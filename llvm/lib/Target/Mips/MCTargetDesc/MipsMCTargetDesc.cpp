@@ -309,13 +309,26 @@ public:
       return false;
     switch (Info->get(Inst.getOpcode()).operands()[NumOps - 1].OperandType) {
     case MCOI::OPERAND_UNKNOWN:
-    case MCOI::OPERAND_IMMEDIATE: {
-      // j, jal, jalx, jals
-      // Absolute branch within the current 256 MB-aligned region
-      uint64_t Region = Addr & ~uint64_t(0xfffffff);
-      Target = Region + Inst.getOperand(NumOps - 1).getImm();
-      return true;
-    }
+    case MCOI::OPERAND_IMMEDIATE:
+      // Absolute branch instructions on Mips have an immediate operand
+      // which encodes a target address within a 256 MB aligned region and
+      // can be interpreted as a function or label.
+      switch (Inst.getOpcode()) {
+      case Mips::JAL:
+      case Mips::JAL_MM:
+      case Mips::J:
+      case Mips::J_MM:
+      case Mips::JALX:
+      case Mips::JALX_MM:
+      case Mips::JALS_MM: {
+        uint64_t Region = Addr & ~uint64_t(0xfffffff);
+        Target = Region + Inst.getOperand(NumOps - 1).getImm();
+        return true;
+      }
+      // Everything else is a regular immediate value.
+      default:
+        return false;
+      }
     case MCOI::OPERAND_PCREL:
       // b, beq ...
       Target = Addr + Inst.getOperand(NumOps - 1).getImm();
@@ -325,7 +338,7 @@ public:
     }
   }
 };
-}
+} // namespace
 
 static MCInstrAnalysis *createMipsMCInstrAnalysis(const MCInstrInfo *Info) {
   return new MipsMCInstrAnalysis(Info);

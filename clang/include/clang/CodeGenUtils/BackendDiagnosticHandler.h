@@ -35,6 +35,7 @@ class DiagnosticInfoMisExpect;
 class DiagnosticInfoOptimizationBase;
 class DiagnosticInfoOptimizationFailure;
 class DiagnosticInfoResourceLimit;
+class DiagnosticInfoSanitizerInstrumentationRegion;
 class DiagnosticInfoSrcMgr;
 class DiagnosticInfoStackSize;
 class DiagnosticInfoUnsupported;
@@ -134,6 +135,9 @@ private:
   /// Specialized handler for misexpect warnings.
   /// Note that misexpect remarks are emitted through ORE
   void MisExpectDiagHandler(const llvm::DiagnosticInfoMisExpect &D);
+  /// Specialized handler for unbalanced sanitizer instrumentation regions.
+  void SanitizerInstrumentationRegionDiagHandler(
+      const llvm::DiagnosticInfoSanitizerInstrumentationRegion &D);
 
   DiagnosticsEngine &Diags;
   const CodeGenOptions &CodeGenOpts;

@@ -587,8 +587,7 @@ def nonext_masked_load :
   PatFrag<(ops node:$ptr, node:$pred, node:$def),
           (masked_ld node:$ptr, undef, node:$pred, node:$def), [{
   return cast<MaskedLoadSDNode>(N)->getExtensionType() == ISD::NON_EXTLOAD &&
-         cast<MaskedLoadSDNode>(N)->isUnindexed() &&
-         !cast<MaskedLoadSDNode>(N)->isNonTemporal();
+         cast<MaskedLoadSDNode>(N)->isUnindexed();
 }]>;
 // Any/Zero extending masked load fragments.
 def azext_masked_load :
@@ -650,7 +649,6 @@ def nontrunc_masked_store :
           (masked_st node:$val, node:$ptr, undef, node:$pred), [{
   return !cast<MaskedStoreSDNode>(N)->isTruncatingStore() &&
          cast<MaskedStoreSDNode>(N)->isUnindexed() &&
-         !cast<MaskedStoreSDNode>(N)->isNonTemporal() &&
          !cast<MaskedStoreSDNode>(N)->isCompressingStore();
 }]>;
 // truncating masked store fragments.

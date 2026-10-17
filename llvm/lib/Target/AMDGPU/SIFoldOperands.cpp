@@ -550,7 +550,52 @@ bool SIFoldOperandsImpl::tryFoldImmWithOpSel(MachineInstr *MI, unsigned UseOpNo,
   // Helper function that attempts to inline the given value with a newly
   // chosen opsel pattern.
   auto tryFoldToInline = [&](uint32_t Imm) -> bool {
-    if (!BF16FromUpperFP32 && AMDGPU::isInlinableLiteralV216(Imm, OpType)) {
+    uint16_t Lo = static_cast<uint16_t>(Imm);
+    uint16_t Hi = static_cast<uint16_t>(Imm >> 16);
+
+    if (BF16FromUpperFP32) {
+      uint16_t C = Lo ? Lo : Hi;
+      if (Lo && Hi && Lo != Hi)
+        return false;
+
+      // The operand holds a bf16 inline constant as the raw 16-bit pattern,
+      // and an integer one sign-extended to 32 bits.
+      int64_t NewImm = C;
+      std::optional<unsigned> Enc =
+          AMDGPU::getInlineEncodingV2BF16(static_cast<uint32_t>(NewImm));
+      if (!Enc) {
+        NewImm = SignExtend64<16>(C);
+        Enc = AMDGPU::getInlineEncodingV2BF16(static_cast<uint32_t>(NewImm));
+      }
+      if (!Enc)
+        return false;
+
+      // A floating-point inline constant is materialized as the equivalent
+      // fp32 constant, so the operand reads as {hi: C, lo: +0.0}. An integer
+      // one is sign-extended, so it reads as {hi: 0 or 0xFFFF, lo: C} and
+      // opsel has to select the other half.
+      uint32_t Bits = *Enc >= AMDGPU::EncValues::INLINE_FLOATING_C_MIN
+                          ? static_cast<uint32_t>(C) << 16
+                          : static_cast<uint32_t>(NewImm);
+      uint16_t ReadLo = static_cast<uint16_t>(Bits);
+      uint16_t ReadHi = static_cast<uint16_t>(Bits >> 16);
+
+      // Each half has to read one of the two, so a half that wants the sign
+      // extension of a negative integer cannot be served.
+      if ((Lo != ReadLo && Lo != ReadHi) || (Hi != ReadLo && Hi != ReadHi))
+        return false;
+
+      // Set opsel for a half that reads the upper 16 bits of the constant.
+      if (Lo != ReadLo)
+        NewModVal |= SISrcMods::OP_SEL_0;
+      if (Hi == ReadHi)
+        NewModVal |= SISrcMods::OP_SEL_1;
+      Mod.setImm(NewModVal);
+      Old.ChangeToImmediate(NewImm);
+      return true;
+    }
+
+    if (AMDGPU::isInlinableLiteralV216(Imm, OpType)) {
       Mod.setImm(NewModVal | SISrcMods::OP_SEL_1);
       Old.ChangeToImmediate(Imm);
       return true;
@@ -558,21 +603,14 @@ bool SIFoldOperandsImpl::tryFoldImmWithOpSel(MachineInstr *MI, unsigned UseOpNo,
 
     // Try to shuffle the halves around and leverage opsel to get an inline
     // constant.
-    uint16_t Lo = static_cast<uint16_t>(Imm);
-    uint16_t Hi = static_cast<uint16_t>(Imm >> 16);
     if (Lo == Hi) {
       if (AMDGPU::isInlinableLiteralV216(Lo, OpType)) {
-        // If the target has feature 'BF16InlineConstFromUpperFP32', packed BF16
-        // instructions using inline constant must use OPSEL to select the upper
-        // 16-bits from FP32.
-        if (BF16FromUpperFP32)
-          NewModVal |= (SISrcMods::OP_SEL_0 | SISrcMods::OP_SEL_1);
         Mod.setImm(NewModVal);
         Old.ChangeToImmediate(Lo);
         return true;
       }
 
-      if (!BF16FromUpperFP32 && static_cast<int16_t>(Lo) < 0) {
+      if (static_cast<int16_t>(Lo) < 0) {
         int32_t SExt = static_cast<int16_t>(Lo);
         if (AMDGPU::isInlinableLiteralV216(SExt, OpType)) {
           Mod.setImm(NewModVal);
@@ -591,8 +629,7 @@ bool SIFoldOperandsImpl::tryFoldImmWithOpSel(MachineInstr *MI, unsigned UseOpNo,
       }
     } else {
       uint32_t Swapped = (static_cast<uint32_t>(Lo) << 16) | Hi;
-      if (!BF16FromUpperFP32 &&
-          AMDGPU::isInlinableLiteralV216(Swapped, OpType)) {
+      if (AMDGPU::isInlinableLiteralV216(Swapped, OpType)) {
         Mod.setImm(NewModVal | SISrcMods::OP_SEL_0);
         Old.ChangeToImmediate(Swapped);
         return true;

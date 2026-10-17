@@ -29,6 +29,33 @@
 
 namespace LIBC_NAMESPACE_DECL {
 namespace math {
+namespace tgammabf16_internal {
+
+// The hexadecimal literals were generated with sollya:
+// > display = hexadecimal;
+// > round(pi, D, RN);
+// > round(log(sqrt(2 * pi)), D, RN);
+// > round(log(2), D, RN);
+// > round(sqrt(2), D, RN);
+constexpr double PI = 0x1.921fb54442d18p1;
+constexpr double LOG_SQRT_2_PI = 0x1.d67f1c864beb5p-1;
+constexpr double LOG_2 = 0x1.62e42fefa39efp-1;
+constexpr double SQRT_2 = 0x1.6a09e667f3bcdp0;
+
+// EULER_GAMMA is the Euler-Mascheroni constant. Its correctly rounded
+// binary64 value was generated with MPFR's mpfr_const_euler.
+constexpr double EULER_GAMMA = 0x1.2788cfc6fb619p-1;
+
+// Paul Godfrey's exact Lanczos approximation coefficients (g=7, n=9)
+// Reference: "A note on the computation of the convergent Lanczos complex
+// Gamma approximation" by Paul Godfrey (2001).
+// Original:
+// https://web.archive.org/web/20060915161115/http://my.fit.edu/~gabdo/gamma.txt
+// Mirror: http://www.mrob.com/pub/ries/lanczos-gamma.html
+constexpr double LANCZOS_COEFFS[9] = {
+    0x1.ffffffffff950p-1,  0x1.52429b6c30b05p+9,  -0x1.3ac8e8ed4171bp+10,
+    0x1.81a9661d3b4d8p+9,  -0x1.613ae51a32f5dp+7, 0x1.903c27f8b9c81p+3,
+    -0x1.1bcb2992b2855p-3, 0x1.4f0514e4e324fp-17, 0x1.435508f3faeefp-23};
 
 // Sets ERANGE, raises FE_OVERFLOW, and returns the overflow value
 // (+inf or max_normal) according to the sign and active IEEE 754 rounding mode.
@@ -64,13 +91,6 @@ LIBC_INLINE bfloat16 tgammabf16_overflow(Sign sign) {
 // series accurate to ~2^-41 (sufficient for bfloat16 requirements).
 LIBC_INLINE double tgammabf16_log(double x) {
   using DoubleBits = fputil::FPBits<double>;
-  // The hexadecimal literals were generated with Sollya:
-  // > display = hexadecimal;
-  // > round(log(2), D, RN);
-  // > round(sqrt(2), D, RN);
-  constexpr double LOG_2 = 0x1.62e42fefa39efp-1;
-  constexpr double SQRT_2 = 0x1.6a09e667f3bcdp0;
-
   DoubleBits xbits(x);
   int exponent =
       static_cast<int>(xbits.get_biased_exponent()) - DoubleBits::EXP_BIAS;
@@ -94,24 +114,10 @@ LIBC_INLINE double tgammabf16_log(double x) {
                               2.0 * r * fputil::multiply_add(r2, p, 1.0));
 }
 
+} // namespace tgammabf16_internal
+
 LIBC_INLINE bfloat16 tgammabf16(bfloat16 x) {
   using FPBits = fputil::FPBits<bfloat16>;
-  // The hexadecimal literals were generated with Sollya:
-  // > display = hexadecimal;
-  // > round(pi, D, RN);
-  // > round(log(sqrt(2 * pi)), D, RN);
-  constexpr double PI = 0x1.921fb54442d18p+1;
-  constexpr double LOG_SQRT_2_PI = 0x1.d67f1c864beb5p-1;
-  // Paul Godfrey's exact Lanczos approximation coefficients (g=7, n=9)
-  // Reference: "A note on the computation of the convergent Lanczos complex
-  // Gamma approximation" by Paul Godfrey (2001).
-  // Original:
-  // https://web.archive.org/web/20060915161115/http://my.fit.edu/~gabdo/gamma.txt
-  // Mirror: http://www.mrob.com/pub/ries/lanczos-gamma.html
-  constexpr double LANCZOS_COEFFS[9] = {
-      0x1.ffffffffff950p-1,  0x1.52429b6c30b05p+9,  -0x1.3ac8e8ed4171bp+10,
-      0x1.81a9661d3b4d8p+9,  -0x1.613ae51a32f5dp+7, 0x1.903c27f8b9c81p+3,
-      -0x1.1bcb2992b2855p-3, 0x1.4f0514e4e324fp-17, 0x1.435508f3faeefp-23};
 
   FPBits xbits(x);
   uint16_t x_abs = xbits.uintval() & 0x7fffU;
@@ -157,7 +163,7 @@ LIBC_INLINE bfloat16 tgammabf16(bfloat16 x) {
   // Gamma is strictly increasing for x >= 2, and Gamma(35) is finite in
   // bfloat16 while every larger positive bfloat16 input overflows.
   if (LIBC_UNLIKELY(xf > 35.0f))
-    return tgammabf16_overflow(Sign::POS);
+    return tgammabf16_internal::tgammabf16_overflow(Sign::POS);
 
   // Fast path for exact positive integers
   if (xf > 0.0f && xf <= 35.0f) {
@@ -178,11 +184,8 @@ LIBC_INLINE bfloat16 tgammabf16(bfloat16 x) {
   double res;
 
   // Fast path for tiny positive inputs to prevent exact-boundary overshoots.
-  // EULER_GAMMA is the Euler-Mascheroni constant. Its correctly rounded
-  // binary64 value was generated with MPFR's mpfr_const_euler.
   if (LIBC_UNLIKELY(xf > 0.0f && xf < 0x1.0p-8f)) {
-    constexpr double EULER_GAMMA = 0x1.2788cfc6fb619p-1;
-    res = (1.0 / xd) - EULER_GAMMA;
+    res = (1.0 / xd) - tgammabf16_internal::EULER_GAMMA;
   } else {
     if (reflection) {
       x_eval = 1.0 - xd;
@@ -192,15 +195,17 @@ LIBC_INLINE bfloat16 tgammabf16(bfloat16 x) {
     }
 
     double z = x_eval - 1.0;
-    double a = LANCZOS_COEFFS[0];
+    double a = tgammabf16_internal::LANCZOS_COEFFS[0];
     for (int i = 1; i < 9; ++i) {
-      a += LANCZOS_COEFFS[i] / (z + static_cast<double>(i));
+      a +=
+          tgammabf16_internal::LANCZOS_COEFFS[i] / (z + static_cast<double>(i));
     }
 
     double t = z + 7.5;
 
-    double log_t = tgammabf16_log(t);
-    double base_term = (LOG_SQRT_2_PI - t) + tgammabf16_log(a);
+    double log_t = tgammabf16_internal::tgammabf16_log(t);
+    double base_term = (tgammabf16_internal::LOG_SQRT_2_PI - t) +
+                       tgammabf16_internal::tgammabf16_log(a);
     double exp_arg = fputil::multiply_add(z + 0.5, log_t, base_term);
 
     if (reflection) {
@@ -213,7 +218,7 @@ LIBC_INLINE bfloat16 tgammabf16(bfloat16 x) {
 
       // Gamma(x_eval) can exceed the float range on the reflection path.
       // Evaluate 1 / Gamma(x_eval) directly instead.
-      res = (PI / sin_pi_x) *
+      res = (tgammabf16_internal::PI / sin_pi_x) *
             static_cast<double>(math::expf(static_cast<float>(-exp_arg)));
     } else {
       // Since x <= 35, exp_arg < 88.0, which is within normal float bounds
@@ -228,7 +233,8 @@ LIBC_INLINE bfloat16 tgammabf16(bfloat16 x) {
   // 0x1.ffp127 is max normal + 0.5 ULP in bfloat16, the exact RTN overflow
   // threshold
   if (LIBC_UNLIKELY(abs_res > 0x1.ffp+127)) {
-    return tgammabf16_overflow(res > 0.0 ? Sign::POS : Sign::NEG);
+    return tgammabf16_internal::tgammabf16_overflow(res > 0.0 ? Sign::POS
+                                                              : Sign::NEG);
   }
 
   return fputil::cast<bfloat16>(res);

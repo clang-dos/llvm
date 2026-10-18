@@ -352,6 +352,10 @@ features cannot lower the translation-unit ABI level;
 
 ### Removed Compiler Flags
 
+- Removed the experimental `-cc1` flag `-debug-info-macro-expansion-loc`.
+  Debug information now always uses macro expansion locations for macro arguments.
+  (#GH175249)
+
 ### Attribute Changes in Clang
 
 - Clang now properly propagates attributes on class and variable templates to their redeclarations, which will result in redeclarations not interfering with diagnostics. (#GH209812)

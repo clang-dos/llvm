@@ -781,7 +781,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::FNEARBYINT, MVT::f32, Legal);
       setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f32, Legal);
     } else {
-      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f32, Custom);
+      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f32, Expand);
     }
   }
 
@@ -811,7 +811,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       if (Subtarget.is64Bit())
         setOperationAction(FPRndMode, MVT::f64, Custom);
 
-      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f64, Custom);
+      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f64, Expand);
     }
 
     setOperationAction(ISD::STRICT_FP_ROUND, MVT::f32, Legal);

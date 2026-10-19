@@ -1200,14 +1200,6 @@ public:
         Metadata.emplace_back(LLVMContext::MD_prof, BW);
   }
 
-  /// Adds the metadata that can be preserved when combining all of \p VL into
-  /// a single instruction represented by \p Repr.
-  VPIRMetadata(const Instruction &Repr, ArrayRef<Value *> VL) {
-    getMetadataToPropagate(&Repr, VL, Metadata);
-    // Drop the kinds the bundle does not agree on, which come back as null.
-    erase_if(Metadata, [](const auto &P) { return !P.second; });
-  }
-
   /// Copy constructor for cloning.
   VPIRMetadata(const VPIRMetadata &Other) = default;
 
@@ -4959,7 +4951,7 @@ public:
   /// wrapping \p ScalarHeaderBB and vector loop index of type \p IdxTy. The
   /// scalar header is left empty; callers that need recipes for the
   /// instructions in \p ScalarHeaderBB must create them themselves.
-  VPlan(BasicBlock *ScalarHeaderBB, Type *IdxTy)
+  VPlan(BasicBlock *ScalarHeaderBB, Type *IdxTy = nullptr)
       : VectorTripCount(IdxTy), VF(IdxTy), UF(IdxTy), VFxUF(IdxTy) {
     setEntry(createVPBasicBlock("preheader"));
     ScalarHeader = createEmptyVPIRBasicBlock(ScalarHeaderBB);
@@ -5331,7 +5323,10 @@ public:
   }
 
   /// The type of the canonical induction variable of the vector loop.
-  Type *getIndexType() const { return VF.getType(); }
+  Type *getIndexType() const {
+    assert(VF.getType() && "plan has no vector loop index type");
+    return VF.getType();
+  }
 };
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

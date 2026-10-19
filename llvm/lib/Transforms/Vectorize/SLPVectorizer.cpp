@@ -26209,11 +26209,12 @@ bool BoUpSLP::isVPlanEligible() const {
     if (MinBWs.contains(TE.get()))
       return false;
 
-    // Only handle plain Vectorize entries, i.e. no gathers or combined entries,
-    // without any lane permutation.
+    // Only handle plain Vectorize entries, i.e. no gathers, entries transformed
+    // to gathers by trimming or combined entries, without any lane permutation.
     if (TE->State != TreeEntry::Vectorize || !TE->hasState() ||
         TE->CombinedOp != TreeEntry::NotCombinedOp || TE->isAltShuffle() ||
-        !TE->ReorderIndices.empty() || !TE->ReuseShuffleIndices.empty())
+        !TE->ReorderIndices.empty() || !TE->ReuseShuffleIndices.empty() ||
+        TransformedToGatherNodes.contains(TE.get()))
       return false;
 
     unsigned Opcode = TE->getOpcode();
@@ -26277,7 +26278,7 @@ std::unique_ptr<VPlan> BoUpSLP::buildVPlanForTree() {
          "all entries must have the same number of lanes as the root");
 
   BasicBlock *BB = getRootNode().getMainOp()->getParent();
-  auto Plan = std::make_unique<VPlan>(BB, Type::getInt32Ty(F->getContext()));
+  auto Plan = std::make_unique<VPlan>(BB);
   VPBuilder VPB(Plan->getEntry());
 
   // Walk the scheduled region backwards to find where to place each entry. The

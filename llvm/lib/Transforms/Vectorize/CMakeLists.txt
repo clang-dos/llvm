@@ -1,3 +1,8 @@
+set(LLVM_TABLEGEN_PROJECT LLVM_HEADERS)
+set(LLVM_TARGET_DEFINITIONS VectorizeOptions.td)
+tablegen(LLVM VectorizeOptions.inc -gen-opt-parser-defs)
+add_public_tablegen_target(VectorizeOptionsTableGen)
+
 add_llvm_component_library(LLVMVectorize
   LoadStoreVectorizer.cpp
   LoopIdiomVectorize.cpp
@@ -29,10 +34,11 @@ add_llvm_component_library(LLVMVectorize
   SLPVectorizer/SLPReductionUtils.cpp
   SLPVectorizer/SLPTypeUtils.cpp
   SLPVectorizer/SLPUtils.cpp
+  SLPVectorizer/SLPVPlanCodegen.cpp
   SLPVectorizer.cpp
-  SLPVPlanCodegen.cpp
   Vectorize.cpp
   VectorCombine.cpp
+  VectorizeOptions.cpp
   VPlan.cpp
   VPlanAnalysis.cpp
   VPlanConstruction.cpp
@@ -53,10 +59,12 @@ add_llvm_component_library(LLVMVectorize
 
   DEPENDS
   intrinsics_gen
+  VectorizeOptionsTableGen
 
   LINK_COMPONENTS
   Analysis
   Core
+  Option
   Support
   TransformUtils
   SandboxIR

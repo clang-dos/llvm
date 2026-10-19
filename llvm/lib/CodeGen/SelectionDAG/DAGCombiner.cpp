@@ -13408,8 +13408,8 @@ SDValue DAGCombiner::foldSelectToUMin(SDValue LHS, SDValue RHS, SDValue True,
   return SDValue();
 }
 
-// Fold (X > +0.0) ? X : +0.0 and (+0.0 < X) ? X : +0.0 to llvm.maximumnum(X,
-// +0.0).
+// Fold (X > C) ? X : C and (C < X) ? X : C to llvm.maximumnum(X, C)
+// when C is a constant other than NaN or negative zero.
 static SDValue combineSelectCCToFMaximumNum(SelectionDAG &DAG, const SDLoc &DL,
                                             SDValue LHS, SDValue RHS,
                                             SDValue True, SDValue False,
@@ -13417,8 +13417,7 @@ static SDValue combineSelectCCToFMaximumNum(SelectionDAG &DAG, const SDLoc &DL,
                                             SDNodeFlags Flags) {
   EVT VT = True.getValueType();
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-  if (!VT.isFloatingPoint() ||
-      !TLI.isOperationLegalOrCustom(ISD::FMAXIMUMNUM, VT))
+  if (!VT.isFloatingPoint() || !TLI.isOperationLegal(ISD::FMAXIMUMNUM, VT))
     return SDValue();
 
   if (CC == ISD::SETOLT)
@@ -13426,8 +13425,9 @@ static SDValue combineSelectCCToFMaximumNum(SelectionDAG &DAG, const SDLoc &DL,
   else if (CC != ISD::SETOGT)
     return SDValue();
 
-  auto *Zero = isConstOrConstSplatFP(False);
-  if (LHS != True || RHS != False || !Zero || !Zero->isPosZero())
+  auto *C = isConstOrConstSplatFP(False);
+  if (LHS != True || RHS != False || !C || C->getValueAPF().isNaN() ||
+      C->getValueAPF().isNegZero())
     return SDValue();
 
   return DAG.getNode(ISD::FMAXIMUMNUM, DL, VT, True, False, Flags);
@@ -13821,9 +13821,10 @@ SDValue DAGCombiner::visitSELECT(SDNode *N) {
     return R;
 
   if (N0.getOpcode() == ISD::SETCC)
-    return combineSelectCCToFMaximumNum(
-        DAG, DL, N0.getOperand(0), N0.getOperand(1), N1, N2,
-        cast<CondCodeSDNode>(N0.getOperand(2))->get(), Flags);
+    if (SDValue R = combineSelectCCToFMaximumNum(
+            DAG, DL, N0.getOperand(0), N0.getOperand(1), N1, N2,
+            cast<CondCodeSDNode>(N0.getOperand(2))->get(), Flags))
+      return R;
 
   return SDValue();
 }
@@ -15098,9 +15099,10 @@ SDValue DAGCombiner::visitVSELECT(SDNode *N) {
     return R;
 
   if (N0.getOpcode() == ISD::SETCC)
-    return combineSelectCCToFMaximumNum(
-        DAG, DL, N0.getOperand(0), N0.getOperand(1), N1, N2,
-        cast<CondCodeSDNode>(N0.getOperand(2))->get(), N->getFlags());
+    if (SDValue R = combineSelectCCToFMaximumNum(
+            DAG, DL, N0.getOperand(0), N0.getOperand(1), N1, N2,
+            cast<CondCodeSDNode>(N0.getOperand(2))->get(), N->getFlags()))
+      return R;
 
   return SDValue();
 }

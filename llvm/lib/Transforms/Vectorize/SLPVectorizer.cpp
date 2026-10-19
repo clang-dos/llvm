@@ -26377,8 +26377,10 @@ BoUpSLP::vectorizeTree(const ExtraValueToDebugLocsMap &ExternallyUsedValues,
 
   // Reductions need the root's VectorizedValue, which VPlan does not set.
   // Decide before versioning clears the runtime alias checks.
-  bool UsedVPlan = Opts.slp_use_vplan_codegen && !ReductionRoot && isVPlanEligible();
-  assert((!Opts.slp_use_vplan_codegen || !Opts.slp_vplan_codegen_assert_eligible || UsedVPlan) &&
+  bool UsedVPlan =
+      Opts.slp_use_vplan_codegen && !ReductionRoot && isVPlanEligible();
+  assert((!Opts.slp_use_vplan_codegen ||
+          !Opts.slp_vplan_codegen_assert_eligible || UsedVPlan) &&
          "tree is not eligible for VPlan-based codegen");
 
   // If this tree was scheduled by dropping may-alias memory dependencies in

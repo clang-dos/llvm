@@ -13408,8 +13408,8 @@ SDValue DAGCombiner::foldSelectToUMin(SDValue LHS, SDValue RHS, SDValue True,
   return SDValue();
 }
 
-// Fold (X > C) ? X : C and (C < X) ? X : C to llvm.maximumnum(X, C)
-// when C is a constant other than NaN or negative zero.
+// Fold (X > Y) ? X : Y and (Y < X) ? X : Y to llvm.maximumnum(X, Y)
+// when Y is known to be neither NaN nor negative zero.
 static SDValue combineSelectCCToFMaximumNum(SelectionDAG &DAG, const SDLoc &DL,
                                             SDValue LHS, SDValue RHS,
                                             SDValue True, SDValue False,
@@ -13425,9 +13425,13 @@ static SDValue combineSelectCCToFMaximumNum(SelectionDAG &DAG, const SDLoc &DL,
   else if (CC != ISD::SETOGT)
     return SDValue();
 
-  auto *C = isConstOrConstSplatFP(False);
-  if (LHS != True || RHS != False || !C || C->getValueAPF().isNaN() ||
-      C->getValueAPF().isNegZero())
+  if (LHS != True || RHS != False)
+    return SDValue();
+
+  // NaN would select Y instead of X, and a -0.0 Y would be selected over
+  // a +0.0 X. Neither result agrees with maximumnum.
+  KnownFPClass Known = DAG.computeKnownFPClass(False, fcNan | fcNegZero);
+  if (!Known.isKnownNever(fcNan | fcNegZero))
     return SDValue();
 
   return DAG.getNode(ISD::FMAXIMUMNUM, DL, VT, True, False, Flags);
@@ -13820,11 +13824,12 @@ SDValue DAGCombiner::visitSELECT(SDNode *N) {
   if (SDValue R = combineSelectToPseudoMinMax(DAG, N))
     return R;
 
-  if (N0.getOpcode() == ISD::SETCC)
+  if (N0.getOpcode() == ISD::SETCC) {
     if (SDValue R = combineSelectCCToFMaximumNum(
             DAG, DL, N0.getOperand(0), N0.getOperand(1), N1, N2,
             cast<CondCodeSDNode>(N0.getOperand(2))->get(), Flags))
       return R;
+  }
 
   return SDValue();
 }
@@ -15098,11 +15103,12 @@ SDValue DAGCombiner::visitVSELECT(SDNode *N) {
   if (SDValue R = combineSelectToPseudoMinMax(DAG, N))
     return R;
 
-  if (N0.getOpcode() == ISD::SETCC)
+  if (N0.getOpcode() == ISD::SETCC) {
     if (SDValue R = combineSelectCCToFMaximumNum(
             DAG, DL, N0.getOperand(0), N0.getOperand(1), N1, N2,
             cast<CondCodeSDNode>(N0.getOperand(2))->get(), N->getFlags()))
       return R;
+  }
 
   return SDValue();
 }

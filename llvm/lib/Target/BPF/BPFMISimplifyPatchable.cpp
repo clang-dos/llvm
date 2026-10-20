@@ -313,9 +313,16 @@ void BPFMISimplifyPatchableImpl::processInst(MachineRegisterInfo *MRI,
   if (DisableCOREOptimization)
     return;
 
+  // The target enum value may need all 64 bits, regardless of its local value.
+  // Keep its relocation on the LD_imm64 instruction.
+  auto Reloc = BPFCoreSharedInfo::AmaRelocation::get(*GVal);
+  if (Reloc.Kind == BTF::ENUM_VALUE)
+    return;
+
   switch (Opcode) {
   case BPF::ADD_rr:
-    if (BPFCoreSharedInfo::AmaRelocation::get(*GVal).PatchImm <= INT16_MAX)
+    if (Reloc.Kind == BTF::FIELD_BYTE_OFFSET && Reloc.PatchImm >= 0 &&
+        Reloc.PatchImm <= INT16_MAX)
       checkADDrr(MRI, Inst, RelocOpNo, GVal);
     break;
   case BPF::SLL_rr:

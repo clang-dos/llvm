@@ -778,7 +778,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::FNEARBYINT, MVT::f32, Legal);
       setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f32, Legal);
     } else {
-      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f32, Custom);
+      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f32, Expand);
     }
   }
 
@@ -808,7 +808,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       if (Subtarget.is64Bit())
         setOperationAction(FPRndMode, MVT::f64, Custom);
 
-      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f64, Custom);
+      setOperationAction({ISD::FMAXIMUM, ISD::FMINIMUM}, MVT::f64, Expand);
     }
 
     setOperationAction(ISD::STRICT_FP_ROUND, MVT::f32, Legal);
@@ -7905,6 +7905,7 @@ static SDValue lowerFMAXIMUM_FMINIMUM(SDValue Op, SelectionDAG &DAG,
   SDValue Y = Op.getOperand(1);
 
   if (!VT.isVector()) {
+    assert(VT == MVT::f16 && "Unexpected scalar type");
     MVT XLenVT = Subtarget.getXLenVT();
 
     // If X is a nan, replace Y with X. If Y is a nan, replace X with Y. This

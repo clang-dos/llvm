@@ -6,15 +6,7 @@ define float @log2_zero_fraction(i32 %bits) #0 {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
 ; CHECK-NEXT:    v_and_b32_e32 v0, 0xff800000, v0
-; CHECK-NEXT:    s_mov_b32 s0, 0x800000
-; CHECK-NEXT:    v_cmp_gt_f32_e32 vcc, s0, v0
-; CHECK-NEXT:    s_nop 1
-; CHECK-NEXT:    v_cndmask_b32_e64 v1, 0, 32, vcc
-; CHECK-NEXT:    v_ldexp_f32 v0, v0, v1
 ; CHECK-NEXT:    v_log_f32_e32 v0, v0
-; CHECK-NEXT:    v_mov_b32_e32 v1, 0x42000000
-; CHECK-NEXT:    v_cndmask_b32_e32 v1, 0, v1, vcc
-; CHECK-NEXT:    v_sub_f32_e32 v0, v0, v1
 ; CHECK-NEXT:    s_setpc_b64 s[30:31]
   %masked = and i32 %bits, -8388608 ; 0xff800000
   %x = bitcast i32 %masked to float
@@ -26,16 +18,8 @@ define float @log2_nonzero_exponent(i32 %bits) #0 {
 ; CHECK-LABEL: log2_nonzero_exponent:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; CHECK-NEXT:    s_mov_b32 s0, 0x800000
 ; CHECK-NEXT:    v_or_b32_e32 v0, 0x800000, v0
-; CHECK-NEXT:    v_cmp_gt_f32_e32 vcc, s0, v0
-; CHECK-NEXT:    s_nop 1
-; CHECK-NEXT:    v_cndmask_b32_e64 v1, 0, 32, vcc
-; CHECK-NEXT:    v_ldexp_f32 v0, v0, v1
 ; CHECK-NEXT:    v_log_f32_e32 v0, v0
-; CHECK-NEXT:    v_mov_b32_e32 v1, 0x42000000
-; CHECK-NEXT:    v_cndmask_b32_e32 v1, 0, v1, vcc
-; CHECK-NEXT:    v_sub_f32_e32 v0, v0, v1
 ; CHECK-NEXT:    s_setpc_b64 s[30:31]
   %normal = or i32 %bits, 8388608 ; 0x00800000
   %x = bitcast i32 %normal to float

@@ -1387,12 +1387,12 @@ Error IndexedInstrProfReader::readHeader() {
   if (HashType > IndexedInstrProf::HashT::Last)
     return error(instrprof_error::unsupported_hash_type);
 
-  // The hash table offset comes from the file: validate it before using it
-  // to dereference the buffer. The table starts with the bucket and entry
-  // counts (two 64-bit fields), so the offset must leave room for at least
-  // those.
+  // Validate the offset before forming a pointer. The hash table follows the
+  // summary and uses aligned 64-bit reads for its bucket and entry counts.
   uint64_t BufferSize = DataBuffer->getBufferSize();
-  if (Header->HashOffset > BufferSize ||
+  if (Header->HashOffset < static_cast<uint64_t>(Cur - Start) ||
+      Header->HashOffset % alignof(uint64_t) != 0 ||
+      Header->HashOffset > BufferSize ||
       BufferSize - Header->HashOffset < 2 * sizeof(uint64_t))
     return make_error<InstrProfError>(instrprof_error::malformed,
                                       "corrupt hash table offset");

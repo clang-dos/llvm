@@ -1760,6 +1760,7 @@ add_fp_unittest(
     FrexpTest.h
   DEPENDS
     libc.src.math.frexpf128
+    libc.src.__support.FPUtil.float128
 )
 
 add_fp_unittest(
@@ -2139,6 +2140,7 @@ add_fp_unittest(
   DEPENDS
     libc.src.math.ilogbf128
     libc.src.__support.CPP.algorithm
+    libc.src.__support.FPUtil.float128
     libc.src.__support.FPUtil.fp_bits
     libc.src.__support.FPUtil.manipulation_functions
 )
@@ -2316,6 +2318,7 @@ add_fp_unittest(
   DEPENDS
     libc.src.math.llogbf128
     libc.src.__support.CPP.algorithm
+    libc.src.__support.FPUtil.float128
     libc.src.__support.FPUtil.fp_bits
     libc.src.__support.FPUtil.manipulation_functions
 )
@@ -2500,6 +2503,7 @@ add_fp_unittest(
   DEPENDS
     libc.src.math.logbf128
     libc.src.__support.CPP.algorithm
+    libc.src.__support.FPUtil.float128
     libc.src.__support.FPUtil.manipulation_functions
 )
 

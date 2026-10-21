@@ -1386,7 +1386,7 @@ Instruction *InstCombinerImpl::visitTrunc(TruncInst &Trunc) {
       if (auto *GEP = dyn_cast<GetElementPtrInst>(LI->getOperand(0))) {
         if (Instruction *Res = foldCmpLoadFromIndexedGlobal(
                 LI, GEP, ICmpInst::ICMP_NE, ConstantInt::getNullValue(SrcTy),
-                Trunc, cast<ConstantInt>(ConstantInt::get(SrcTy, 1))))
+                Trunc, ConstantInt::get(cast<IntegerType>(SrcTy), 1)))
           return Res;
       }
 

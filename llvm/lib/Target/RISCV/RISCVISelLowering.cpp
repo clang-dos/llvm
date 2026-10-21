@@ -8856,9 +8856,10 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     SDValue Res;
     std::tie(Res, Chain) =
         makeLibCall(DAG, LC, MVT::f32, Op0, CallOptions, DL, Chain);
-    if (Subtarget.is64Bit())
-      return DAG.getNode(RISCVISD::FMV_X_ANYEXTW_RV64, DL, MVT::i64, Res);
-    SDValue Result = DAG.getBitcast(MVT::i32, IsStrict ? Res.getValue(0) : Res);
+    SDValue Result =
+        Subtarget.is64Bit()
+            ? DAG.getNode(RISCVISD::FMV_X_ANYEXTW_RV64, DL, MVT::i64, Res)
+            : DAG.getBitcast(MVT::i32, Res);
     if (IsStrict)
       return DAG.getMergeValues({Result, Chain}, DL);
     return Result;
@@ -13317,8 +13318,11 @@ SDValue RISCVTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
                        ShAmt);
   }
   case Intrinsic::riscv_psati:
-  case Intrinsic::riscv_pusati: {
-    bool IsSigned = IntNo == Intrinsic::riscv_psati;
+  case Intrinsic::riscv_pusati:
+  case Intrinsic::riscv_sati:
+  case Intrinsic::riscv_usati: {
+    bool IsSigned =
+        IntNo == Intrinsic::riscv_psati || IntNo == Intrinsic::riscv_sati;
     unsigned Opc = IsSigned ? RISCVISD::SATI : RISCVISD::USATI;
     return DAG.getNode(
         Opc, DL, Op.getValueType(), Op.getOperand(1),
@@ -18178,6 +18182,21 @@ void RISCVTargetLowering::ReplaceNodeResults(SDNode *N,
       SDValue Rs2 =
           DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, MVT::v2i32, N->getOperand(2));
       SDValue Res = DAG.getNode(Opc, DL, MVT::v2i32, Rs1, Rs2);
+      Results.push_back(DAG.getExtractVectorElt(DL, MVT::i32, Res, 0));
+      return;
+    }
+    case Intrinsic::riscv_sati:
+    case Intrinsic::riscv_usati: {
+      // RV64 has no 32-bit sati; use psati.w on the low word.
+      if (!Subtarget.is64Bit() || N->getValueType(0) != MVT::i32)
+        return;
+      unsigned Opc =
+          IntNo == Intrinsic::riscv_sati ? RISCVISD::SATI : RISCVISD::USATI;
+      SDValue Rs1 =
+          DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, MVT::v2i32, N->getOperand(1));
+      SDValue Res = DAG.getNode(
+          Opc, DL, MVT::v2i32, Rs1,
+          DAG.getTargetConstant(N->getConstantOperandVal(2), DL, MVT::i64));
       Results.push_back(DAG.getExtractVectorElt(DL, MVT::i32, Res, 0));
       return;
     }

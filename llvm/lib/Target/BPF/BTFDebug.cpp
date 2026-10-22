@@ -1683,23 +1683,13 @@ void BTFDebug::generatePatchImmReloc(const MCSymbol *ORSym, uint32_t RootId,
   FieldReloc.Label = ORSym;
   FieldReloc.TypeID = RootId;
 
-  StringRef AccessPattern = GVar->getName();
-  size_t FirstDollar = AccessPattern.find_first_of('$');
   if (IsAma) {
-    size_t FirstColon = AccessPattern.find_first_of(':');
-    size_t SecondColon = AccessPattern.find_first_of(':', FirstColon + 1);
-    StringRef IndexPattern = AccessPattern.substr(FirstDollar + 1);
-    StringRef RelocKindStr = AccessPattern.substr(FirstColon + 1,
-        SecondColon - FirstColon);
-    StringRef PatchImmStr = AccessPattern.substr(SecondColon + 1,
-        FirstDollar - SecondColon);
-
-    FieldReloc.OffsetNameOff = addString(IndexPattern);
-    FieldReloc.RelocKind = std::stoull(std::string(RelocKindStr));
-    PatchImms[GVar] = std::make_pair(std::stoll(std::string(PatchImmStr)),
-                                     FieldReloc.RelocKind);
+    auto Reloc = BPFCoreSharedInfo::AmaRelocation::get(*GVar);
+    FieldReloc.OffsetNameOff = addString(Reloc.AccessString->getString());
+    FieldReloc.RelocKind = Reloc.Kind;
+    PatchImms[GVar] = std::make_pair(Reloc.PatchImm, Reloc.Kind);
   } else {
-    StringRef RelocStr = AccessPattern.substr(FirstDollar + 1);
+    StringRef RelocStr = GVar->getName().split('$').second;
     FieldReloc.OffsetNameOff = addString("0");
     FieldReloc.RelocKind = std::stoull(std::string(RelocStr));
     PatchImms[GVar] = std::make_pair(RootId, FieldReloc.RelocKind);
@@ -1822,6 +1812,9 @@ void BTFDebug::processGlobals(bool ProcessingMapDef) {
   // Collect all types referenced by globals.
   const Module *M = MMI->getModule();
   for (const GlobalVariable &Global : M->globals()) {
+    if (Global.hasAttribute(BPFCoreSharedInfo::AmaAttr))
+      continue;
+
     // Decide the section name.
     StringRef SecName;
     std::optional<SectionKind> GVKind;

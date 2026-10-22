@@ -11,6 +11,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/DebugInfo/BTF/BTF.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -18,6 +19,7 @@
 namespace llvm {
 
 class BasicBlock;
+class GlobalVariable;
 class Instruction;
 class Module;
 
@@ -61,6 +63,18 @@ public:
   static constexpr StringRef AmaAttr = "btf_ama";
   /// The attribute attached to globals representing a type id
   static constexpr StringRef TypeIdAttr = "btf_type_id";
+
+  /// The relocation carried by a global with AmaAttr.
+  struct AmaRelocation {
+    static constexpr StringRef MetadataKind = "llvm.bpf.core.relocation";
+
+    BTF::PatchableRelocKind Kind;
+    int64_t PatchImm;
+    MDString *AccessString;
+
+    static AmaRelocation get(const GlobalVariable &GV);
+    MDNode *toMetadata(LLVMContext &Ctx) const;
+  };
 
   /// llvm.bpf.passthrough builtin seq number
   static uint32_t SeqNum;

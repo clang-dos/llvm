@@ -849,6 +849,10 @@ documentation](CIR/index.md) for more information regarding ClangIR's status and
 
 #### Bug Fixes to C++ Support
 
+- Fixed an undefined reference to a GNU-inline function when its defining
+  header is included after importing a C++20 named module whose global module
+  fragment includes the same header. (#GH228800)
+
 - Fixed lambdas with specifiers or attributes after the capture list being
   misparsed as function declarations in direct-initialization contexts under
   `-fms-extensions` or in HLSL mode.

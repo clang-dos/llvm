@@ -1705,6 +1705,33 @@ bool BinaryFunction::scanExternalRefs() {
         continue;
     }
 
+    if (BC.isRISCV()) {
+      // Retained RISC-V instructions cannot be relocated in place. Pin every
+      // referenced function, including references after a call or a high/low
+      // pair. An entry trampoline would clobber t0, which may hold a return
+      // address or another live value at the destination.
+      for (const MCOperand &Operand : MCPlus::primeOperands(Instruction)) {
+        if (!Operand.isExpr())
+          continue;
+        const MCSymbol *Symbol = BC.MIB->getTargetSymbol(Operand.getExpr());
+        if (ignoreReference(Symbol))
+          continue;
+
+        // These symbols move independently of any function at their address.
+        if (BC.forceSymbolRelocations(Symbol->getName())) {
+          BC.errs()
+              << "BOLT-ERROR: cannot update RISC-V instruction reference to "
+              << Symbol->getName() << " at address 0x"
+              << Twine::utohexstr(AbsoluteInstrAddr) << " in ignored function "
+              << *this << '\n';
+          exit(1);
+        }
+        if (BinaryFunction *Target = BC.getFunctionForSymbol(Symbol))
+          InvalidTargets.insert(Target);
+      }
+      continue;
+    }
+
     // For AArch64, we need to undo relaxation done by the linker if the target
     // of the instruction is a function that we plan to move.
     //

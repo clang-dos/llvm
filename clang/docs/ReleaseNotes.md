@@ -853,6 +853,10 @@ documentation](CIR/index.md) for more information regarding ClangIR's status and
   `alias` are now correctly diagnosed as definitions when followed by an
   out-of-line definition. (#GH204762)
 
+- Fixed an assertion failure when generating code for an x86 function with the
+  `interrupt` attribute whose first parameter uses a typedef for a pointer
+  type. (#GH204756)
+
 #### Bug Fixes to C++ Support
 
 - Fixed lambdas with specifiers or attributes after the capture list being

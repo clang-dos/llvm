@@ -120,7 +120,10 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
   // Set up the register classes.
   addRegisterClass(MVT::i8, &X86::GR8RegClass);
   addRegisterClass(MVT::i16, &X86::GR16RegClass);
-  addRegisterClass(MVT::i32, &X86::GR32RegClass);
+  // Before the 80386 there are no 32-bit registers: i32 is split into i16
+  // halves.
+  if (!Subtarget.isTarget16BitABI() || !Subtarget.isPre386())
+    addRegisterClass(MVT::i32, &X86::GR32RegClass);
   if (Subtarget.is64Bit())
     addRegisterClass(MVT::i64, &X86::GR64RegClass);
 
@@ -64418,6 +64421,10 @@ bool X86TargetLowering::isTypeDesirableForOp(unsigned Opc, EVT VT) const {
   if (!isTypeLegal(VT))
     return false;
 
+  // On a 16-bit CPU, 8-bit and 16-bit operations are the native ones.
+  if (Subtarget.isTarget16BitABI() && Subtarget.isPre386())
+    return true;
+
   // Legacy AVX/AVX2 masked stores are slow on pre-AVX-512 Zen CPUs.
   if (Opc == ISD::MSTORE && Subtarget.isVecMaskStoreSlow())
     return false;
@@ -64514,6 +64521,9 @@ X86TargetLowering::isDesirableToCombineLogicOpOfSETCC(
 }
 
 bool X86TargetLowering::IsDesirableToPromoteOp(SDValue Op, EVT &PVT) const {
+  // There is no wider type to promote to on a 16-bit CPU.
+  if (Subtarget.isTarget16BitABI() && Subtarget.isPre386())
+    return false;
   EVT VT = Op.getValueType();
   bool Is8BitMulByConstant = VT == MVT::i8 && Op.getOpcode() == ISD::MUL &&
                              isa<ConstantSDNode>(Op.getOperand(1));

@@ -161,6 +161,10 @@ bool X86FixupBWInstImpl::runOnMachineFunction(MachineFunction &MF) {
   if (!ST.getCLOpts().fixup_byte_word_insts)
     return false;
 
+  // Widening to 32-bit instructions needs an 80386.
+  if (ST.isTarget16BitABI() && ST.isPre386())
+    return false;
+
   this->MF = &MF;
   TII = ST.getInstrInfo();
   TRI = MF.getRegInfo().getTargetRegisterInfo();

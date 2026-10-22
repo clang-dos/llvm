@@ -75,11 +75,14 @@ getCalleeSavedSpillRC(MCRegister Reg, const X86Subtarget &STI,
 X86FrameLowering::X86FrameLowering(const X86Subtarget &STI,
                                    MaybeAlign StackAlignOverride)
     : TargetFrameLowering(StackGrowsDown, StackAlignOverride.valueOrOne(),
-                          STI.is64Bit() ? -8 : -4),
+                          STI.is64Bit()             ? -8
+                          : STI.isTarget16BitABI() ? -2
+                                                   : -4),
       STI(STI), TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {
   // Cache a bunch of frame-related predicates for this subtarget.
   SlotSize = TRI->getSlotSize();
-  assert(SlotSize == 4 || SlotSize == 8);
+  assert(SlotSize == 2 || SlotSize == 4 || SlotSize == 8);
+  Is16BitABI = STI.isTarget16BitABI();
   Is64Bit = STI.is64Bit();
   IsLP64 = STI.isTarget64BitLP64();
   // standard x86_64 uses 64-bit frame/stack pointers, x32 - 32-bit.
@@ -122,6 +125,10 @@ bool X86FrameLowering::needsFrameIndexResolution(
 /// frame pointer register.  This is true if the function has variable sized
 /// allocas or if frame pointer elimination is disabled.
 bool X86FrameLowering::hasFPImpl(const MachineFunction &MF) const {
+  // SP can't be a base register on the 8086, so the i8086 target always
+  // addresses the frame through BP.
+  if (Is16BitABI)
+    return true;
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   return (MF.disableFramePointerElim() || TRI->hasStackRealignment(MF) ||
           MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken() ||
@@ -133,27 +140,40 @@ bool X86FrameLowering::hasFPImpl(const MachineFunction &MF) const {
           (MFI.hasCopyImplyingStackAdjustment() && MF.usesWindowsUnwindInfo()));
 }
 
-static unsigned getSUBriOpcode(bool IsLP64) {
+// Is16 selects the 16-bit forms used by the i8086 (16-bit ABI) target.
+static unsigned getSUBriOpcode(bool IsLP64, bool Is16 = false) {
+  if (Is16)
+    return X86::SUB16ri;
   return IsLP64 ? X86::SUB64ri32 : X86::SUB32ri;
 }
 
-static unsigned getADDriOpcode(bool IsLP64) {
+static unsigned getADDriOpcode(bool IsLP64, bool Is16 = false) {
+  if (Is16)
+    return X86::ADD16ri;
   return IsLP64 ? X86::ADD64ri32 : X86::ADD32ri;
 }
 
-static unsigned getSUBrrOpcode(bool IsLP64) {
+static unsigned getSUBrrOpcode(bool IsLP64, bool Is16 = false) {
+  if (Is16)
+    return X86::SUB16rr;
   return IsLP64 ? X86::SUB64rr : X86::SUB32rr;
 }
 
-static unsigned getADDrrOpcode(bool IsLP64) {
+static unsigned getADDrrOpcode(bool IsLP64, bool Is16 = false) {
+  if (Is16)
+    return X86::ADD16rr;
   return IsLP64 ? X86::ADD64rr : X86::ADD32rr;
 }
 
-static unsigned getANDriOpcode(bool IsLP64, int64_t Imm) {
+static unsigned getANDriOpcode(bool IsLP64, int64_t Imm, bool Is16 = false) {
+  if (Is16)
+    return X86::AND16ri;
   return IsLP64 ? X86::AND64ri32 : X86::AND32ri;
 }
 
-static unsigned getLEArOpcode(bool IsLP64) {
+static unsigned getLEArOpcode(bool IsLP64, bool Is16 = false) {
+  if (Is16)
+    return X86::LEA16r;
   return IsLP64 ? X86::LEA64r : X86::LEA32r;
 }
 
@@ -175,10 +195,14 @@ static unsigned getLEArOpcode(bool IsLP64) {
 // PUSH2 and POP2 are instructions for (respectively) pushing/popping 2
 // GPRs at a time to/from the stack.
 static unsigned getPUSHOpcode(const X86Subtarget &ST) {
+  if (ST.isTarget16BitABI())
+    return X86::PUSH16r;
   return ST.is64Bit() ? (ST.hasPPX() ? X86::PUSHP64r : X86::PUSH64r)
                       : X86::PUSH32r;
 }
 static unsigned getPOPOpcode(const X86Subtarget &ST) {
+  if (ST.isTarget16BitABI())
+    return X86::POP16r;
   return ST.is64Bit() ? (ST.hasPPX() ? X86::POPP64r : X86::POP64r)
                       : X86::POP32r;
 }
@@ -187,6 +211,12 @@ static unsigned getPUSH2Opcode(const X86Subtarget &ST) {
 }
 static unsigned getPOP2Opcode(const X86Subtarget &ST) {
   return ST.hasPPX() ? X86::POP2P : X86::POP2;
+}
+
+bool X86FrameLowering::isPushableGPR(MCRegister Reg) const {
+  if (X86::GR64RegClass.contains(Reg) || X86::GR32RegClass.contains(Reg))
+    return true;
+  return Is16BitABI && X86::GR16RegClass.contains(Reg);
 }
 
 static bool isEAXLiveIn(MachineBasicBlock &MBB) {
@@ -253,6 +283,11 @@ void X86FrameLowering::emitSPUpdate(MachineBasicBlock &MBB,
   MachineInstr::MIFlag Flag =
       isSub ? MachineInstr::FrameSetup : MachineInstr::FrameDestroy;
 
+  if (Is16BitABI && !isUInt<16>(Offset)) {
+    BuildMI(MBB, MBBI, DL, TII.get(X86::TRAP));
+    return;
+  }
+
   if (!Uses64BitFramePtr && !isUInt<32>(Offset)) {
     // We're being asked to adjust a 32-bit stack pointer by 4 GiB or more.
     // This might be unreachable code, so don't complain now; just trap if
@@ -286,8 +321,8 @@ void X86FrameLowering::emitSPUpdate(MachineBasicBlock &MBB,
       Reg = getX86SubSuperRegister(TRI->findDeadCallerSavedReg(MBB, MBBI),
                                    Uses64BitFramePtr ? 64 : 32);
 
-    unsigned AddSubRROpc = isSub ? getSUBrrOpcode(Uses64BitFramePtr)
-                                 : getADDrrOpcode(Uses64BitFramePtr);
+    unsigned AddSubRROpc = isSub ? getSUBrrOpcode(Uses64BitFramePtr, Is16BitABI)
+                                 : getADDrrOpcode(Uses64BitFramePtr, Is16BitABI);
     if (Reg) {
       BuildMI(MBB, MBBI, DL,
               TII.get(X86::getMOVriOpcode(Uses64BitFramePtr, Offset)), Reg)
@@ -339,11 +374,19 @@ void X86FrameLowering::emitSPUpdate(MachineBasicBlock &MBB,
     if (Offset == SlotSize) {
       // Use push / pop for slot sized adjustments as a size optimization. We
       // need to find a dead register when using pop.
-      unsigned Reg = isSub ? (unsigned)(Is64Bit ? X86::RAX : X86::EAX)
+      unsigned Reg = isSub ? (unsigned)(Is64Bit      ? X86::RAX
+                                        : Is16BitABI ? X86::AX
+                                                     : X86::EAX)
                            : TRI->findDeadCallerSavedReg(MBB, MBBI);
+      if (Reg && Is16BitABI)
+        Reg = getX86SubSuperRegister(Reg, 16);
       if (Reg) {
-        unsigned Opc = isSub ? (Is64Bit ? X86::PUSH64r : X86::PUSH32r)
-                             : (Is64Bit ? X86::POP64r : X86::POP32r);
+        unsigned Opc = isSub ? (Is64Bit      ? X86::PUSH64r
+                                : Is16BitABI ? X86::PUSH16r
+                                             : X86::PUSH32r)
+                             : (Is64Bit      ? X86::POP64r
+                                : Is16BitABI ? X86::POP16r
+                                             : X86::POP32r);
         BuildMI(MBB, MBBI, DL, TII.get(Opc))
             .addReg(Reg, getDefRegState(!isSub) | getUndefRegState(isSub))
             .setMIFlag(Flag);
@@ -374,6 +417,8 @@ MachineInstrBuilder X86FrameLowering::BuildStackAdjustment(
     // We need to use LEA operations if EFLAGS is live in, because
     // it means an instruction will read it before it gets defined.
     UseLEA = STI.useLeaForSP() || MBB.isLiveIn(X86::EFLAGS);
+    if (Is16BitABI)
+      UseLEA = false;
   } else {
     // If we can use LEA for SP but we shouldn't, check that none
     // of the terminators uses the eflags. Otherwise we will insert
@@ -410,12 +455,12 @@ MachineInstrBuilder X86FrameLowering::BuildStackAdjustment(
     // NF instructions define no EFLAGS, so there is nothing to mark dead.
   } else if (UseLEA) {
     MI = addRegOffset(BuildMI(MBB, MBBI, DL,
-                              TII.get(getLEArOpcode(Uses64BitFramePtr)),
+                              TII.get(getLEArOpcode(Uses64BitFramePtr, Is16BitABI)),
                               StackPtr),
                       StackPtr, false, Offset);
   } else {
-    unsigned Opc = IsSub ? getSUBriOpcode(Uses64BitFramePtr)
-                         : getADDriOpcode(Uses64BitFramePtr);
+    unsigned Opc = IsSub ? getSUBriOpcode(Uses64BitFramePtr, Is16BitABI)
+                         : getADDriOpcode(Uses64BitFramePtr, Is16BitABI);
     int64_t Imm = AbsOffset;
     // Prefer `add rsp, -128` over `sub rsp, 128` (and vice versa in the
     // epilogue): 128 is the one magnitude whose negation fits the
@@ -429,8 +474,8 @@ MachineInstrBuilder X86FrameLowering::BuildStackAdjustment(
     // too.
     if (AbsOffset == 128 &&
         !(InEpilogue && MBB.getParent()->usesWindowsUnwindInfo())) {
-      Opc = IsSub ? getADDriOpcode(Uses64BitFramePtr)
-                  : getSUBriOpcode(Uses64BitFramePtr);
+      Opc = IsSub ? getADDriOpcode(Uses64BitFramePtr, Is16BitABI)
+                  : getSUBriOpcode(Uses64BitFramePtr, Is16BitABI);
       Imm = -128;
     }
     MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
@@ -951,7 +996,7 @@ void X86FrameLowering::emitStackProbeInlineGenericLoop(
         Uses64BitFramePtr ? isUInt<31>(BoundOffset) : isUInt<32>(BoundOffset);
 
     if (canUseSub) {
-      const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr);
+      const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr, Is16BitABI);
 
       BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::COPY), FinalStackProbed)
           .addReg(StackPtr)
@@ -1354,7 +1399,7 @@ void X86FrameLowering::emitStackProbeCall(
     // All other platforms do not specify a particular ABI for the stack probe
     // function, so we arbitrarily define it to not adjust %esp/%rsp itself.
     ModInst =
-        BuildMI(MBB, MBBI, DL, TII.get(getSUBrrOpcode(Uses64BitFramePtr)), SP)
+        BuildMI(MBB, MBBI, DL, TII.get(getSUBrrOpcode(Uses64BitFramePtr, Is16BitABI)), SP)
             .addReg(SP)
             .addReg(AX)
             .setOperandDead(3); // implicit-def $eflags
@@ -1489,7 +1534,7 @@ void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
       // Loop entry block
 
       {
-        const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr);
+        const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr, Is16BitABI);
         BuildMI(headMBB, DL, TII.get(SUBOpc), StackPtr)
             .addReg(StackPtr)
             .addImm(StackProbeSize)
@@ -1520,7 +1565,7 @@ void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
             .addImm(0)
             .setMIFlag(MachineInstr::FrameSetup);
 
-        const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr);
+        const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr, Is16BitABI);
         BuildMI(bodyMBB, DL, TII.get(SUBOpc), StackPtr)
             .addReg(StackPtr)
             .addImm(StackProbeSize)
@@ -1726,6 +1771,8 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
   assert(&STI == &MF.getSubtarget<X86Subtarget>() &&
          "MF used frame lowering for wrong subtarget");
+  if (Is16BitABI)
+    return emitPrologue16(MF, MBB);
   MachineBasicBlock::iterator MBBI = MBB.begin();
   MachineFrameInfo &MFI = MF.getFrameInfo();
   const Function &Fn = MF.getFunction();
@@ -2632,6 +2679,8 @@ static bool isTailCallOpcode(unsigned Opc) {
 
 void X86FrameLowering::emitEpilogue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
+  if (Is16BitABI)
+    return emitEpilogue16(MF, MBB);
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
   MachineBasicBlock::iterator Terminator = MBB.getFirstTerminator();
@@ -2874,7 +2923,7 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
             .setMIFlag(MachineInstr::FrameDestroy);
     }
     if (LEAAmount != 0) {
-      unsigned Opc = getLEArOpcode(Uses64BitFramePtr);
+      unsigned Opc = getLEArOpcode(Uses64BitFramePtr, Is16BitABI);
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr), FramePtr,
                    false, LEAAmount);
       --MBBI;
@@ -3235,7 +3284,7 @@ bool X86FrameLowering::assignCalleeSavedSpillSlots(
   for (CalleeSavedInfo &I : llvm::reverse(CSI)) {
     MCRegister Reg = I.getReg();
 
-    if (!X86::GR64RegClass.contains(Reg) && !X86::GR32RegClass.contains(Reg))
+    if (!isPushableGPR(Reg))
       continue;
 
     // A CSR is a candidate for push2/pop2 when it's slot offset is 16B aligned
@@ -3272,7 +3321,7 @@ bool X86FrameLowering::assignCalleeSavedSpillSlots(
   // Assign slots for XMMs.
   for (CalleeSavedInfo &I : llvm::reverse(CSI)) {
     MCRegister Reg = I.getReg();
-    if (X86::GR64RegClass.contains(Reg) || X86::GR32RegClass.contains(Reg))
+    if (isPushableGPR(Reg))
       continue;
 
     const TargetRegisterClass *RC = getCalleeSavedSpillRC(Reg, STI, *TRI);
@@ -3336,7 +3385,7 @@ bool X86FrameLowering::spillCalleeSavedRegisters(
 
   for (auto RI = CSI.rbegin(), RE = CSI.rend(); RI != RE; ++RI) {
     MCRegister Reg = RI->getReg();
-    if (!X86::GR64RegClass.contains(Reg) && !X86::GR32RegClass.contains(Reg))
+    if (!isPushableGPR(Reg))
       continue;
 
     if (X86FI->isCandidateForPush2Pop2(Reg)) {
@@ -3364,7 +3413,7 @@ bool X86FrameLowering::spillCalleeSavedRegisters(
   // It can be done by spilling XMMs to stack frame.
   for (const CalleeSavedInfo &I : llvm::reverse(CSI)) {
     MCRegister Reg = I.getReg();
-    if (X86::GR64RegClass.contains(Reg) || X86::GR32RegClass.contains(Reg))
+    if (isPushableGPR(Reg))
       continue;
 
     // Add the callee-saved register as live-in. It's killed at the spill.
@@ -3440,7 +3489,7 @@ bool X86FrameLowering::restoreCalleeSavedRegisters(
   // Reload XMMs from stack frame.
   for (const CalleeSavedInfo &I : CSI) {
     MCRegister Reg = I.getReg();
-    if (X86::GR64RegClass.contains(Reg) || X86::GR32RegClass.contains(Reg))
+    if (isPushableGPR(Reg))
       continue;
 
     const TargetRegisterClass *RC = getCalleeSavedSpillRC(Reg, STI, *TRI);
@@ -3463,7 +3512,7 @@ bool X86FrameLowering::restoreCalleeSavedRegisters(
   // POP GPRs.
   for (auto I = CSI.begin(), E = CSI.end(); I != E; ++I) {
     MCRegister Reg = I->getReg();
-    if (!X86::GR64RegClass.contains(Reg) && !X86::GR32RegClass.contains(Reg))
+    if (!isPushableGPR(Reg))
       continue;
 
     if (X86FI->isCandidateForPush2Pop2(Reg)) {
@@ -4968,3 +5017,96 @@ void X86FrameLowering::spillFPBP(MachineFunction &MF) const {
     }
   }
 }
+
+//===----------------------------------------------------------------------===//
+// i8086 (16-bit ABI) prologue and epilogue
+//===----------------------------------------------------------------------===//
+//
+// The 8086 can't use SP as a base register, so every function has a BP frame:
+//
+//   push bp            ; [bp+0] = caller's BP, [bp+2] = return address,
+//   mov  bp, sp        ; [bp+4] = first stack argument (near calls)
+//   push si / push di  ; callee-saved registers (spillCalleeSavedRegisters)
+//   sub  sp, N         ; locals and spill slots
+//   ...
+//   lea  sp, [bp-CSSize]  (or mov sp, bp when nothing was pushed)
+//   pop  di / pop si
+//   pop  bp
+//   ret
+//
+// Restoring SP from BP also handles variable-sized objects. No unwind or
+// debug frame information is emitted yet.
+
+void X86FrameLowering::emitPrologue16(MachineFunction &MF,
+                                      MachineBasicBlock &MBB) const {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  const X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
+  MachineBasicBlock::iterator MBBI = MBB.begin();
+  DebugLoc DL;
+  Register FramePtr = TRI->getFrameRegister(MF);
+  assert(FramePtr == X86::BP && "i8086 frames use BP");
+  assert(!TRI->hasStackRealignment(MF) &&
+         "stack realignment is not supported on i8086");
+
+  uint64_t StackSize = MFI.getStackSize();
+  // The saved BP is part of StackSize; so are the callee-saved pushes.
+  uint64_t NumBytes = StackSize - SlotSize - X86FI->getCalleeSavedFrameSize();
+
+  BuildMI(MBB, MBBI, DL, TII.get(X86::PUSH16r))
+      .addReg(FramePtr, RegState::Kill)
+      .setMIFlag(MachineInstr::FrameSetup);
+  BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16rr), FramePtr)
+      .addReg(StackPtr)
+      .setMIFlag(MachineInstr::FrameSetup);
+  for (MachineBasicBlock &EveryMBB : MF)
+    EveryMBB.addLiveIn(FramePtr);
+  MBB.sortUniqueLiveIns();
+
+  // Skip the callee-saved register pushes.
+  while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup) &&
+         MBBI->getOpcode() == X86::PUSH16r)
+    ++MBBI;
+
+  if (NumBytes)
+    emitSPUpdate(MBB, MBBI, DL, -(int64_t)NumBytes, /*InEpilogue=*/false);
+}
+
+void X86FrameLowering::emitEpilogue16(MachineFunction &MF,
+                                      MachineBasicBlock &MBB) const {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  const X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
+  MachineBasicBlock::iterator Terminator = MBB.getFirstTerminator();
+  MachineBasicBlock::iterator MBBI = Terminator;
+  DebugLoc DL;
+  if (MBBI != MBB.end())
+    DL = MBBI->getDebugLoc();
+  Register FramePtr = TRI->getFrameRegister(MF);
+  unsigned CSSize = X86FI->getCalleeSavedFrameSize();
+  uint64_t NumBytes = MFI.getStackSize() - SlotSize - CSSize;
+
+  // Step back over the callee-saved register pops.
+  while (MBBI != MBB.begin()) {
+    MachineBasicBlock::iterator PI = std::prev(MBBI);
+    if (!PI->getFlag(MachineInstr::FrameDestroy) ||
+        PI->getOpcode() != X86::POP16r)
+      break;
+    MBBI = PI;
+  }
+
+  // Restore SP to just below the callee-saved registers.
+  if (NumBytes || MFI.hasVarSizedObjects()) {
+    if (CSSize)
+      addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::LEA16r), StackPtr),
+                   FramePtr, false, -(int64_t)CSSize)
+          .setMIFlag(MachineInstr::FrameDestroy);
+    else
+      BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16rr), StackPtr)
+          .addReg(FramePtr)
+          .setMIFlag(MachineInstr::FrameDestroy);
+  }
+
+  // Restore the caller's BP after the callee-saved registers.
+  BuildMI(MBB, Terminator, DL, TII.get(X86::POP16r), FramePtr)
+      .setMIFlag(MachineInstr::FrameDestroy);
+}
+

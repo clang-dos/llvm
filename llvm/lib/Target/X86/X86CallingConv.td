@@ -505,9 +505,22 @@ def RetCC_X86_64 : CallingConv<[
   CCDelegateTo<RetCC_X86_64_C>
 ]>;
 
+//===----------------------------------------------------------------------===//
+// i8086 (16-bit ABI) Return Value Calling Convention
+//===----------------------------------------------------------------------===//
+
+// i8 in AL, i16 and near pointers in AX, i32 and far pointers in DX:AX. Wider
+// values come back through a hidden pointer, since only AX and DX are used.
+def RetCC_X86_16_C : CallingConv<[
+  CCIfType<[i1], CCPromoteToType<i8>>,
+  CCIfType<[i8], CCAssignToReg<[AL, DL]>>,
+  CCIfType<[i16], CCAssignToReg<[AX, DX]>>
+]>;
+
 // This is the return-value convention used for the entire X86 backend.
 let Entry = 1 in
 def RetCC_X86 : CallingConv<[
+  CCIfSubtarget<"isTarget16BitABI()", CCDelegateTo<RetCC_X86_16_C>>,
 
   // Check if this is the Intel OpenCL built-ins calling convention
   CCIfCC<"CallingConv::Intel_OCL_BI", CCDelegateTo<RetCC_Intel_OCL_BI>>,
@@ -1109,9 +1122,22 @@ def CC_X86_64 : CallingConv<[
   CCDelegateTo<CC_X86_64_C>
 ]>;
 
+//===----------------------------------------------------------------------===//
+// i8086 (16-bit ABI) Argument Calling Conventions
+//===----------------------------------------------------------------------===//
+
+// cdecl: every argument on the stack, pushed right to left, each in a 2-byte
+// aligned slot. The caller removes the arguments.
+def CC_X86_16_C : CallingConv<[
+  CCIfByVal<CCPassByVal<2, 2>>,
+  CCIfType<[i1, i8], CCPromoteToType<i16>>,
+  CCIfType<[i16], CCAssignToStack<2, 2>>
+]>;
+
 // This is the argument convention used for the entire X86 backend.
 let Entry = 1 in
 def CC_X86 : CallingConv<[
+  CCIfSubtarget<"isTarget16BitABI()", CCDelegateTo<CC_X86_16_C>>,
   CCIfCC<"CallingConv::Intel_OCL_BI", CCDelegateTo<CC_Intel_OCL_BI>>,
   CCIfSubtarget<"is64Bit()", CCDelegateTo<CC_X86_64>>,
   CCDelegateTo<CC_X86_32>
@@ -1127,6 +1153,8 @@ def CSR_IPRA_32 : CalleeSavedRegs<(add EBP, ESI)>;
 def CSR_IPRA_64 : CalleeSavedRegs<(add RBP, RBX)>;
 
 def CSR_32 : CalleeSavedRegs<(add ESI, EDI, EBX, EBP)>;
+// i8086: SI, DI and BP are preserved; AX, BX, CX, DX and ES are scratch.
+def CSR_16 : CalleeSavedRegs<(add SI, DI, BP)>;
 def CSR_64 : CalleeSavedRegs<(add RBX, R12, R13, R14, R15, RBP)>;
 
 def CSR_64_SwiftError : CalleeSavedRegs<(sub CSR_64, R12)>;

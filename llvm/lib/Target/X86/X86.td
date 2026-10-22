@@ -25,6 +25,9 @@ def Is32Bit : SubtargetFeature<"32bit-mode", "Is32Bit", "true",
                                "32-bit mode (80386)">;
 def Is16Bit : SubtargetFeature<"16bit-mode", "Is16Bit", "true",
                                "16-bit mode (i8086)">;
+def Is16BitABI : SubtargetFeature<"16bit-abi", "Is16BitABI", "true",
+                                  "16-bit ABI with 16-bit int and near "
+                                  "pointers (i8086)">;
 def IsX32 : SubtargetFeature<"x32", "IsX32", "true",
                              "64-bit with ILP32 programming model (e.g. x32 ABI)">;
 

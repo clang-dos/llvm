@@ -47,6 +47,14 @@ public:
   /// instruction operands should be used to manipulate StackPtr and FramePtr.
   bool Uses64BitFramePtr;
 
+  /// The i8086 target: 16-bit stack and frame pointers, 2-byte slots, and
+  /// every stack access through BP.
+  bool Is16BitABI;
+
+  /// Whether \p Reg is a general purpose register that the prologue saves
+  /// with PUSH (and the epilogue restores with POP).
+  bool isPushableGPR(MCRegister Reg) const;
+
   Register StackPtr;
 
   /// Emit target stack probe code. This is required for all
@@ -77,6 +85,10 @@ public:
   /// the function.
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
+
+  /// The i8086 (16-bit ABI) prologue and epilogue: always a BP frame.
+  void emitPrologue16(MachineFunction &MF, MachineBasicBlock &MBB) const;
+  void emitEpilogue16(MachineFunction &MF, MachineBasicBlock &MBB) const;
 
   void adjustForSegmentedStacks(MachineFunction &MF,
                                 MachineBasicBlock &PrologueMBB) const override;

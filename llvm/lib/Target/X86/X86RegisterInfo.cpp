@@ -63,6 +63,13 @@ X86RegisterInfo::X86RegisterInfo(const Triple &TT)
     StackPtr = Use64BitReg ? X86::RSP : X86::ESP;
     FramePtr = Use64BitReg ? X86::RBP : X86::EBP;
     BasePtr = Use64BitReg ? X86::RBX : X86::EBX;
+  } else if (TT.isX86_16()) {
+    // The 16-bit ABI. SP can't be a base register on the 8086, so stack
+    // objects are always addressed through BP (see X86FrameLowering).
+    SlotSize = 2;
+    StackPtr = X86::SP;
+    FramePtr = X86::BP;
+    BasePtr = X86::SI;
   } else {
     SlotSize = 4;
     StackPtr = X86::ESP;
@@ -232,6 +239,10 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   if (MF->getFunction().hasFnAttribute("no_callee_saved_registers"))
     return CSR_NoRegs_SaveList;
 
+  // FIXME: interrupt handlers and other conventions on i8086.
+  if (Subtarget.isTarget16BitABI())
+    return CSR_16_SaveList;
+
   switch (CC) {
   case CallingConv::GHC:
   case CallingConv::HiPE:
@@ -372,6 +383,9 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   bool HasAVX = Subtarget.hasAVX();
   bool HasAVX512 = Subtarget.hasAVX512();
   bool HasEGPR = Subtarget.hasEGPR();
+
+  if (Subtarget.isTarget16BitABI())
+    return CSR_16_RegMask;
 
   switch (CC) {
   case CallingConv::GHC:

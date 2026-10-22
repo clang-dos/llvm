@@ -6,15 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+// FIXME: i8086 (X86_16) addresses can only use BX or BP as the base and SI or
+// DI as the index. That needs its own register classes; for now any GR16
+// register is allowed here.
 def x86_ptr_rc : RegClassByHwMode<
-  [X86_32, X86_64, X86_64_X32],
-  [GR32, GR64, LOW32_ADDR_ACCESS]>;
+  [X86_32, X86_64, X86_64_X32, X86_16],
+  [GR32, GR64, LOW32_ADDR_ACCESS, GR16]>;
 
 // A version of ptr_rc which excludes SP, ESP, and RSP. This is used for
 // the index operand of an address, to conform to x86 encoding restrictions.
 def ptr_rc_nosp : RegClassByHwMode<
-  [X86_32, X86_64, X86_64_X32],
-  [GR32_NOSP, GR64_NOSP, GR32_NOSP]>;
+  [X86_32, X86_64, X86_64_X32, X86_16],
+  [GR32_NOSP, GR64_NOSP, GR32_NOSP, GR16]>;
 
 // *mem - Operand definitions for the funky X86 addressing mode operands.
 //
@@ -120,12 +123,12 @@ def sdmem : X86MemOperand<"printqwordmem", X86Mem64AsmOperand>;
 // A version of i8mem for use on x86-64 and x32 that uses a NOREX GPR instead
 // of a plain GPR, so that it doesn't potentially require a REX prefix.
 def ptr_rc_norex : RegClassByHwMode<
-  [X86_32, X86_64, X86_64_X32],
-  [GR32_NOREX, GR64_NOREX, GR32_NOREX]>;
+  [X86_32, X86_64, X86_64_X32, X86_16],
+  [GR32_NOREX, GR64_NOREX, GR32_NOREX, GR16]>;
 
 def ptr_rc_norex_nosp : RegClassByHwMode<
-  [X86_32, X86_64, X86_64_X32],
-  [GR32_NOREX_NOSP, GR64_NOREX_NOSP, GR32_NOREX_NOSP]>;
+  [X86_32, X86_64, X86_64_X32, X86_16],
+  [GR32_NOREX_NOSP, GR64_NOREX_NOSP, GR32_NOREX_NOSP, GR16]>;
 
 
 def i8mem_NOREX : X86MemOperand<"printbytemem", X86Mem8AsmOperand, 8> {

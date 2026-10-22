@@ -209,6 +209,8 @@ def NotX32Mode  : Predicate<"!Subtarget->getTargetTriple().isX32()">,
 
 def IsLP64  : Predicate<"Subtarget->isTarget64BitLP64()">;
 def NotLP64 : Predicate<"!Subtarget->isTarget64BitLP64()">;
+def In16BitABIMode : Predicate<"Subtarget->isTarget16BitABI()">,
+                     AssemblerPredicate<(all_of Is16BitABI), "16-bit ABI">;
 def In16BitMode  : Predicate<"Subtarget->is16Bit()">,
                              AssemblerPredicate<(all_of Is16Bit), "16-bit mode">;
 def Not16BitMode : Predicate<"!Subtarget->is16Bit()">,
@@ -271,3 +273,4 @@ def NotUseIndirectThunkCalls : Predicate<"!Subtarget->useIndirectThunkCalls()">;
 defvar X86_32 = DefaultMode;
 def X86_64 : HwMode<[In64BitMode, NotX32Mode]>;
 def X86_64_X32 : HwMode<[IsX32Mode]>;
+def X86_16 : HwMode<[In16BitABIMode]>;

@@ -564,6 +564,7 @@ def get_run_handler(triple):
         "i686": (scrub_asm_x86, ASM_FUNCTION_X86_RE),
         "x86": (scrub_asm_x86, ASM_FUNCTION_X86_RE),
         "i386": (scrub_asm_x86, ASM_FUNCTION_X86_RE),
+        "i8086": (scrub_asm_x86, ASM_FUNCTION_X86_RE),
         "arm64_32": (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_DARWIN_RE),
         "aarch64": (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_RE),
         "aarch64-apple-darwin": (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_DARWIN_RE),

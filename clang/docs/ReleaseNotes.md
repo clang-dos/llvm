@@ -849,6 +849,9 @@ documentation](CIR/index.md) for more information regarding ClangIR's status and
 
 #### Bug Fixes to C++ Support
 
+- Fixed a crash when a lambda parameter type contains an invalid non-type
+  template argument. (#GH170185)
+
 - Fixed lambdas with specifiers or attributes after the capture list being
   misparsed as function declarations in direct-initialization contexts under
   `-fms-extensions` or in HLSL mode.

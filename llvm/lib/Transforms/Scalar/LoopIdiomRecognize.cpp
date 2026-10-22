@@ -1358,6 +1358,7 @@ bool LoopIdiomRecognize::processLoopStoreOfLoopLoad(
 
   bool Changed = false;
   const SCEV *StrStart = StoreEv->getStart();
+  const SCEV *LdStart = LoadEv->getStart();
   unsigned StrAS = DestPtr->getType()->getPointerAddressSpace();
   Type *IntIdxTy = Builder.getIntNTy(DL->getIndexSizeInBits(StrAS));
 
@@ -1371,9 +1372,12 @@ bool LoopIdiomRecognize::processLoopStoreOfLoopLoad(
   bool IsNegStride = StoreSize == -Stride;
 
   // Handle negative strided loops.
-  if (IsNegStride)
+  if (IsNegStride) {
     StrStart =
         getStartForNegStride(StrStart, BECount, IntIdxTy, StoreSizeSCEV, SE);
+    LdStart =
+        getStartForNegStride(LdStart, BECount, IntIdxTy, StoreSizeSCEV, SE);
+  }
 
   // Okay, we have a strided store "p[i]" of a loaded value.  We can turn
   // this into a memcpy in the loop preheader now if we want.  However, this
@@ -1408,7 +1412,33 @@ bool LoopIdiomRecognize::processLoopStoreOfLoopLoad(
     // the only user of TheLoad.
     if (!TheLoad->hasOneUse())
       return Changed;
+
     IgnoredInsts.insert(TheLoad);
+
+    auto GetKnownAlignment = [&](MaybeAlign AccessAlign, const SCEV *BaseEv) {
+      unsigned MinTrailingZeros =
+          std::min(SE->getMinTrailingZeros(BaseEv), 63u);
+      Align SCEVAlign(1ULL << MinTrailingZeros);
+      return std::max(AccessAlign.valueOrOne(), SCEVAlign);
+    };
+
+    Align DstAlign = GetKnownAlignment(StoreAlign, StrStart);
+    Align SrcAlign = GetKnownAlignment(LoadAlign, LdStart);
+    std::optional<APInt> PtrDiff =
+        SE->computeConstantDifference(StrStart, LdStart);
+    if (!TTI->isMemmoveProfitable(DstAlign, SrcAlign, PtrDiff)) {
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE,
+                                        "LoopMayAccessUnalignedStore", TheStore)
+               << ore::NV("Inst", InstRemark) << " in "
+               << ore::NV("Function", TheStore->getFunction())
+               << " function will not be hoisted: "
+               << ore::NV("Reason",
+                          "The conversion is not profitable for the target");
+      });
+      return Changed;
+    }
+
     if (mayLoopAccessLocation(StoreBasePtr, ModRefInfo::ModRef, CurLoop,
                               BECount, StoreSizeSCEV, *AA, IgnoredInsts)) {
       ORE.emit([&]() {
@@ -1424,13 +1454,7 @@ bool LoopIdiomRecognize::processLoopStoreOfLoopLoad(
     IgnoredInsts.erase(TheLoad);
   }
 
-  const SCEV *LdStart = LoadEv->getStart();
   unsigned LdAS = SourcePtr->getType()->getPointerAddressSpace();
-
-  // Handle negative strided loops.
-  if (IsNegStride)
-    LdStart =
-        getStartForNegStride(LdStart, BECount, IntIdxTy, StoreSizeSCEV, SE);
 
   // For a memcpy, we have to make sure that the input array is not being
   // mutated by the loop.

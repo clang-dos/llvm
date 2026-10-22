@@ -2073,7 +2073,7 @@ Expected<bool> FunctionImporter::importFunctions(
         if (ImportDefinition) {
           if (Error Err = GV.materialize())
             return std::move(Err);
-          ImportedGVCount += GlobalsToImport.insert(&GV);
+          ImportedGVCount += GlobalsToImport.insert(&GV).second;
         }
       }
     }

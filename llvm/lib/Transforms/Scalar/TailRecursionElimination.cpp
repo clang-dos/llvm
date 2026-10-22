@@ -1015,7 +1015,7 @@ void TailRecursionEliminator::cleanupAndFinalize() {
       New->setName("accumulator.ret.tr");
       New->setOperand(AccRecInstr->getOperand(0) == AccPN, OtherVal);
       New->insertBefore(InsertPt);
-      New->dropLocation();
+      New->dropSourcePosition();
       return New;
     };
 

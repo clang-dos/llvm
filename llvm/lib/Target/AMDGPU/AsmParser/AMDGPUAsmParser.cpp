@@ -1645,7 +1645,8 @@ private:
   bool validateBLGP(const MCInst &Inst, const OperandVector &Operands);
   bool validateDS(const MCInst &Inst, const OperandVector &Operands);
   bool validateGWS(const MCInst &Inst, const OperandVector &Operands);
-  bool validateDivScale(const MCInst &Inst);
+  bool validateDivScale(const MCInst &Inst, const OperandVector &Operands,
+                        SMLoc IDLoc);
   bool validateWaitCnt(const MCInst &Inst, const OperandVector &Operands);
   bool validateCoherencyBits(const MCInst &Inst, const OperandVector &Operands,
                              SMLoc IDLoc);
@@ -4327,7 +4328,21 @@ bool AMDGPUAsmParser::validateMFMA(const MCInst &Inst,
   return true;
 }
 
-bool AMDGPUAsmParser::validateDivScale(const MCInst &Inst) {
+static bool isEqualSrcOperand(const MCOperand &SrcA, const MCOperand &SrcB) {
+  if ((SrcA.isReg() && SrcB.isReg()) || (SrcA.isImm() && SrcB.isImm()) ||
+      (SrcA.isSFPImm() && SrcB.isSFPImm()) ||
+      (SrcA.isDFPImm() && SrcB.isDFPImm()))
+    return SrcA == SrcB;
+  // A register can never be equal to a constant.
+  if (SrcA.isReg() != SrcB.isReg())
+    return false;
+  // Conservatively skip anything else (e.g. expressions).
+  return true;
+}
+
+bool AMDGPUAsmParser::validateDivScale(const MCInst &Inst,
+                                       const OperandVector &Operands,
+                                       SMLoc IDLoc) {
   switch (Inst.getOpcode()) {
   default:
     return true;
@@ -4340,14 +4355,29 @@ bool AMDGPUAsmParser::validateDivScale(const MCInst &Inst) {
     break;
   }
 
-  // TODO: Check that src0 = src1 or src2.
-
   for (auto Name :
        {AMDGPU::OpName::src0_modifiers, AMDGPU::OpName::src2_modifiers,
         AMDGPU::OpName::src2_modifiers}) {
     if (Inst.getOperand(AMDGPU::getNamedOperandIdx(Inst.getOpcode(), Name))
             .getImm() &
         SISrcMods::ABS) {
+      Error(IDLoc, "ABS not allowed in VOP3B instructions");
+      return false;
+    }
+  }
+
+  // The hardware requires src0 to be equal to src1 or src2.
+  const unsigned Opc = Inst.getOpcode();
+  const int Src0Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src0);
+  const int Src1Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src1);
+  const int Src2Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src2);
+  if (Src0Idx != -1 && Src1Idx != -1 && Src2Idx != -1) {
+    const MCOperand &Src0 = Inst.getOperand(Src0Idx);
+    const MCOperand &Src1 = Inst.getOperand(Src1Idx);
+    const MCOperand &Src2 = Inst.getOperand(Src2Idx);
+    if (!isEqualSrcOperand(Src0, Src1) && !isEqualSrcOperand(Src0, Src2)) {
+      Error(getOperandLoc(Operands, Src0Idx),
+            "src0 must be equal to src1 or src2");
       return false;
     }
   }
@@ -5699,8 +5729,7 @@ bool AMDGPUAsmParser::validateInstruction(const MCInst &Inst, SMLoc IDLoc,
     return false;
   }
 
-  if (!validateDivScale(Inst)) {
-    Error(IDLoc, "ABS not allowed in VOP3B instructions");
+  if (!validateDivScale(Inst, Operands, IDLoc)) {
     return false;
   }
   if (!validateWaitCnt(Inst, Operands)) {

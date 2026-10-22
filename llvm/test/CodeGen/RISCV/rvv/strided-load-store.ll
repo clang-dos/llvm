@@ -4,6 +4,11 @@
 
 %struct.foo = type { i32, i32, i32, i32 }
 
+@select.base.a = external global i8
+@select.base.b = external global i8
+@select.base.c = external global i8
+@select.base.d = external global i8
+
 define <vscale x 1 x i64> @gather(ptr %a, i32 %len) {
 ; CHECK-LABEL: @gather(
 ; CHECK-NEXT:  vector.ph:
@@ -298,6 +303,176 @@ vector.body:                                      ; preds = %vector.body, %vecto
 
 for.cond.cleanup:                                 ; preds = %vector.body
   ret void
+}
+
+define <vscale x 4 x i32> @gather_select_base(<vscale x 4 x i1> %cond,
+                                               i32 %evl) {
+; CHECK-LABEL: @gather_select_base(
+; CHECK-NEXT:    [[SELECT_MASK_FALSE:%.*]] = xor <vscale x 4 x i1> [[COND:%.*]], splat (i1 true)
+; CHECK-NEXT:    [[SELECT_LOAD_TRUE:%.*]] = call <vscale x 4 x i32> @llvm.vp.load.nxv4i32.p0(ptr align 4 @select.base.a, <vscale x 4 x i1> [[COND]], i32 [[EVL:%.*]])
+; CHECK-NEXT:    [[SELECT_LOAD_FALSE:%.*]] = call <vscale x 4 x i32> @llvm.vp.load.nxv4i32.p0(ptr align 4 @select.base.b, <vscale x 4 x i1> [[SELECT_MASK_FALSE]], i32 [[EVL]])
+; CHECK-NEXT:    [[GATHER_0:%.*]] = select <vscale x 4 x i1> [[COND]], <vscale x 4 x i32> [[SELECT_LOAD_TRUE]], <vscale x 4 x i32> [[SELECT_LOAD_FALSE]]
+; CHECK-NEXT:    [[SELECT_MASK_FALSE1:%.*]] = xor <vscale x 4 x i1> [[COND]], splat (i1 true)
+; CHECK-NEXT:    [[SELECT_LOAD_TRUE2:%.*]] = call <vscale x 4 x i32> @llvm.vp.load.nxv4i32.p0(ptr align 4 @select.base.a, <vscale x 4 x i1> [[COND]], i32 [[EVL]])
+; CHECK-NEXT:    [[SELECT_LOAD_FALSE3:%.*]] = call <vscale x 4 x i32> @llvm.vp.load.nxv4i32.p0(ptr align 4 @select.base.b, <vscale x 4 x i1> [[SELECT_MASK_FALSE1]], i32 [[EVL]])
+; CHECK-NEXT:    [[GATHER_1:%.*]] = select <vscale x 4 x i1> [[COND]], <vscale x 4 x i32> [[SELECT_LOAD_TRUE2]], <vscale x 4 x i32> [[SELECT_LOAD_FALSE3]]
+; CHECK-NEXT:    [[SUM:%.*]] = add <vscale x 4 x i32> [[GATHER_0]], [[GATHER_1]]
+; CHECK-NEXT:    ret <vscale x 4 x i32> [[SUM]]
+;
+  %base = select <vscale x 4 x i1> %cond,
+                 <vscale x 4 x ptr> splat (ptr @select.base.a),
+                 <vscale x 4 x ptr> splat (ptr @select.base.b)
+  %step = call <vscale x 4 x i64> @llvm.stepvector.nxv4i64()
+  %ptr = getelementptr [4 x i8], <vscale x 4 x ptr> %base,
+                       <vscale x 4 x i64> %step
+  %gather.0 = call <vscale x 4 x i32> @llvm.vp.gather(
+      <vscale x 4 x ptr> %ptr, <vscale x 4 x i1> splat (i1 true), i32 %evl)
+  %gather.1 = call <vscale x 4 x i32> @llvm.vp.gather(
+      <vscale x 4 x ptr> %ptr, <vscale x 4 x i1> splat (i1 true), i32 %evl)
+  %sum = add <vscale x 4 x i32> %gather.0, %gather.1
+  ret <vscale x 4 x i32> %sum
+}
+
+define <vscale x 4 x i32> @gather_select_base_recurrence(
+    <vscale x 4 x i1> %cond, i1 %again, i32 %evl) {
+; CHECK-LABEL: @gather_select_base_recurrence(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br label [[LOOP:%.*]]
+; CHECK:       loop:
+; CHECK-NEXT:    [[INDEX_SCALAR:%.*]] = phi i64 [ 0, [[ENTRY:%.*]] ], [ [[INDEX_NEXT_SCALAR:%.*]], [[LOOP]] ]
+; CHECK-NEXT:    [[TMP0:%.*]] = getelementptr [4 x i8], ptr @select.base.a, i64 [[INDEX_SCALAR]]
+; CHECK-NEXT:    [[SELECT_GEP_FALSE:%.*]] = getelementptr [4 x i8], ptr @select.base.b, i64 [[INDEX_SCALAR]]
+; CHECK-NEXT:    [[SELECT_MASK_FALSE:%.*]] = xor <vscale x 4 x i1> [[COND:%.*]], splat (i1 true)
+; CHECK-NEXT:    [[SELECT_LOAD_TRUE:%.*]] = call <vscale x 4 x i32> @llvm.vp.load.nxv4i32.p0(ptr align 4 [[TMP0]], <vscale x 4 x i1> [[COND]], i32 [[EVL:%.*]])
+; CHECK-NEXT:    [[SELECT_LOAD_FALSE:%.*]] = call <vscale x 4 x i32> @llvm.vp.load.nxv4i32.p0(ptr align 4 [[SELECT_GEP_FALSE]], <vscale x 4 x i1> [[SELECT_MASK_FALSE]], i32 [[EVL]])
+; CHECK-NEXT:    [[GATHER:%.*]] = select <vscale x 4 x i1> [[COND]], <vscale x 4 x i32> [[SELECT_LOAD_TRUE]], <vscale x 4 x i32> [[SELECT_LOAD_FALSE]]
+; CHECK-NEXT:    [[INDEX_NEXT_SCALAR]] = add i64 [[INDEX_SCALAR]], 4
+; CHECK-NEXT:    br i1 [[AGAIN:%.*]], label [[LOOP]], label [[EXIT:%.*]]
+; CHECK:       exit:
+; CHECK-NEXT:    ret <vscale x 4 x i32> [[GATHER]]
+;
+entry:
+  %start = call <vscale x 4 x i64> @llvm.stepvector.nxv4i64()
+  br label %loop
+
+loop:
+  %index = phi <vscale x 4 x i64> [ %start, %entry ], [ %index.next, %loop ]
+  %base = select <vscale x 4 x i1> %cond,
+                 <vscale x 4 x ptr> splat (ptr @select.base.a),
+                 <vscale x 4 x ptr> splat (ptr @select.base.b)
+  %ptr = getelementptr [4 x i8], <vscale x 4 x ptr> %base,
+                       <vscale x 4 x i64> %index
+  %gather = call <vscale x 4 x i32> @llvm.vp.gather(
+      <vscale x 4 x ptr> %ptr, <vscale x 4 x i1> splat (i1 true), i32 %evl)
+  %index.next = add <vscale x 4 x i64> %index, splat (i64 4)
+  br i1 %again, label %loop, label %exit
+
+exit:
+  ret <vscale x 4 x i32> %gather
+}
+
+define <8 x i32> @gather_select_base_fixed(<8 x i1> %cond.0,
+                                            <8 x i1> %cond.1, i32 %evl) {
+; CHECK-LABEL: @gather_select_base_fixed(
+; CHECK-NEXT:    [[BASE_0:%.*]] = select <8 x i1> [[COND_0:%.*]], <8 x ptr> <ptr @select.base.a, ptr @select.base.a, ptr @select.base.a, ptr @select.base.a, ptr @select.base.a, ptr @select.base.a, ptr @select.base.a, ptr @select.base.a>, <8 x ptr> <ptr @select.base.b, ptr @select.base.b, ptr @select.base.b, ptr @select.base.b, ptr @select.base.b, ptr @select.base.b, ptr @select.base.b, ptr @select.base.b>
+; CHECK-NEXT:    [[PTR_0:%.*]] = getelementptr [4 x i8], <8 x ptr> [[BASE_0]], <8 x i64> <i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7, i64 8>
+; CHECK-NEXT:    [[SELECT_MASK_FALSE:%.*]] = xor <8 x i1> [[COND_0]], splat (i1 true)
+; CHECK-NEXT:    [[SELECT_LOAD_TRUE:%.*]] = call <8 x i32> @llvm.vp.load.v8i32.p0(ptr align 4 getelementptr (i8, ptr @select.base.a, i64 4), <8 x i1> [[COND_0]], i32 [[EVL:%.*]])
+; CHECK-NEXT:    [[SELECT_LOAD_FALSE:%.*]] = call <8 x i32> @llvm.vp.load.v8i32.p0(ptr align 4 getelementptr (i8, ptr @select.base.b, i64 4), <8 x i1> [[SELECT_MASK_FALSE]], i32 [[EVL]])
+; CHECK-NEXT:    [[GATHER_0:%.*]] = select <8 x i1> [[COND_0]], <8 x i32> [[SELECT_LOAD_TRUE]], <8 x i32> [[SELECT_LOAD_FALSE]]
+; CHECK-NEXT:    [[KEEP_PTR_0:%.*]] = icmp ne <8 x ptr> [[PTR_0]], splat (ptr null)
+; CHECK-NEXT:    [[SELECT_MASK_FALSE1:%.*]] = xor <8 x i1> [[COND_1:%.*]], splat (i1 true)
+; CHECK-NEXT:    [[SELECT_LOAD_TRUE2:%.*]] = call <8 x i32> @llvm.vp.load.v8i32.p0(ptr align 4 getelementptr (i8, ptr @select.base.c, i64 4), <8 x i1> [[COND_1]], i32 [[EVL]])
+; CHECK-NEXT:    [[SELECT_LOAD_FALSE3:%.*]] = call <8 x i32> @llvm.vp.load.v8i32.p0(ptr align 4 getelementptr (i8, ptr @select.base.d, i64 4), <8 x i1> [[SELECT_MASK_FALSE1]], i32 [[EVL]])
+; CHECK-NEXT:    [[GATHER_1:%.*]] = select <8 x i1> [[COND_1]], <8 x i32> [[SELECT_LOAD_TRUE2]], <8 x i32> [[SELECT_LOAD_FALSE3]]
+; CHECK-NEXT:    [[SUM:%.*]] = add <8 x i32> [[GATHER_0]], [[GATHER_1]]
+; CHECK-NEXT:    [[RESULT:%.*]] = select <8 x i1> [[KEEP_PTR_0]], <8 x i32> [[SUM]], <8 x i32> zeroinitializer
+; CHECK-NEXT:    ret <8 x i32> [[RESULT]]
+;
+  %base.0 = select <8 x i1> %cond.0,
+                   <8 x ptr> splat (ptr @select.base.a),
+                   <8 x ptr> splat (ptr @select.base.b)
+  %ptr.0 = getelementptr [4 x i8], <8 x ptr> %base.0,
+                         <8 x i64> <i64 1, i64 2, i64 3, i64 4,
+                                     i64 5, i64 6, i64 7, i64 8>
+  %gather.0 = call <8 x i32> @llvm.vp.gather(
+      <8 x ptr> %ptr.0, <8 x i1> splat (i1 true), i32 %evl)
+  %keep.ptr.0 = icmp ne <8 x ptr> %ptr.0, zeroinitializer
+
+  %base.1 = select <8 x i1> %cond.1,
+                   <8 x ptr> splat (ptr @select.base.c),
+                   <8 x ptr> splat (ptr @select.base.d)
+  %ptr.1 = getelementptr [4 x i8], <8 x ptr> %base.1,
+                         <8 x i64> <i64 1, i64 2, i64 3, i64 4,
+                                     i64 5, i64 6, i64 7, i64 8>
+  %gather.1 = call <8 x i32> @llvm.vp.gather(
+      <8 x ptr> %ptr.1, <8 x i1> splat (i1 true), i32 %evl)
+  %sum = add <8 x i32> %gather.0, %gather.1
+  %result = select <8 x i1> %keep.ptr.0, <8 x i32> %sum,
+                   <8 x i32> zeroinitializer
+  ret <8 x i32> %result
+}
+
+define <vscale x 64 x i32> @gather_select_base_scalar_condition(
+    i1 %cond, i32 %evl) {
+; CHECK-LABEL: @gather_select_base_scalar_condition(
+; CHECK-NEXT:    [[BASE:%.*]] = select i1 [[COND:%.*]], <vscale x 64 x ptr> shufflevector (<vscale x 64 x ptr> insertelement (<vscale x 64 x ptr> poison, ptr @select.base.a, i64 0), <vscale x 64 x ptr> poison, <vscale x 64 x i32> zeroinitializer), <vscale x 64 x ptr> shufflevector (<vscale x 64 x ptr> insertelement (<vscale x 64 x ptr> poison, ptr @select.base.b, i64 0), <vscale x 64 x ptr> poison, <vscale x 64 x i32> zeroinitializer)
+; CHECK-NEXT:    [[STEP:%.*]] = call <vscale x 64 x i64> @llvm.stepvector.nxv64i64()
+; CHECK-NEXT:    [[PTR:%.*]] = getelementptr [4 x i8], <vscale x 64 x ptr> [[BASE]], <vscale x 64 x i64> [[STEP]]
+; CHECK-NEXT:    [[GATHER:%.*]] = call <vscale x 64 x i32> @llvm.vp.gather.nxv64i32.nxv64p0(<vscale x 64 x ptr> [[PTR]], <vscale x 64 x i1> splat (i1 true), i32 [[EVL:%.*]])
+; CHECK-NEXT:    ret <vscale x 64 x i32> [[GATHER]]
+;
+  %base = select i1 %cond,
+                 <vscale x 64 x ptr> splat (ptr @select.base.a),
+                 <vscale x 64 x ptr> splat (ptr @select.base.b)
+  %step = call <vscale x 64 x i64> @llvm.stepvector.nxv64i64()
+  %ptr = getelementptr [4 x i8], <vscale x 64 x ptr> %base,
+                       <vscale x 64 x i64> %step
+  %gather = call <vscale x 64 x i32> @llvm.vp.gather(
+      <vscale x 64 x ptr> %ptr, <vscale x 64 x i1> splat (i1 true), i32 %evl)
+  ret <vscale x 64 x i32> %gather
+}
+
+define <vscale x 4 x i32> @gather_select_base_variable_mask(
+    <vscale x 4 x i1> %cond, <vscale x 4 x i1> %mask, i32 %evl) {
+; CHECK-LABEL: @gather_select_base_variable_mask(
+; CHECK-NEXT:    [[BASE:%.*]] = select <vscale x 4 x i1> [[COND:%.*]], <vscale x 4 x ptr> shufflevector (<vscale x 4 x ptr> insertelement (<vscale x 4 x ptr> poison, ptr @select.base.a, i64 0), <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer), <vscale x 4 x ptr> shufflevector (<vscale x 4 x ptr> insertelement (<vscale x 4 x ptr> poison, ptr @select.base.b, i64 0), <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer)
+; CHECK-NEXT:    [[STEP:%.*]] = call <vscale x 4 x i64> @llvm.stepvector.nxv4i64()
+; CHECK-NEXT:    [[PTR:%.*]] = getelementptr [4 x i8], <vscale x 4 x ptr> [[BASE]], <vscale x 4 x i64> [[STEP]]
+; CHECK-NEXT:    [[GATHER:%.*]] = call <vscale x 4 x i32> @llvm.vp.gather.nxv4i32.nxv4p0(<vscale x 4 x ptr> [[PTR]], <vscale x 4 x i1> [[MASK:%.*]], i32 [[EVL:%.*]])
+; CHECK-NEXT:    ret <vscale x 4 x i32> [[GATHER]]
+;
+  %base = select <vscale x 4 x i1> %cond,
+                 <vscale x 4 x ptr> splat (ptr @select.base.a),
+                 <vscale x 4 x ptr> splat (ptr @select.base.b)
+  %step = call <vscale x 4 x i64> @llvm.stepvector.nxv4i64()
+  %ptr = getelementptr [4 x i8], <vscale x 4 x ptr> %base,
+                       <vscale x 4 x i64> %step
+  %gather = call <vscale x 4 x i32> @llvm.vp.gather(
+      <vscale x 4 x ptr> %ptr, <vscale x 4 x i1> %mask, i32 %evl)
+  ret <vscale x 4 x i32> %gather
+}
+
+define <vscale x 4 x i32> @gather_select_base_non_unit_stride(
+    <vscale x 4 x i1> %cond, i32 %evl) {
+; CHECK-LABEL: @gather_select_base_non_unit_stride(
+; CHECK-NEXT:    [[BASE:%.*]] = select <vscale x 4 x i1> [[COND:%.*]], <vscale x 4 x ptr> shufflevector (<vscale x 4 x ptr> insertelement (<vscale x 4 x ptr> poison, ptr @select.base.a, i64 0), <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer), <vscale x 4 x ptr> shufflevector (<vscale x 4 x ptr> insertelement (<vscale x 4 x ptr> poison, ptr @select.base.b, i64 0), <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer)
+; CHECK-NEXT:    [[STEP:%.*]] = call <vscale x 4 x i64> @llvm.stepvector.nxv4i64()
+; CHECK-NEXT:    [[STRIDE:%.*]] = shl <vscale x 4 x i64> [[STEP]], splat (i64 1)
+; CHECK-NEXT:    [[PTR:%.*]] = getelementptr [4 x i8], <vscale x 4 x ptr> [[BASE]], <vscale x 4 x i64> [[STRIDE]]
+; CHECK-NEXT:    [[GATHER:%.*]] = call <vscale x 4 x i32> @llvm.vp.gather.nxv4i32.nxv4p0(<vscale x 4 x ptr> [[PTR]], <vscale x 4 x i1> splat (i1 true), i32 [[EVL:%.*]])
+; CHECK-NEXT:    ret <vscale x 4 x i32> [[GATHER]]
+;
+  %base = select <vscale x 4 x i1> %cond,
+                 <vscale x 4 x ptr> splat (ptr @select.base.a),
+                 <vscale x 4 x ptr> splat (ptr @select.base.b)
+  %step = call <vscale x 4 x i64> @llvm.stepvector.nxv4i64()
+  %stride = shl <vscale x 4 x i64> %step, splat (i64 1)
+  %ptr = getelementptr [4 x i8], <vscale x 4 x ptr> %base,
+                       <vscale x 4 x i64> %stride
+  %gather = call <vscale x 4 x i32> @llvm.vp.gather(
+      <vscale x 4 x ptr> %ptr, <vscale x 4 x i1> splat (i1 true), i32 %evl)
+  ret <vscale x 4 x i32> %gather
 }
 
 define void @scatter_non_invariant_step(ptr %a, ptr %b, i32 %len) {

@@ -15,12 +15,14 @@
 #include "RISCVTargetMachine.h"
 #include "llvm/Analysis/InstSimplifyFolder.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
@@ -37,6 +39,7 @@ namespace {
 class RISCVGatherScatterLoweringImpl {
   const RISCVSubtarget *ST;
   const RISCVTargetLowering *TLI;
+  const TargetTransformInfo *TTI;
   LoopInfo *LI;
   const DataLayout *DL;
 
@@ -48,14 +51,19 @@ class RISCVGatherScatterLoweringImpl {
   DenseMap<GetElementPtrInst *, std::pair<Value *, Value *>> StridedAddrs;
 
 public:
-  RISCVGatherScatterLoweringImpl(const RISCVSubtarget *ST, LoopInfo *LI,
+  RISCVGatherScatterLoweringImpl(const RISCVSubtarget *ST,
+                                 const TargetTransformInfo *TTI, LoopInfo *LI,
                                  const DataLayout *DL)
-      : ST(ST), TLI(ST->getTargetLowering()), LI(LI), DL(DL) {}
+      : ST(ST), TLI(ST->getTargetLowering()), TTI(TTI), LI(LI), DL(DL) {}
 
   bool run(Function &F);
 
 private:
+  bool tryCreateSelectBaseLoad(IntrinsicInst *II);
+
   bool tryCreateStridedLoadStore(IntrinsicInst *II);
+
+  bool isUnitStrided(GetElementPtrInst *GEP, Type *DataType) const;
 
   std::pair<Value *, Value *> determineBaseAndStride(Instruction *Ptr,
                                                      IRBuilderBase &Builder);
@@ -79,6 +87,7 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     AU.addRequired<TargetPassConfig>();
+    AU.addRequired<TargetTransformInfoWrapperPass>();
     AU.addRequired<LoopInfoWrapperPass>();
   }
 
@@ -94,6 +103,7 @@ INITIALIZE_PASS_BEGIN(RISCVGatherScatterLoweringLegacy, DEBUG_TYPE,
                       "RISC-V gather/scatter lowering pass", false, false)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
+INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
 INITIALIZE_PASS_END(RISCVGatherScatterLoweringLegacy, DEBUG_TYPE,
                     "RISC-V gather/scatter lowering pass", false, false)
 
@@ -352,6 +362,38 @@ bool RISCVGatherScatterLoweringImpl::matchStridedRecurrence(
   return true;
 }
 
+bool RISCVGatherScatterLoweringImpl::isUnitStrided(GetElementPtrInst *GEP,
+                                                   Type *DataType) const {
+  if (GEP->getNumIndices() != 1)
+    return false;
+
+  Value *VecIndex = *GEP->idx_begin();
+  TypeSize TypeScale = gep_type_begin(GEP).getSequentialElementStride(*DL);
+  if (!VecIndex->getType()->isVectorTy() || TypeScale.isScalable() ||
+      VecIndex->getType() != DL->getIntPtrType(GEP->getType()) ||
+      TypeScale !=
+          DL->getTypeStoreSize(cast<VectorType>(DataType)->getElementType()))
+    return false;
+
+  Value *Start = VecIndex;
+  if (auto *Phi = dyn_cast<PHINode>(VecIndex)) {
+    Loop *L = LI->getLoopFor(GEP->getParent());
+    BinaryOperator *Inc;
+    Value *Step;
+    if (!L || !L->getLoopPreheader() || !L->getLoopLatch() ||
+        Phi->getParent() != L->getHeader() ||
+        !matchSimpleRecurrence(Phi, Inc, Start, Step) ||
+        Inc->getOpcode() != Instruction::Add || !getSplatValue(Step))
+      return false;
+  }
+
+  if (match(Start, m_Intrinsic<Intrinsic::stepvector>()))
+    return true;
+
+  auto *StartC = dyn_cast<Constant>(Start);
+  return StartC && match(matchStridedConstant(StartC).second, m_One());
+}
+
 std::pair<Value *, Value *>
 RISCVGatherScatterLoweringImpl::determineBaseAndStride(Instruction *Ptr,
                                                        IRBuilderBase &Builder) {
@@ -507,6 +549,96 @@ RISCVGatherScatterLoweringImpl::determineBaseAndStride(Instruction *Ptr,
   return P;
 }
 
+// Split gather(gep(select(splat(A), splat(B)), unit-stride-index)) into two
+// complementary masked loads when that is cheaper than the gather.
+bool RISCVGatherScatterLoweringImpl::tryCreateSelectBaseLoad(
+    IntrinsicInst *II) {
+  if (II->getIntrinsicID() != Intrinsic::vp_gather)
+    return false;
+
+  auto *DataType = cast<VectorType>(II->getType());
+  auto *GEP = dyn_cast<GetElementPtrInst>(II->getArgOperand(0));
+  auto *Select = GEP ? dyn_cast<SelectInst>(GEP->getPointerOperand()) : nullptr;
+  if (!Select || !Select->getType()->isVectorTy() ||
+      !Select->getCondition()->getType()->isVectorTy())
+    return false;
+
+  Value *TrueBase = getSplatValue(Select->getTrueValue());
+  Value *FalseBase = getSplatValue(Select->getFalseValue());
+  if (!TrueBase || !FalseBase)
+    return false;
+
+  Align Alignment = II->getParamAlign(0).value_or(
+      DL->getABITypeAlign(DataType->getElementType()));
+  unsigned AddressSpace = GEP->getAddressSpace();
+  if (!match(II->getArgOperand(1), m_AllOnes()) ||
+      !isUnitStrided(GEP, DataType) ||
+      !TTI->isLegalMaskedLoad(DataType, Alignment, AddressSpace))
+    return false;
+
+  auto CostKind = TargetTransformInfo::TCK_RecipThroughput;
+  InstructionCost GatherCost = TTI->getMemIntrinsicInstrCost(
+      MemIntrinsicCostAttributes(II->getIntrinsicID(), DataType, GEP,
+                                 /*VariableMask=*/false, Alignment, II),
+      CostKind);
+  Type *MaskType = Select->getCondition()->getType();
+  InstructionCost LoadCost = TTI->getMemIntrinsicInstrCost(
+      MemIntrinsicCostAttributes(Intrinsic::vp_load, DataType, Alignment,
+                                 AddressSpace),
+      CostKind);
+  InstructionCost SelectLoadCost =
+      2 * LoadCost +
+      TTI->getArithmeticInstrCost(Instruction::Xor, MaskType, CostKind) +
+      TTI->getCmpSelInstrCost(Instruction::Select, DataType, MaskType,
+                              CmpInst::BAD_ICMP_PREDICATE, CostKind);
+  if (!GatherCost.isValid() || !SelectLoadCost.isValid() ||
+      SelectLoadCost >= GatherCost)
+    return false;
+
+  auto *TrueGEP = cast<GetElementPtrInst>(GEP->clone());
+  TrueGEP->insertBefore(GEP->getIterator());
+  TrueGEP->setOperand(0, Select->getTrueValue());
+  TrueGEP->setNoWrapFlags(GEPNoWrapFlags::none());
+
+  IRBuilder Builder(TrueGEP->getIterator(), InstSimplifyFolder(*DL));
+  auto [TruePtr, Stride] = determineBaseAndStride(TrueGEP, Builder);
+  assert(TruePtr && Stride && "Expected a strided address");
+  // TrueGEP is temporary and will be deleted below.
+  StridedAddrs.erase(TrueGEP);
+
+  Value *FalsePtr = FalseBase;
+  if (TruePtr != TrueBase) {
+    auto *ScalarGEP = cast<GEPOperator>(TruePtr);
+    SmallVector<Value *> Indices(ScalarGEP->indices());
+    Builder.SetInsertPoint(GEP);
+    FalsePtr = Builder.CreateGEP(ScalarGEP->getSourceElementType(), FalseBase,
+                                 Indices, "select.gep.false");
+  }
+
+  Builder.SetInsertPoint(II);
+  Value *SelectMask = Select->getCondition();
+  Value *FalseMask = Builder.CreateNot(SelectMask, "select.mask.false");
+  Value *EVL = II->getArgOperand(2);
+  auto CreateLoad = [&](Value *Ptr, Value *LoadMask, const Twine &Name) {
+    CallInst *Load = Builder.CreateIntrinsicWithoutFolding(
+        DataType, Intrinsic::vp_load, {Ptr, LoadMask, EVL}, nullptr, Name);
+    Load->addParamAttr(
+        0, Attribute::getWithAlignment(II->getContext(), Alignment));
+    Load->copyMetadata(*II);
+    return Load;
+  };
+  Value *TrueLoad = CreateLoad(TruePtr, SelectMask, "select.load.true");
+  Value *FalseLoad = CreateLoad(FalsePtr, FalseMask, "select.load.false");
+  Value *Call = Builder.CreateSelect(SelectMask, TrueLoad, FalseLoad);
+
+  Call->takeName(II);
+  II->replaceAllUsesWith(Call);
+  II->eraseFromParent();
+  RecursivelyDeleteTriviallyDeadInstructions(TrueGEP);
+  RecursivelyDeleteTriviallyDeadInstructions(GEP);
+  return true;
+}
+
 bool RISCVGatherScatterLoweringImpl::tryCreateStridedLoadStore(
     IntrinsicInst *II) {
   VectorType *DataType;
@@ -630,9 +762,9 @@ bool RISCVGatherScatterLoweringImpl::run(Function &F) {
     }
   }
 
-  // Rewrite gather/scatter to form strided load/store if possible.
+  // Rewrite gather/scatter to form regular or strided load/store if possible.
   for (auto *II : Worklist)
-    Changed |= tryCreateStridedLoadStore(II);
+    Changed |= tryCreateSelectBaseLoad(II) || tryCreateStridedLoadStore(II);
 
   // Remove any dead phis.
   while (!MaybeDeadPHIs.empty()) {
@@ -650,16 +782,18 @@ bool RISCVGatherScatterLoweringLegacy::runOnFunction(Function &F) {
   auto &TPC = getAnalysis<TargetPassConfig>();
   auto &TM = TPC.getTM<RISCVTargetMachine>();
   auto *ST = &TM.getSubtarget<RISCVSubtarget>(F);
+  auto *TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
   auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  return RISCVGatherScatterLoweringImpl(ST, LI, &F.getDataLayout()).run(F);
+  return RISCVGatherScatterLoweringImpl(ST, TTI, LI, &F.getDataLayout()).run(F);
 }
 
 PreservedAnalyses
 RISCVGatherScatterLoweringPass::run(Function &F, FunctionAnalysisManager &FAM) {
   auto *ST = &TM->getSubtarget<RISCVSubtarget>(F);
+  auto *TTI = &FAM.getResult<TargetIRAnalysis>(F);
   auto *LI = &FAM.getResult<LoopAnalysis>(F);
   bool Changed =
-      RISCVGatherScatterLoweringImpl(ST, LI, &F.getDataLayout()).run(F);
+      RISCVGatherScatterLoweringImpl(ST, TTI, LI, &F.getDataLayout()).run(F);
   if (!Changed)
     return PreservedAnalyses::all();
 

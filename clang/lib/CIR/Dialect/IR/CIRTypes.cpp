@@ -539,8 +539,17 @@ UnionType::verify(function_ref<mlir::InFlightDiagnostic()> emitError,
     return emitError() << "a union member cannot be marked pad";
   if (failed(verifyRecordMemberTypes(emitError, members)))
     return mlir::failure();
-  if (mlir::isa_and_nonnull<cir::VoidType>(padding))
-    return emitError() << "union padding cannot be void";
+  // CIRGen pads a union's tail with a byte or a byte array.  Allowing only
+  // integers keeps the padding a type every consumer can size and lower.
+  if (padding) {
+    mlir::Type unitTy = padding;
+    if (auto arrTy = mlir::dyn_cast<cir::ArrayType>(padding))
+      unitTy = arrTy.getElementType();
+    if (!mlir::isa<cir::IntType>(unitTy))
+      return emitError()
+             << "union padding must be an integer or an array of integers, got "
+             << padding;
+  }
   // Every variant starts at offset zero, so a bit-field variant is an access
   // unit of its own.  There is no run for a zero-width bit-field to end, so a
   // variant always has storage.

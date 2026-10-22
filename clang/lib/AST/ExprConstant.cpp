@@ -22707,6 +22707,13 @@ APSInt Expr::EvaluateKnownConstIntCheckOverflow(
   EvalResult EVResult;
   EVResult.Diag = Diag;
 
+  bool IsConst;
+  if (FastEvaluateAsRValue(this, EVResult.Val, Ctx, IsConst)) {
+    assert(IsConst);
+    assert(EVResult.Val.isInt() && "Expression did not evaluate to integer");
+    return EVResult.Val.getInt();
+  }
+
   if (Ctx.getLangOpts().EnableNewConstInterp) {
     interp::EvalSettings Settings(EvaluationMode::IgnoreSideEffects, EVResult);
     Settings.InConstantContext = true;

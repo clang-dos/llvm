@@ -132,8 +132,8 @@ bool RISCVMCSymbolizer::trySymbolizeLinkerResolvedControlTransfer(
   // relocations. Decode the following JALR and attach a call expression to the
   // AUIPC before function reordering can move the caller relative to the
   // callee.
-  if (Inst.getOpcode() != RISCV::AUIPC || !CreateNewSymbols ||
-      !BC.TheTriple->isRISCV64() || InstOffset + 8 > Function.getSize() ||
+  if (Inst.getOpcode() != RISCV::AUIPC || !BC.TheTriple->isRISCV64() ||
+      InstOffset + 8 > Function.getSize() ||
       Function.getRelocationInRange(InstOffset, InstOffset + 8))
     return false;
 
@@ -165,6 +165,18 @@ bool RISCVMCSymbolizer::trySymbolizeLinkerResolvedControlTransfer(
   // is an intraprocedural long jump and must not be represented as a call.
   if (JALR.getOperand(0).getReg() == RISCV::X0 && TargetBF == &Function)
     return false;
+
+  if (!CreateNewSymbols) {
+    // Retaining the owning function preserves interior targets as well. No
+    // entry point or instruction label is needed in this mode.
+    const MCExpr *Expr = MCSymbolRefExpr::create(TargetBF->getSymbol(), *Ctx);
+    const uint64_t Offset = Target - TargetBF->getAddress();
+    if (Offset)
+      Expr = MCBinaryExpr::createAdd(Expr, MCConstantExpr::create(Offset, *Ctx),
+                                     *Ctx);
+    Inst.addOperand(MCOperand::createExpr(Expr));
+    return true;
+  }
 
   BC.addInterproceduralReference(&Function, Target);
   MCSymbol *TargetSymbol =

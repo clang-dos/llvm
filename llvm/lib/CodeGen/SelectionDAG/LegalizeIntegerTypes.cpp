@@ -6607,6 +6607,21 @@ SDValue DAGTypeLegalizer::PromoteIntOp_CONCAT_VECTORS(SDNode *N) {
   EVT ResVT = N->getValueType(0);
   unsigned NumElems = N->getNumOperands();
 
+  // New legal concat from promoted operands.
+  SDValue PromotedOp0 = GetPromotedInteger(N->getOperand(0));
+  EVT WideVT = PromotedOp0.getValueType().changeVectorElementCount(
+      *DAG.getContext(), ResVT.getVectorElementCount());
+  if (isTypeLegal(WideVT)) {
+    SmallVector<SDValue> PromotedOps;
+    PromotedOps.push_back(PromotedOp0);
+    for (const SDValue &Op : drop_begin(N->ops()))
+      PromotedOps.push_back(GetPromotedInteger(Op));
+
+    SDValue WideConcat =
+        DAG.getNode(ISD::CONCAT_VECTORS, dl, WideVT, PromotedOps);
+    return DAG.getAnyExtOrTrunc(WideConcat, dl, ResVT);
+  }
+
   if (ResVT.isScalableVector()) {
     SDValue ResVec = DAG.getPOISON(ResVT);
 

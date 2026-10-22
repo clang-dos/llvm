@@ -94,6 +94,7 @@ public:
     thumbeb,        // Thumb (big endian): thumbeb
     x86,            // X86: i[3-9]86
     x86_64,         // X86-64: amd64, x86_64
+    i8086,          // X86 16-bit real mode: i8086, i8088, i86, ia16
     xcore,          // XCore: xcore
     xtensa,         // Tensilica: Xtensa
     nvptx,          // NVPTX: 32-bit
@@ -351,7 +352,8 @@ public:
     Firmware,
     QURT,
     H2,
-    LastOSType = H2
+    MSDOS, // MS-DOS and compatibles (16-bit real mode)
+    LastOSType = MSDOS
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -429,6 +431,7 @@ public:
     SPIRV,
     Wasm,
     XCOFF,
+    OMF,
   };
 
 private:
@@ -756,6 +759,9 @@ public:
 
   bool isOSIAMCU() const { return getOS() == Triple::ELFIAMCU; }
 
+  /// Tests whether the OS is MS-DOS.
+  bool isOSMSDOS() const { return getOS() == Triple::MSDOS; }
+
   bool isOSUnknown() const { return getOS() == Triple::UnknownOS; }
 
   bool isGNUEnvironment() const {
@@ -880,6 +886,10 @@ public:
 
   /// Tests whether the OS uses the XCOFF binary format.
   bool isOSBinFormatXCOFF() const { return getObjectFormat() == Triple::XCOFF; }
+
+  /// Tests whether the OS uses the OMF (Intel/Microsoft relocatable object
+  /// module) binary format.
+  bool isOSBinFormatOMF() const { return getObjectFormat() == Triple::OMF; }
 
   /// Tests whether the OS uses the DXContainer binary format.
   bool isOSBinFormatDXContainer() const {
@@ -1194,10 +1204,16 @@ public:
   /// Tests whether the target is SystemZ.
   bool isSystemZ() const { return getArch() == Triple::systemz; }
 
-  /// Tests whether the target is x86 (32- or 64-bit).
+  /// Tests whether the target is x86 (16-, 32- or 64-bit).
   bool isX86() const {
-    return getArch() == Triple::x86 || getArch() == Triple::x86_64;
+    return getArch() == Triple::x86 || getArch() == Triple::x86_64 ||
+           getArch() == Triple::i8086;
   }
+
+  /// Tests whether the target is x86 16-bit real mode with a 16-bit ABI
+  /// (i8086). This is distinct from the CODE16 environment, which keeps the
+  /// 32-bit ABI and only changes the instruction encoding.
+  bool isX86_16() const { return getArch() == Triple::i8086; }
 
   /// Tests whether the target is x86 (32-bit).
   bool isX86_32() const { return getArch() == Triple::x86; }

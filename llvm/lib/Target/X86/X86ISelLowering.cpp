@@ -2965,6 +2965,9 @@ X86TargetLowering::getPreferredVectorAction(MVT VT) const {
 FastISel *X86TargetLowering::createFastISel(
     FunctionLoweringInfo &funcInfo, const TargetLibraryInfo *libInfo,
     const LibcallLoweringInfo *libcallLowering) const {
+  // FastISel assumes a 32-bit or 64-bit ABI.
+  if (Subtarget.isTarget16BitABI())
+    return nullptr;
   return X86::createFastISel(funcInfo, libInfo, libcallLowering);
 }
 

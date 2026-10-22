@@ -1243,6 +1243,7 @@ MCSection *MCObjectFileInfo::getDwarfComdatSection(const char *Name,
   case Triple::SPIRV:
   case Triple::XCOFF:
   case Triple::DXContainer:
+  case Triple::OMF:
   case Triple::UnknownObjectFormat:
     report_fatal_error("Cannot get DWARF comdat section for this object file "
                        "format: not implemented.");

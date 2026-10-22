@@ -92,6 +92,35 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::ELFIAMCU, T.getOS());
   EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
 
+  T = Triple("i8086-pc-msdos");
+  EXPECT_EQ(Triple::i8086, T.getArch());
+  EXPECT_EQ(Triple::PC, T.getVendor());
+  EXPECT_EQ(Triple::MSDOS, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+  EXPECT_EQ(Triple::OMF, T.getObjectFormat());
+  EXPECT_TRUE(T.isX86());
+  EXPECT_TRUE(T.isX86_16());
+  EXPECT_FALSE(T.isX86_32());
+  EXPECT_TRUE(T.isOSMSDOS());
+  EXPECT_TRUE(T.isOSBinFormatOMF());
+
+  T = Triple("ia16-unknown-dos-elf");
+  EXPECT_EQ(Triple::i8086, T.getArch());
+  EXPECT_EQ(Triple::MSDOS, T.getOS());
+  EXPECT_EQ(Triple::ELF, T.getObjectFormat());
+
+  T = Triple("i8088-unknown-unknown");
+  EXPECT_EQ(Triple::i8086, T.getArch());
+  EXPECT_EQ(Triple::ELF, T.getObjectFormat());
+
+  T = Triple("i86-pc-msdos");
+  EXPECT_EQ(Triple::i8086, T.getArch());
+
+  // The CODE16 environment keeps the 32-bit x86 architecture.
+  T = Triple("i386-pc-linux-code16");
+  EXPECT_EQ(Triple::x86, T.getArch());
+  EXPECT_FALSE(T.isX86_16());
+
   T = Triple("i386-pc-hurd-gnu");
   EXPECT_EQ(Triple::x86, T.getArch());
   EXPECT_EQ(Triple::PC, T.getVendor());
@@ -3990,6 +4019,66 @@ TEST(TripleTest, Merge) {
   EXPECT_EQ("amdgpu9-amd-amdhsa",
             Triple(Triple::normalize("x86_64-amd-amdhsa"))
                 .merge(Triple(Triple::normalize("amdgpu9-amd-amdhsa"))));
+}
+
+TEST(TripleTest, X86_16) {
+  Triple T("i8086-pc-msdos");
+  EXPECT_TRUE(T.isArch16Bit());
+  EXPECT_FALSE(T.isArch32Bit());
+  EXPECT_TRUE(T.isLittleEndian());
+  EXPECT_EQ(Triple::x86, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::x86_64, T.get64BitArchVariant().getArch());
+  EXPECT_EQ(Triple::UnknownArch, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(FloatABI::Soft, T.getDefaultFloatABI());
+  EXPECT_EQ(LongDoubleFormat::IEEEdouble, T.getDefaultLongDoubleFormat());
+  EXPECT_EQ("i8086", Triple::getArchTypeName(Triple::i8086));
+  EXPECT_EQ("x86", Triple::getArchTypePrefix(Triple::i8086));
+  EXPECT_EQ("msdos", Triple::getOSTypeName(Triple::MSDOS));
+  EXPECT_EQ("omf", Triple::getObjectFormatTypeName(Triple::OMF));
+  EXPECT_EQ(Triple::i8086, Triple::getArchTypeForLLVMName("i8086"));
+}
+
+TEST(DataLayoutTest, X86_16) {
+  Triple OMF("i8086-pc-msdos");
+  Triple ELF("i8086-unknown-unknown");
+
+  auto PointerLayoutSpecs = [](StringRef DataLayout) {
+    SmallVector<std::string, 8> Specs;
+    for (StringRef Spec : split(DataLayout, '-'))
+      if (Spec.starts_with("p") || Spec.starts_with("P"))
+        Specs.emplace_back(Spec);
+    return Specs;
+  };
+
+  // The default memory model is small.
+  EXPECT_EQ(OMF.computeDataLayout(""), OMF.computeDataLayout("small"));
+  EXPECT_THAT(OMF.computeDataLayout(""), testing::StartsWith("e-m:x-"));
+  EXPECT_THAT(ELF.computeDataLayout(""), testing::StartsWith("e-m:e-"));
+  EXPECT_THAT(OMF.computeDataLayout(""),
+              testing::HasSubstr("-i32:16-i64:16-i128:16-f32:16-f64:16-f80:16-"
+                                 "n8:16-a:0:16-S16"));
+
+  const char *P1 = "p1:16:16", *P2 = "p2:32:16:16:16", *P3 = "p3:32:16:16:32",
+             *P4 = "p4:16:16", *P5 = "p5:32:16:16:16", *P256 = "p256:16:16",
+             *P257 = "p257:16:16", *P258 = "p258:16:16";
+  EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("tiny")),
+              testing::ElementsAre("p:16:16", P1, P2, P3, P4, P5, P256, P257,
+                                   P258, "P4"));
+  EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("small")),
+              testing::ElementsAre("p:16:16", P1, P2, P3, P4, P5, P256, P257,
+                                   P258, "P4"));
+  EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("medium")),
+              testing::ElementsAre("p:16:16", P1, P2, P3, P4, P5, P256, P257,
+                                   P258, "P5"));
+  EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("compact")),
+              testing::ElementsAre("p:32:16:16:16", P1, P2, P3, P4, P5, P256,
+                                   P257, P258, "P4"));
+  EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("large")),
+              testing::ElementsAre("p:32:16:16:16", P1, P2, P3, P4, P5, P256,
+                                   P257, P258, "P5"));
+  EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("huge")),
+              testing::ElementsAre("p:32:16:16:32", P1, P2, P3, P4, P5, P256,
+                                   P257, P258, "P5"));
 }
 
 TEST(DataLayoutTest, UEFI) {

@@ -44,6 +44,22 @@ def FeatureReserveEDI : SubtargetFeature<"reserve-edi", "ReservedRReg[X86::EDI]"
 def FeatureX87     : SubtargetFeature<"x87","HasX87", "true",
                                       "Enable X87 float instructions">;
 
+// CPU levels below the 80386. These only matter for the i8086 triple: on every
+// other triple the subtarget treats all three as enabled. In the i8086 triple,
+// every CPU other than the ones defined with these features below is an 80386
+// or later, and gets Feature386 automatically.
+def Feature186     : SubtargetFeature<"186", "Has186", "true",
+                                      "Enable 80186 instructions (PUSH imm, "
+                                      "IMUL imm, shifts by imm, ENTER/LEAVE, "
+                                      "PUSHA/POPA, INS/OUTS, BOUND)">;
+def Feature286     : SubtargetFeature<"286", "Has286", "true",
+                                      "Enable 80286 instructions",
+                                      [Feature186]>;
+def Feature386     : SubtargetFeature<"386", "Has386", "true",
+                                      "Enable 80386 instructions and 32-bit "
+                                      "registers in 16-bit code",
+                                      [Feature286]>;
+
 // Does not have intrinsics or ABI effects.
 def FeatureNOPL    : SubtargetFeature<"nopl", "HasNOPL", "true",
                                       "Enable NOPL instruction (generally pentium pro+)",
@@ -1915,6 +1931,17 @@ def : ProcModel<"generic", SandyBridgeModel,
                  TuningFastScalarFSQRT,
                  TuningFast15ByteNOP,
                  TuningInsertVZEROUPPER]>;
+
+// 16-bit CPUs, for the i8086 triple. The x87 coprocessor (8087/287) is
+// optional on these, so it is not enabled by default.
+def : Proc<"i8086",           [], [TuningSlowUAMem16]>;
+def : Proc<"i8088",           [], [TuningSlowUAMem16]>;
+def : Proc<"i186",            [Feature186], [TuningSlowUAMem16]>;
+def : ProcessorAlias<"i80186", "i186">;
+def : Proc<"v20",             [Feature186], [TuningSlowUAMem16]>;
+def : Proc<"v30",             [Feature186], [TuningSlowUAMem16]>;
+def : Proc<"i286",            [Feature286], [TuningSlowUAMem16]>;
+def : ProcessorAlias<"i80286", "i286">;
 
 def : Proc<"i386",            [FeatureX87],
                               [TuningSlowUAMem16, TuningInsertVZEROUPPER]>;

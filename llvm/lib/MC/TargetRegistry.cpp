@@ -90,6 +90,8 @@ MCStreamer *Target::createMCObjectStreamer(
     S = createDXContainerStreamer(Ctx, std::move(TAB), std::move(OW),
                                   std::move(Emitter));
     break;
+  case Triple::OMF:
+    reportFatalUsageError("the OMF object file format is not supported yet");
   }
   if (ObjectTargetStreamerCtorFn)
     ObjectTargetStreamerCtorFn(*S, STI);

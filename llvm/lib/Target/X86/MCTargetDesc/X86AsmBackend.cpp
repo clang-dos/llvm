@@ -766,6 +766,11 @@ void X86AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
 bool X86AsmBackend::mayNeedRelaxation(unsigned Opcode,
                                       ArrayRef<MCOperand> Operands,
                                       const MCSubtargetInfo &STI) const {
+  // Before the 80386 there is no Jcc rel16, so a short conditional branch
+  // can't be relaxed to one. An out-of-range Jcc then gives a fixup error.
+  // FIXME: relax to an inverted Jcc over a near JMP instead.
+  if (Opcode == X86::JCC_1 && X86_MC::isPre386Subtarget(STI))
+    return false;
   unsigned SkipOperands = X86::isCCMPCC(Opcode) ? 2 : 0;
   return isRelaxableBranch(Opcode) ||
          (X86::getOpcodeForLongImmediateForm(Opcode) != Opcode &&

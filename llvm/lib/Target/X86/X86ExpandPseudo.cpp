@@ -419,7 +419,9 @@ bool X86ExpandPseudoImpl::expandMI(MachineBasicBlock &MBB,
     int64_t StackAdj = MBBI->getOperand(0).getImm();
     X86FL->emitSPUpdate(MBB, MBBI, DL, StackAdj, true);
     // Replace pseudo with machine iret
-    unsigned RetOp = STI->is64Bit() ? X86::IRET64 : X86::IRET32;
+    unsigned RetOp = STI->is64Bit()            ? X86::IRET64
+                     : STI->isTarget16BitABI() ? X86::IRET16
+                                               : X86::IRET32;
     // Use UIRET if UINTR is present (except for building kernel)
     if (STI->is64Bit() && STI->hasUINTR() &&
         MBB.getParent()->getTarget().getCodeModel() != CodeModel::Kernel)
@@ -434,13 +436,17 @@ bool X86ExpandPseudoImpl::expandMI(MachineBasicBlock &MBB,
     MachineInstrBuilder MIB;
     if (StackAdj == 0) {
       MIB = BuildMI(MBB, MBBI, DL,
-                    TII->get(STI->is64Bit() ? X86::RET64 : X86::RET32));
+                    TII->get(STI->is64Bit()            ? X86::RET64
+                             : STI->isTarget16BitABI() ? X86::RET16
+                                                       : X86::RET32));
     } else if (isUInt<16>(StackAdj)) {
       MIB = BuildMI(MBB, MBBI, DL,
-                    TII->get(STI->is64Bit() ? X86::RETI64 : X86::RETI32))
+                    TII->get(STI->is64Bit()            ? X86::RETI64
+                             : STI->isTarget16BitABI() ? X86::RETI16
+                                                       : X86::RETI32))
                 .addImm(StackAdj);
     } else {
-      assert(!STI->is64Bit() &&
+      assert(!STI->is64Bit() && !STI->isTarget16BitABI() &&
              "shouldn't need to do this for x86_64 targets!");
       // A ret can only handle immediates as big as 2**16-1.  If we need to pop
       // off bytes before the return address, we must do it manually.

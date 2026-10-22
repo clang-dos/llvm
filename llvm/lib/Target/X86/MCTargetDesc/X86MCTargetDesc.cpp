@@ -21,6 +21,7 @@
 #include "X86TargetStreamer.h"
 #include "llvm-c/Visibility.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/DebugInfo/CodeView/CodeView.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstrAnalysis.h"
@@ -56,6 +57,8 @@ std::string X86_MC::ParseX86Triple(const Triple &TT) {
   // explicitly.
   if (TT.isX86_64())
     FS = "+64bit-mode,-32bit-mode,-16bit-mode,+sse2";
+  else if (TT.isX86_16())
+    FS = "-64bit-mode,-32bit-mode,+16bit-mode";
   else if (TT.getEnvironment() != Triple::CODE16)
     FS = "-64bit-mode,+32bit-mode,-16bit-mode";
   else
@@ -460,6 +463,129 @@ void X86_MC::initLLVMToSEHAndCVRegMapping(MCRegisterInfo *MRI) {
     MRI->mapLLVMRegToCVReg(I.Reg, static_cast<int>(I.CVReg));
 }
 
+static bool isPre386CPUName(StringRef CPU) {
+  return StringSwitch<bool>(CPU)
+      .Cases(
+          {"i8086", "i8088", "i186", "i80186", "v20", "v30", "i286", "i80286"},
+          true)
+      .Default(false);
+}
+
+void X86_MC::adjustX86_16CPUAndFeatures(const Triple &TT, StringRef &CPU,
+                                        std::string &FS) {
+  if (!TT.isX86_16())
+    return;
+  if (CPU.empty() || CPU == "generic")
+    CPU = "i8086";
+  // Every CPU that is not one of the 16-bit ones is an 80386 or later.
+  if (!isPre386CPUName(CPU))
+    FS += FS.empty() ? "+386" : ",+386";
+}
+
+X86_MC::CPULevel16 X86_MC::getCPULevel16(const MCSubtargetInfo &STI) {
+  if (!STI.getTargetTriple().isX86_16() || STI.hasFeature(X86::Feature386))
+    return CPULevel16::I386;
+  if (STI.hasFeature(X86::Feature286))
+    return CPULevel16::I286;
+  if (STI.hasFeature(X86::Feature186))
+    return CPULevel16::I186;
+  return CPULevel16::I8086;
+}
+
+bool X86_MC::isPre386Subtarget(const MCSubtargetInfo &STI) {
+  return getCPULevel16(STI) != CPULevel16::I386;
+}
+
+StringRef X86_MC::getCPULevel16Name(CPULevel16 Level) {
+  switch (Level) {
+  case CPULevel16::I8086:
+    return "8086";
+  case CPULevel16::I186:
+    return "80186";
+  case CPULevel16::I286:
+    return "80286";
+  case CPULevel16::I386:
+    return "80386";
+  }
+  llvm_unreachable("unknown CPU level");
+}
+
+X86_MC::CPULevel16 X86_MC::getRequiredCPULevel16(const MCInst &MI,
+                                                 const MCInstrInfo &MCII) {
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  uint64_t TSFlags = Desc.TSFlags;
+
+  // Pseudos never reach the encoder.
+  if ((TSFlags & X86II::FormMask) == X86II::Pseudo)
+    return CPULevel16::I8086;
+
+  // VEX, XOP and EVEX encodings, 32-bit operand size, 32-bit address size and
+  // REX.W all need at least an 80386. (Feature checks elsewhere reject most
+  // of these much earlier.)
+  if ((TSFlags & X86II::EncodingMask) != X86II::LEGACY ||
+      (TSFlags & X86II::OpSizeMask) == X86II::OpSize32 ||
+      (TSFlags & X86II::AdSizeMask) == X86II::AdSize32 ||
+      (TSFlags & X86II::REX_W))
+    return CPULevel16::I386;
+
+  // 32-bit and 64-bit registers, FS and GS, control and debug registers.
+  for (const MCOperand &Op : MI) {
+    if (!Op.isReg() || !Op.getReg())
+      continue;
+    MCRegister Reg = Op.getReg();
+    if (getX86MCRegisterClass(X86::GR32RegClassID).contains(Reg) ||
+        getX86MCRegisterClass(X86::GR64RegClassID).contains(Reg) ||
+        getX86MCRegisterClass(X86::CONTROL_REGRegClassID).contains(Reg) ||
+        getX86MCRegisterClass(X86::DEBUG_REGRegClassID).contains(Reg) ||
+        Reg == X86::FS || Reg == X86::GS)
+      return CPULevel16::I386;
+  }
+
+  uint8_t Opcode = X86II::getBaseOpcodeFor(TSFlags);
+  switch (TSFlags & X86II::OpMapMask) {
+  case X86II::OB:
+    switch (Opcode) {
+    case 0x60: // PUSHA
+    case 0x61: // POPA
+    case 0x62: // BOUND
+    case 0x68: // PUSH imm16
+    case 0x69: // IMUL r, r/m, imm16
+    case 0x6A: // PUSH imm8
+    case 0x6B: // IMUL r, r/m, imm8
+    case 0x6C: // INSB
+    case 0x6D: // INSW
+    case 0x6E: // OUTSB
+    case 0x6F: // OUTSW
+    case 0xC0: // shift/rotate r/m8, imm8
+    case 0xC1: // shift/rotate r/m16, imm8
+    case 0xC8: // ENTER
+    case 0xC9: // LEAVE
+      return CPULevel16::I186;
+    case 0x63: // ARPL
+      return CPULevel16::I286;
+    default:
+      return CPULevel16::I8086;
+    }
+  case X86II::TB:
+    // The 8086 has no two-byte opcodes (0F is POP CS). The 80286 added the
+    // protected-mode system instructions; everything else in the 0F map is
+    // 80386 or later, including Jcc rel16, SETcc, MOVZX and MOVSX.
+    switch (Opcode) {
+    case 0x00: // SLDT, STR, LLDT, LTR, VERR, VERW
+    case 0x01: // SGDT, SIDT, LGDT, LIDT, SMSW, LMSW
+    case 0x02: // LAR
+    case 0x03: // LSL
+    case 0x05: // LOADALL (80286)
+    case 0x06: // CLTS
+      return CPULevel16::I286;
+    default:
+      return CPULevel16::I386;
+    }
+  default:
+    return CPULevel16::I386;
+  }
+}
+
 MCSubtargetInfo *X86_MC::createX86MCSubtargetInfo(const Triple &TT,
                                                   StringRef CPU, StringRef FS) {
   std::string ArchFS = X86_MC::ParseX86Triple(TT);
@@ -467,6 +593,7 @@ MCSubtargetInfo *X86_MC::createX86MCSubtargetInfo(const Triple &TT,
   if (!FS.empty())
     ArchFS = (Twine(ArchFS) + "," + FS).str();
 
+  X86_MC::adjustX86_16CPUAndFeatures(TT, CPU, ArchFS);
   if (CPU.empty())
     CPU = "generic";
 
@@ -807,7 +934,8 @@ createX86MCLFIRewriter(MCContext &Ctx,
 // Force static initialization.
 extern "C" LLVM_C_ABI void LLVMInitializeX86TargetMC() {
   static opt::RegisterLibraryOptions<X86MCOptions> O;
-  for (Target *T : {&getTheX86_32Target(), &getTheX86_64Target()}) {
+  for (Target *T :
+       {&getTheX86_32Target(), &getTheX86_64Target(), &getTheX86_16Target()}) {
     // Register the MC asm info.
     RegisterMCAsmInfoFn X(*T, createX86MCAsmInfo);
 
@@ -855,6 +983,8 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86TargetMC() {
                                        createX86_32AsmBackend);
   TargetRegistry::RegisterMCAsmBackend(getTheX86_64Target(),
                                        createX86_64AsmBackend);
+  TargetRegistry::RegisterMCAsmBackend(getTheX86_16Target(),
+                                       createX86_32AsmBackend);
 }
 
 MCRegister llvm::getX86SubSuperRegister(MCRegister Reg, unsigned Size,

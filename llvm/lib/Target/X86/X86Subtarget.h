@@ -316,6 +316,14 @@ public:
   bool isTargetMusl() const { return TargetTriple.isMusl(); }
   bool isTargetAndroid() const { return TargetTriple.isAndroid(); }
   bool isTargetMCU() const { return TargetTriple.isOSIAMCU(); }
+
+  /// Whether this is the i8086 target: 16-bit real mode with a 16-bit ABI
+  /// (16-bit int and near pointers). Unlike the CODE16 environment, which
+  /// keeps the 32-bit ABI and only changes the encoding.
+  bool isTarget16BitABI() const { return TargetTriple.isX86_16(); }
+
+  /// Whether instructions are limited to a CPU older than the 80386.
+  bool isPre386() const { return !Has386; }
   bool isTargetFuchsia() const { return TargetTriple.isOSFuchsia(); }
 
   bool isLFI() const { return TargetTriple.isLFI(); }

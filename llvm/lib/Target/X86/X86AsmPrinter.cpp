@@ -1161,6 +1161,7 @@ INITIALIZE_PASS(X86AsmPrinter, "x86-asm-printer", "X86 Assembly Printer", false,
 extern "C" LLVM_C_ABI void LLVMInitializeX86AsmPrinter() {
   RegisterAsmPrinter<X86AsmPrinter> X(getTheX86_32Target());
   RegisterAsmPrinter<X86AsmPrinter> Y(getTheX86_64Target());
+  RegisterAsmPrinter<X86AsmPrinter> Z(getTheX86_16Target());
 }
 
 PreservedAnalyses X86AsmPrinterBeginPass::run(Module &M,

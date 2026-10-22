@@ -47,6 +47,7 @@
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Triple.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 #include "llvm/Transforms/CFGuard.h"
 #include <memory>
 #include <optional>
@@ -57,6 +58,7 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86Target() {
   // Register the target.
   RegisterTargetMachine<X86TargetMachine> X(getTheX86_32Target());
   RegisterTargetMachine<X86TargetMachine> Y(getTheX86_64Target());
+  RegisterTargetMachine<X86TargetMachine> Z(getTheX86_16Target());
   static opt::RegisterLibraryOptions<X86Options> O;
 
   PassRegistry &PR = *PassRegistry::getPassRegistry();
@@ -195,6 +197,15 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
   if (TT.isPS() || TT.isOSBinFormatMachO()) {
     this->Options.TrapUnreachable = true;
     this->Options.NoTrapAfterNoreturn = TT.isOSBinFormatMachO();
+  }
+
+  // On i8086 the target ABI name is the memory model.
+  if (TT.isX86_16()) {
+    StringRef ABIName = Options.MCOptions.getABIName();
+    if (!X86::parseMemoryModel16(ABIName))
+      reportFatalUsageError("unknown i8086 memory model '" + ABIName +
+                            "'; expected tiny, small, medium, compact, "
+                            "large or huge");
   }
 
   setMachineOutliner(true);

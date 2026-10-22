@@ -132,6 +132,20 @@ void X86AsmPrinter::StackMapShadowTracker::emitShadowPadding(
 }
 
 void X86AsmPrinter::EmitAndCountInstruction(MCInst &Inst) {
+  // On the i8086 target, refuse to emit an instruction the selected CPU does
+  // not have. Emitting it would be a silent miscompile.
+  if (Subtarget && Subtarget->isTarget16BitABI() && Subtarget->isPre386()) {
+    X86_MC::CPULevel16 Need =
+        X86_MC::getRequiredCPULevel16(Inst, *Subtarget->getInstrInfo());
+    X86_MC::CPULevel16 Have = X86_MC::getCPULevel16(*Subtarget);
+    if (Need > Have)
+      OutContext.reportError(
+          SMLoc(), Twine("generated instruction '") +
+                       Subtarget->getInstrInfo()->getName(Inst.getOpcode()) +
+                       "' requires an " + X86_MC::getCPULevel16Name(Need) +
+                       " or later CPU, but the target CPU is an " +
+                       X86_MC::getCPULevel16Name(Have));
+  }
   OutStreamer->emitInstruction(Inst, getSubtargetInfo());
   SMShadowTracker.count(Inst, getSubtargetInfo(), CodeEmitter.get());
 }
@@ -327,6 +341,8 @@ MCOperand X86MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
 }
 
 static unsigned getRetOpcode(const X86Subtarget &Subtarget) {
+  if (Subtarget.isTarget16BitABI())
+    return X86::RET16;
   return Subtarget.is64Bit() ? X86::RET64 : X86::RET32;
 }
 

@@ -1045,8 +1045,10 @@ unsigned X86RegisterInfo::findDeadCallerSavedReg(
     return 0;
   case TargetOpcode::PATCHABLE_RET:
   case X86::RET:
+  case X86::RET16:
   case X86::RET32:
   case X86::RET64:
+  case X86::RETI16:
   case X86::RETI32:
   case X86::RETI64:
   case X86::TCRETURNdi:

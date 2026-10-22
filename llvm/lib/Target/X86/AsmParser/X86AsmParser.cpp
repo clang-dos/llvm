@@ -4113,6 +4113,7 @@ bool X86AsmParser::validateInstruction(MCInst &Inst, const OperandVector &Ops) {
   const MCRegisterInfo *MRI = getContext().getRegisterInfo();
   unsigned Opcode = Inst.getOpcode();
   uint64_t TSFlags = MII.get(Opcode).TSFlags;
+
   if (isVFCMADDCPH(Opcode) || isVFCMADDCSH(Opcode) || isVFMADDCPH(Opcode) ||
       isVFMADDCSH(Opcode)) {
     MCRegister Dest = Inst.getOperand(0).getReg();
@@ -4333,6 +4334,20 @@ void X86AsmParser::applyLVILoadHardeningMitigation(MCInst &Inst,
 
 void X86AsmParser::emitInstruction(MCInst &Inst, OperandVector &Operands,
                                    MCStreamer &Out) {
+  // The i8086 target rejects instructions newer than the selected CPU. This
+  // runs after processInstruction, which may pick a shorter, older encoding
+  // (for example SHL r, 1 instead of SHL r, imm8).
+  if (X86_MC::isPre386Subtarget(getSTI())) {
+    X86_MC::CPULevel16 Need = X86_MC::getRequiredCPULevel16(Inst, MII);
+    X86_MC::CPULevel16 Have = X86_MC::getCPULevel16(getSTI());
+    if (Need > Have) {
+      Error(Operands[0]->getStartLoc(), Twine("instruction requires an ") +
+                                            X86_MC::getCPULevel16Name(Need) +
+                                            " or later CPU");
+      return;
+    }
+  }
+
   if (CLOpts.experimental_lvi_inline_asm_hardening &&
       getSTI().hasFeature(X86::FeatureLVIControlFlowIntegrity))
     applyLVICFIMitigation(Inst, Out);
@@ -5378,6 +5393,7 @@ bool X86AsmParser::parseDirectiveSEHPushFrame(SMLoc Loc) {
 extern "C" LLVM_C_ABI void LLVMInitializeX86AsmParser() {
   RegisterMCAsmParser<X86AsmParser> X(getTheX86_32Target());
   RegisterMCAsmParser<X86AsmParser> Y(getTheX86_64Target());
+  RegisterMCAsmParser<X86AsmParser> Z(getTheX86_16Target());
 }
 
 #define GET_MATCHER_IMPLEMENTATION

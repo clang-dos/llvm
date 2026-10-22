@@ -79,4 +79,6 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86TargetMCA() {
                                            createX86InstrPostProcess);
   TargetRegistry::RegisterInstrPostProcess(getTheX86_64Target(),
                                            createX86InstrPostProcess);
+  TargetRegistry::RegisterInstrPostProcess(getTheX86_16Target(),
+                                           createX86InstrPostProcess);
 }

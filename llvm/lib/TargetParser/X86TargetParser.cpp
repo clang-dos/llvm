@@ -829,3 +829,33 @@ unsigned llvm::X86::getFeaturePriority(ProcessorFeatures Feat) {
     llvm_unreachable("No Feature Priority for non-CPUSupports Features");
   }
 }
+
+std::optional<X86::MemoryModel16> X86::parseMemoryModel16(StringRef Name) {
+  return StringSwitch<std::optional<MemoryModel16>>(Name)
+      .Case("", MemoryModel16::Small)
+      .Case("tiny", MemoryModel16::Tiny)
+      .Case("small", MemoryModel16::Small)
+      .Case("medium", MemoryModel16::Medium)
+      .Case("compact", MemoryModel16::Compact)
+      .Case("large", MemoryModel16::Large)
+      .Case("huge", MemoryModel16::Huge)
+      .Default(std::nullopt);
+}
+
+StringRef X86::getMemoryModel16Name(MemoryModel16 Model) {
+  switch (Model) {
+  case MemoryModel16::Tiny:
+    return "tiny";
+  case MemoryModel16::Small:
+    return "small";
+  case MemoryModel16::Medium:
+    return "medium";
+  case MemoryModel16::Compact:
+    return "compact";
+  case MemoryModel16::Large:
+    return "large";
+  case MemoryModel16::Huge:
+    return "huge";
+  }
+  llvm_unreachable("unknown memory model");
+}

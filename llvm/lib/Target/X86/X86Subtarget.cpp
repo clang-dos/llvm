@@ -244,6 +244,12 @@ bool X86Subtarget::isLegalToCallImmediateAddr() const {
 
 void X86Subtarget::initSubtargetFeatures(StringRef CPU, StringRef TuneCPU,
                                          StringRef FS) {
+  std::string FS16;
+  if (TargetTriple.isX86_16()) {
+    FS16 = FS.str();
+    X86_MC::adjustX86_16CPUAndFeatures(TargetTriple, CPU, FS16);
+    FS = FS16;
+  }
   if (CPU.empty())
     CPU = "generic";
 
@@ -267,6 +273,10 @@ void X86Subtarget::initSubtargetFeatures(StringRef CPU, StringRef TuneCPU,
   // Parse features string and set the CPU.
   ParseSubtargetFeatures(CPU, TuneCPU, FullFS);
 
+  // The pre-386 CPU levels only restrict the i8086 triple.
+  if (!TargetTriple.isX86_16())
+    Has186 = Has286 = Has386 = true;
+
   // All CPUs that implement SSE4.2 or SSE4A support unaligned accesses of
   // 16-bytes and under that are reasonably fast. These features were
   // introduced with Intel's Nehalem/Silvermont and AMD's Family10h
@@ -288,6 +298,8 @@ void X86Subtarget::initSubtargetFeatures(StringRef CPU, StringRef TuneCPU,
   // following the i386 psABI, while on Illumos it is always 16 bytes.
   if (StackAlignOverride)
     stackAlignment = *StackAlignOverride;
+  else if (isTarget16BitABI())
+    stackAlignment = Align(2);
   else if (isTargetDarwin() || isTargetLinux() || isTargetKFreeBSD() ||
            isTargetHurd() || Is64Bit)
     stackAlignment = Align(16);

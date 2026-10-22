@@ -19,6 +19,10 @@ Target &llvm::getTheX86_64Target() {
   static Target TheX86_64Target;
   return TheX86_64Target;
 }
+Target &llvm::getTheX86_16Target() {
+  static Target TheX86_16Target;
+  return TheX86_16Target;
+}
 
 extern "C" LLVM_C_ABI void LLVMInitializeX86TargetInfo() {
   RegisterTarget<Triple::x86, /*HasJIT=*/true> X(
@@ -26,4 +30,7 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86TargetInfo() {
 
   RegisterTarget<Triple::x86_64, /*HasJIT=*/true> Y(
       getTheX86_64Target(), "x86-64", "64-bit X86: EM64T and AMD64", "X86");
+
+  RegisterTarget<Triple::i8086, /*HasJIT=*/false> Z(
+      getTheX86_16Target(), "i8086", "16-bit X86: 8086 real mode", "X86");
 }

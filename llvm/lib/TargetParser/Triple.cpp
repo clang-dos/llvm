@@ -157,6 +157,8 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
     return "wasm64";
   case x86:
     return "i386";
+  case i8086:
+    return "i8086";
   case x86_64:
     return "x86_64";
   case xcore:
@@ -315,6 +317,7 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
 
   case x86:
   case x86_64:
+  case i8086:
     return "x86";
 
   case xcore:
@@ -431,6 +434,8 @@ StringRef Triple::getObjectFormatTypeName(ObjectFormatType Kind) {
     return "wasm";
   case XCOFF:
     return "xcoff";
+  case OMF:
+    return "omf";
   case DXContainer:
     return "dxcontainer";
   case SPIRV:
@@ -500,6 +505,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
       .Case("x86", x86)
       .Case("i386", x86)
       .Case("x86-64", x86_64)
+      .Case("i8086", i8086)
       .Case("xcore", xcore)
       .Case("nvptx", nvptx)
       .Case("nvptx64", nvptx64)
@@ -600,6 +606,7 @@ Triple::ArchType Triple::parseArch(StringRef ArchName) {
           // FIXME: Do we need to support these?
           .Cases({"i786", "i886", "i986"}, Triple::x86)
           .Cases({"amd64", "x86_64", "x86_64h", "x86_64_lfi"}, Triple::x86_64)
+          .Cases({"i8086", "i8088", "i86", "ia16"}, Triple::i8086)
           .Cases({"powerpc", "powerpcspe", "ppc", "ppc32"}, Triple::ppc)
           .Cases({"powerpcle", "ppcle", "ppc32le"}, Triple::ppcle)
           .Cases({"powerpc64", "ppu", "ppc64"}, Triple::ppc64)
@@ -729,6 +736,7 @@ static Triple::ObjectFormatType parseFormat(StringRef EnvironmentName) {
       .EndsWith("macho", Triple::MachO)
       .EndsWith("wasm", Triple::Wasm)
       .EndsWith("spirv", Triple::SPIRV)
+      .EndsWith("omf", Triple::OMF)
       .Default(Triple::UnknownObjectFormat);
 }
 
@@ -1028,6 +1036,11 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::systemz:
     if (T.isOSzOS())
       return Triple::GOFF;
+    return Triple::ELF;
+
+  case Triple::i8086:
+    if (T.isOSMSDOS())
+      return Triple::OMF;
     return Triple::ELF;
 
   case Triple::wasm32:
@@ -1739,6 +1752,7 @@ unsigned Triple::getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
 
   case llvm::Triple::avr:
   case llvm::Triple::msp430:
+  case llvm::Triple::i8086:
     return 16;
 
   case llvm::Triple::aarch64_32:
@@ -1946,6 +1960,7 @@ Triple Triple::get32BitArchVariant() const {
     T.setArch(Triple::wasm32);
     break;
   case Triple::x86_64:
+  case Triple::i8086:
     T.setArch(Triple::x86);
     break;
   }
@@ -2066,6 +2081,7 @@ Triple Triple::get64BitArchVariant() const {
     T.setArch(Triple::wasm64);
     break;
   case Triple::x86:
+  case Triple::i8086:
     T.setArch(Triple::x86_64);
     break;
   }
@@ -2107,6 +2123,7 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::wasm64:
   case Triple::x86:
   case Triple::x86_64:
+  case Triple::i8086:
   case Triple::xcore:
   case Triple::ve:
   case Triple::csky:
@@ -2255,6 +2272,7 @@ bool Triple::isLittleEndian() const {
   case Triple::wasm64:
   case Triple::x86:
   case Triple::x86_64:
+  case Triple::i8086:
   case Triple::xcore:
   case Triple::xtensa:
     return true;
@@ -2542,7 +2560,7 @@ FloatABI::ABIType Triple::getDefaultFloatABI(StringRef ABIName) const {
   if (isMIPS())
     return isOSFreeBSD() ? FloatABI::Soft : FloatABI::Hard;
 
-  if (isCSKY() || isAVR() || getArch() == msp430)
+  if (isCSKY() || isAVR() || getArch() == msp430 || isX86_16())
     return FloatABI::Soft;
 
   // Most targets use hard float unless soft float is explicitly requested.
@@ -2590,6 +2608,9 @@ LongDoubleFormat Triple::getDefaultLongDoubleFormat() const {
     if (isWindowsMSVCEnvironment() || isUEFI())
       return LongDoubleFormat::IEEEdouble;
     return LongDoubleFormat::X87DoubleExtended;
+  case i8086:
+    // 16-bit DOS defaults to soft float, where long double is plain double.
+    return LongDoubleFormat::IEEEdouble;
   case aarch64:
   case aarch64_be:
   case aarch64_32:

@@ -9,6 +9,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/TargetParser/ARMTargetParser.h"
 #include "llvm/TargetParser/Triple.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 using namespace llvm;
 
 static StringRef getManglingComponent(const Triple &T) {
@@ -388,6 +389,43 @@ static std::string computeX86DataLayout(const Triple &TT) {
   return Ret;
 }
 
+// The i8086 (16-bit real mode) data layout depends on the memory model, which
+// is passed as the ABI name. Address spaces are described in
+// X86TargetParser.h (X86::AddressSpace16). Far pointers are 32 bits with a
+// 16-bit index: getelementptr only changes the offset half, which is how
+// 8086 far pointers behave. Huge pointers have a 32-bit index and need
+// explicit lowering, because their arithmetic carries into the segment.
+static std::string computeX86_16DataLayout(const Triple &TT,
+                                           StringRef ABIName) {
+  X86::MemoryModel16 Model =
+      X86::parseMemoryModel16(ABIName).value_or(X86::MemoryModel16::Small);
+
+  std::string Ret = "e";
+  // OMF objects use the Microsoft and Borland convention of a leading
+  // underscore on C symbols.
+  Ret += TT.isOSBinFormatOMF() ? "-m:x" : "-m:e";
+
+  // Default data pointer.
+  if (Model == X86::MemoryModel16::Huge)
+    Ret += "-p:32:16:16:32";
+  else if (X86::isFarDataModel16(Model))
+    Ret += "-p:32:16:16:16";
+  else
+    Ret += "-p:16:16";
+
+  // near data, far data, huge data, near code, far code.
+  Ret += "-p1:16:16-p2:32:16:16:16-p3:32:16:16:32-p4:16:16-p5:32:16:16:16";
+  // GS-, FS- and SS-relative offsets.
+  Ret += "-p256:16:16-p257:16:16-p258:16:16";
+
+  Ret += "-i32:16-i64:16-i128:16-f32:16-f64:16-f80:16";
+  Ret += "-n8:16-a:0:16-S16";
+
+  // Functions live in the near or far code address space.
+  Ret += X86::isFarCodeModel16(Model) ? "-P5" : "-P4";
+  return Ret;
+}
+
 static std::string computeNVPTXDataLayout(const Triple &T, StringRef ABIName) {
   if (T.getArch() == Triple::nvptx)
     return "e-p:32:32-i64:64-i128:128-i256:256-v16:16-v32:32-n16:32:64";
@@ -543,6 +581,8 @@ std::string Triple::computeDataLayout(StringRef ABIName) const {
   case Triple::x86:
   case Triple::x86_64:
     return computeX86DataLayout(*this);
+  case Triple::i8086:
+    return computeX86_16DataLayout(*this, ABIName);
   case Triple::xcore:
     return "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32";
   case Triple::xtensa:

@@ -2431,4 +2431,6 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86Disassembler() {
                                          createX86Disassembler);
   TargetRegistry::RegisterMCDisassembler(getTheX86_64Target(),
                                          createX86Disassembler);
+  TargetRegistry::RegisterMCDisassembler(getTheX86_16Target(),
+                                         createX86Disassembler);
 }

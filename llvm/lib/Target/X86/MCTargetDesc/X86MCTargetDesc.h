@@ -66,6 +66,28 @@ void initLLVMToSEHAndCVRegMapping(MCRegisterInfo *MRI);
 /// Returns true if this instruction has a LOCK prefix.
 bool hasLockPrefix(const MCInst &MI);
 
+/// For the i8086 triple, pick the default CPU (i8086) and add the CPU-level
+/// features implied by CPUs that are 80386 or later. Does nothing for other
+/// triples.
+void adjustX86_16CPUAndFeatures(const Triple &TT, StringRef &CPU,
+                                std::string &FS);
+
+/// The oldest CPU that can run an instruction in 16-bit real mode.
+enum class CPULevel16 { I8086, I186, I286, I386 };
+
+/// Returns the oldest CPU that can run \p MI. Only meaningful in 16-bit mode.
+CPULevel16 getRequiredCPULevel16(const MCInst &MI, const MCInstrInfo &MCII);
+
+/// Returns the CPU level that \p STI allows.
+CPULevel16 getCPULevel16(const MCSubtargetInfo &STI);
+
+/// Returns a printable name for \p Level ("8086", "80186", ...).
+StringRef getCPULevel16Name(CPULevel16 Level);
+
+/// Whether \p STI restricts instructions to a pre-386 CPU level. This is only
+/// true for the i8086 triple with a 8086, 80186 or 80286 CPU.
+bool isPre386Subtarget(const MCSubtargetInfo &STI);
+
 /// \param Op operand # of the memory operand.
 ///
 /// \returns true if the specified instruction has a 16-bit memory operand.

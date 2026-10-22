@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Compiler.h"
 #include <array>
+#include <optional>
 
 namespace llvm {
 template <typename T> class SmallVectorImpl;
@@ -176,6 +177,48 @@ LLVM_ABI bool validateCPUSpecificCPUDispatch(StringRef Name);
 LLVM_ABI std::array<uint32_t, 4>
 getCpuSupportsMask(ArrayRef<StringRef> FeatureStrs);
 LLVM_ABI unsigned getFeaturePriority(ProcessorFeatures Feat);
+
+/// Memory models of the 16-bit real-mode (i8086) target. The memory model
+/// decides the default size of code and data pointers, and so the data
+/// layout. It is passed as the target ABI name.
+enum class MemoryModel16 {
+  Tiny,    // Near code and data, all in one 64 KB group (.COM files).
+  Small,   // Near code, near data.
+  Medium,  // Far code, near data.
+  Compact, // Near code, far data.
+  Large,   // Far code, far data.
+  Huge,    // Far code, huge (normalized) data.
+};
+
+/// Parse an i8086 memory model name ("tiny", "small", ...). An empty name
+/// means the default, small. Returns std::nullopt for an unknown name.
+LLVM_ABI std::optional<MemoryModel16> parseMemoryModel16(StringRef Name);
+
+/// Returns the canonical name of \p Model.
+LLVM_ABI StringRef getMemoryModel16Name(MemoryModel16 Model);
+
+/// Whether code pointers and calls are far (32-bit segment:offset) by default.
+inline bool isFarCodeModel16(MemoryModel16 Model) {
+  return Model == MemoryModel16::Medium || Model == MemoryModel16::Large ||
+         Model == MemoryModel16::Huge;
+}
+
+/// Whether data pointers are far or huge (32-bit) by default.
+inline bool isFarDataModel16(MemoryModel16 Model) {
+  return Model == MemoryModel16::Compact || Model == MemoryModel16::Large ||
+         Model == MemoryModel16::Huge;
+}
+
+/// Address spaces of the i8086 target. Address space 0 means the default data
+/// pointer of the current memory model.
+enum AddressSpace16 : unsigned {
+  AS16_Default = 0,
+  AS16_NearData = 1, // 16-bit offset in DGROUP (DS-relative).
+  AS16_FarData = 2,  // 32-bit seg:off, arithmetic on the offset only.
+  AS16_HugeData = 3, // 32-bit seg:off, normalized, 20-bit arithmetic.
+  AS16_NearCode = 4, // 16-bit CS-relative offset; near functions.
+  AS16_FarCode = 5,  // 32-bit seg:off of a far function.
+};
 
 } // namespace X86
 } // namespace llvm

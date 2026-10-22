@@ -792,6 +792,8 @@ private:
                                              TargetAllocTy Kind);
   MemoryManagerTy *getHostMemoryManager();
 
+  MemoryManagerTy *findOwningMemoryManager(void *Ptr);
+
   llvm::DenseMap<std::pair<GenericDeviceTy *, int>,
                  std::unique_ptr<MemoryManagerTy>>
       DeviceMemoryManagers;

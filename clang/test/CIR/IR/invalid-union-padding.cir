@@ -1,0 +1,24 @@
+// RUN: cir-opt %s -verify-diagnostics -split-input-file
+
+!s32i = !cir.int<s, 32>
+!rec_Incomplete = !cir.struct<"Incomplete" incomplete>
+// expected-error @below {{union padding must be an integer or an array of integers}}
+!rec_U = !cir.union<"U" {data !s32i}, padding = {!rec_Incomplete}>
+
+module {}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+// expected-error @below {{union padding must be an integer or an array of integers}}
+!rec_U = !cir.union<"U" {data !s32i}, padding = {!cir.vector<[4] x !s32i>}>
+
+module {}
+
+// -----
+
+!s32i = !cir.int<s, 32>
+// expected-error @below {{union padding must be an integer or an array of integers}}
+!rec_U = !cir.union<"U" {data !s32i}, padding = {!cir.array<!cir.float x 4>}>
+
+module {}

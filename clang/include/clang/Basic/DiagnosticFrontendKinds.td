@@ -410,6 +410,8 @@ def warn_profile_data_misexpect : Warning<
   "potential performance regression from use of __builtin_expect(): "
   "annotation was correct on %0 of profiled executions">,
   BackendInfo, InGroup<MisExpect>;
+def warn_fe_backend_sanitizer_instrumentation_region : Warning<"%0">,
+  BackendInfo, InGroup<SanitizerInstrumentationRegion>;
 } // end of instrumentation issue category
 
 def warn_cgs_no_proto : Warning<

@@ -13,6 +13,7 @@
 
 #include "BPFAsmPrinter.h"
 #include "BPF.h"
+#include "BPFCORE.h"
 #include "BPFInstrInfo.h"
 #include "BPFMCInstLower.h"
 #include "BTFDebug.h"
@@ -112,6 +113,11 @@ bool BPFAsmPrinter::doFinalization(Module &M) {
   }
 
   return AsmPrinter::doFinalization(M);
+}
+
+void BPFAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
+  if (!GV->hasAttribute(BPFCoreSharedInfo::AmaAttr))
+    AsmPrinter::emitGlobalVariable(GV);
 }
 
 void BPFAsmPrinter::printOperand(const MachineInstr *MI, int OpNum,

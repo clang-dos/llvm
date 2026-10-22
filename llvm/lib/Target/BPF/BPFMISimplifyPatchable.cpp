@@ -65,12 +65,12 @@ private:
   bool removeLD();
   void processCandidate(MachineRegisterInfo *MRI, MachineBasicBlock &MBB,
                         MachineInstr &MI, Register &SrcReg, Register &DstReg,
-                        const GlobalValue *GVal, bool IsAma);
+                        const GlobalVariable *GVal, bool IsAma);
   void processDstReg(MachineRegisterInfo *MRI, Register &DstReg,
-                     Register &SrcReg, const GlobalValue *GVal,
+                     Register &SrcReg, const GlobalVariable *GVal,
                      bool doSrcRegProp, bool IsAma);
   void processInst(MachineRegisterInfo *MRI, MachineInstr *Inst,
-                   unsigned RelocOpNo, const GlobalValue *GVal);
+                   unsigned RelocOpNo, const GlobalVariable *GVal);
   void checkADDrr(MachineRegisterInfo *MRI, MachineInstr *Inst,
                   unsigned RelocOpNo, const GlobalValue *GVal);
   void checkShift(MachineRegisterInfo *MRI, MachineInstr *Inst,
@@ -203,7 +203,8 @@ void BPFMISimplifyPatchableImpl::checkShift(MachineRegisterInfo *MRI,
 
 void BPFMISimplifyPatchableImpl::processCandidate(
     MachineRegisterInfo *MRI, MachineBasicBlock &MBB, MachineInstr &MI,
-    Register &SrcReg, Register &DstReg, const GlobalValue *GVal, bool IsAma) {
+    Register &SrcReg, Register &DstReg, const GlobalVariable *GVal,
+    bool IsAma) {
   if (MRI->getRegClass(DstReg) == &BPF::GPR32RegClass) {
     if (IsAma) {
       // We can optimize such a pattern:
@@ -239,7 +240,7 @@ void BPFMISimplifyPatchableImpl::processCandidate(
 void BPFMISimplifyPatchableImpl::processDstReg(MachineRegisterInfo *MRI,
                                                Register &DstReg,
                                                Register &SrcReg,
-                                               const GlobalValue *GVal,
+                                               const GlobalVariable *GVal,
                                                bool doSrcRegProp, bool IsAma) {
   auto Begin = MRI->use_begin(DstReg), End = MRI->use_end();
   decltype(End) NextI;
@@ -302,7 +303,7 @@ void BPFMISimplifyPatchableImpl::processDstReg(MachineRegisterInfo *MRI,
 void BPFMISimplifyPatchableImpl::processInst(MachineRegisterInfo *MRI,
                                              MachineInstr *Inst,
                                              unsigned RelocOpNo,
-                                             const GlobalValue *GVal) {
+                                             const GlobalVariable *GVal) {
   unsigned Opcode = Inst->getOpcode();
   if (isLoadInst(Opcode)) {
     SkipInsts.insert(Inst);
@@ -312,26 +313,30 @@ void BPFMISimplifyPatchableImpl::processInst(MachineRegisterInfo *MRI,
   if (DisableCOREOptimization)
     return;
 
-  if (Opcode == BPF::ADD_rr) {
-    // If the struct offset is greater than INT16_MAX, skip optimization.
-    StringRef AccessPattern = GVal->getName();
-    size_t FirstDollar = AccessPattern.find_first_of('$');
-    size_t FirstColon = AccessPattern.find_first_of(':');
-    size_t SecondColon = AccessPattern.find_first_of(':', FirstColon + 1);
-    StringRef PatchImmStr =
-        AccessPattern.substr(SecondColon + 1, FirstDollar - SecondColon);
-    int PatchImm = std::stoll(std::string(PatchImmStr));
-    if (PatchImm <= INT16_MAX)
-      checkADDrr(MRI, Inst, RelocOpNo, GVal);
+  // The target enum value may need all 64 bits, regardless of its local value.
+  // Keep its relocation on the LD_imm64 instruction.
+  auto Reloc = BPFCoreSharedInfo::AmaRelocation::get(*GVal);
+  if (Reloc.Kind == BTF::ENUM_VALUE)
     return;
-  }
 
-  if (Opcode == BPF::SLL_rr)
+  switch (Opcode) {
+  case BPF::ADD_rr:
+    if (Reloc.Kind == BTF::FIELD_BYTE_OFFSET && Reloc.PatchImm >= 0 &&
+        Reloc.PatchImm <= INT16_MAX)
+      checkADDrr(MRI, Inst, RelocOpNo, GVal);
+    break;
+  case BPF::SLL_rr:
     checkShift(MRI, Inst, RelocOpNo, GVal, BPF::SLL_ri);
-  else if (Opcode == BPF::SRA_rr)
+    break;
+  case BPF::SRA_rr:
     checkShift(MRI, Inst, RelocOpNo, GVal, BPF::SRA_ri);
-  else if (Opcode == BPF::SRL_rr)
+    break;
+  case BPF::SRL_rr:
     checkShift(MRI, Inst, RelocOpNo, GVal, BPF::SRL_ri);
+    break;
+  default:
+    break;
+  }
 }
 
 /// Remove unneeded Load instructions.
@@ -374,8 +379,7 @@ bool BPFMISimplifyPatchableImpl::removeLD() {
       if (!MO.isGlobal())
         continue;
 
-      const GlobalValue *GVal = MO.getGlobal();
-      auto *GVar = dyn_cast<GlobalVariable>(GVal);
+      auto *GVar = dyn_cast<GlobalVariable>(MO.getGlobal());
       if (!GVar)
         continue;
 
@@ -386,7 +390,7 @@ bool BPFMISimplifyPatchableImpl::removeLD() {
       else if (!GVar->hasAttribute(BPFCoreSharedInfo::TypeIdAttr))
         continue;
 
-      processCandidate(MRI, MBB, MI, SrcReg, DstReg, GVal, IsAma);
+      processCandidate(MRI, MBB, MI, SrcReg, DstReg, GVar, IsAma);
 
       ToErase = &MI;
       Changed = true;

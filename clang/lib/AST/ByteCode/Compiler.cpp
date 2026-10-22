@@ -3699,6 +3699,9 @@ bool Compiler<Emitter>::VisitCXXBindTemporaryExpr(
 template <class Emitter>
 bool Compiler<Emitter>::VisitCompoundLiteralExpr(const CompoundLiteralExpr *E) {
   const Expr *Init = E->getInitializer();
+  if (E->hasThreadStorage())
+    return this->emitInvalid(E);
+
   if (DiscardResult)
     return this->discard(Init);
 
@@ -3708,7 +3711,7 @@ bool Compiler<Emitter>::VisitCompoundLiteralExpr(const CompoundLiteralExpr *E) {
   }
 
   OptPrimType T = classify(E->getType());
-  if (E->isFileScope()) {
+  if (E->hasGlobalStorage()) {
     // Avoid creating a variable if this is a primitive RValue anyway.
     if (T && !E->isLValue())
       return this->delegate(Init);

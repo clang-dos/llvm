@@ -4989,8 +4989,8 @@ CFGBlock *CFGBuilder::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
 
   // Add the initialization statements.
   Block = createBlock();
-  addStmt(S->getBeginStmt());
   addStmt(S->getEndStmt());
+  addStmt(S->getBeginStmt());
   CFGBlock *Head = addStmt(S->getRangeStmt());
   if (S->getInit())
     Head = addStmt(S->getInit());

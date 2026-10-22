@@ -20378,7 +20378,6 @@ bool IntExprEvaluator::VisitCastExpr(const CastExpr *E) {
   case CK_HLSLAggregateSplatCast:
     llvm_unreachable("invalid cast kind for integral value");
 
-  case CK_BitCast:
   case CK_Dependent:
   case CK_LValueBitCast:
   case CK_ARCProduceObject:
@@ -20395,6 +20394,16 @@ bool IntExprEvaluator::VisitCastExpr(const CastExpr *E) {
   case CK_LValueToRValueBitCast:
   case CK_HLSLArrayRValue:
     return ExprEvaluatorBaseTy::VisitCastExpr(E);
+
+  case CK_BitCast: {
+    APValue Src;
+    if (!Evaluate(Src, Info, SubExpr))
+      return false;
+    APValue Dst;
+    if (!handleRValueToRValueBitCast(Info, Dst, Src, E))
+      return false;
+    return Success(Dst, E);
+  }
 
   case CK_MemberPointerToBoolean:
   case CK_PointerToBoolean:

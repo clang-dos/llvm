@@ -849,6 +849,9 @@ documentation](CIR/index.md) for more information regarding ClangIR's status and
 
 #### Bug Fixes to C++ Support
 
+- Fixed missing diagnostics for invalid `consteval` calls in lambda
+  init-captures used in default member initializers. (#GH229809)
+
 - Fixed lambdas with specifiers or attributes after the capture list being
   misparsed as function declarations in direct-initialization contexts under
   `-fms-extensions` or in HLSL mode.

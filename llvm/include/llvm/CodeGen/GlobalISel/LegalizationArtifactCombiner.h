@@ -583,10 +583,12 @@ public:
                                     MachineIRBuilder &Builder,
                                     SmallVectorImpl<Register> &UpdatedDefs,
                                     GISelChangeObserver &Observer) {
+    // Copy into a new vreg rather than DstReg, so that DstReg does not get a
+    // second def either.
     if (!llvm::canReplaceReg(DstReg, SrcReg, MRI)) {
-      Builder.buildCopy(DstReg, SrcReg);
-      UpdatedDefs.push_back(DstReg);
-      return;
+      Register NewReg = MRI.cloneVirtualRegister(DstReg);
+      Builder.buildCopy(NewReg, SrcReg);
+      SrcReg = NewReg;
     }
     SmallVector<MachineInstr *, 4> UseMIs;
     // Get the users and notify the observer before replacing.
@@ -594,8 +596,10 @@ public:
       UseMIs.push_back(&UseMI);
       Observer.changingInstr(UseMI);
     }
-    // Replace the registers.
-    MRI.replaceRegWith(DstReg, SrcReg);
+    // Replace the uses only, so that SrcReg does not get a second def.
+    for (MachineOperand &MO :
+         llvm::make_early_inc_range(MRI.use_operands(DstReg)))
+      MO.setReg(SrcReg);
     UpdatedDefs.push_back(SrcReg);
     // Notify the observer that we changed the instructions.
     for (auto *UseMI : UseMIs)
@@ -933,10 +937,6 @@ public:
 
         replaceRegOrBuildCopy(DefReg, FoundVal, MRI, MIB, UpdatedDefs,
                               Observer);
-        // We only want to replace the uses, not the def of the old reg.
-        Observer.changingInstr(MI);
-        MI.getOperand(DefIdx).setReg(DefReg);
-        Observer.changedInstr(MI);
         DeadDefs[DefIdx] = true;
       }
       return DeadDefs.all();

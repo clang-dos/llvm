@@ -232,7 +232,7 @@ public:
   MaybeSubscriptIntExpr EvaluateSubscriptIntExpr(const T &expr) {
     if (MaybeIntExpr maybeIntExpr{EvaluateIntExpr(expr)}) {
       return FoldExpr(evaluate::ConvertToType<evaluate::SubscriptInteger>(
-          std::move(*maybeIntExpr)));
+          evaluate::SubscriptIntegerKind, std::move(*maybeIntExpr)));
     } else {
       return std::nullopt;
     }
@@ -2629,8 +2629,11 @@ void AttrsVisitor::SetBindNameOn(Symbol &symbol) {
     return;
   }
   symbol.SetIsCDefined(isCDefined_);
-  std::optional<std::string> label{
-      evaluate::GetScalarConstantValue<evaluate::Ascii>(bindName_)};
+  std::optional<std::string> label;
+  if (auto charVal{
+          evaluate::GetScalarConstantValue<evaluate::Ascii>(bindName_)}) {
+    label = charVal->AsStdString();
+  }
   // 18.9.2(2): discard leading and trailing blanks
   if (label) {
     symbol.SetIsExplicitBindName(true);
@@ -6523,7 +6526,7 @@ bool DeclarationVisitor::Pre(const parser::Enumerator &enumerator) {
     // Enumerators are treated as PARAMETER (section 7.6 paragraph (4))
     symbol = &MakeSymbol(name, Attrs{Attr::PARAMETER}, ObjectEntityDetails{});
     symbol->SetType(context().MakeNumericType(
-        TypeCategory::Integer, evaluate::CInteger::kind));
+        TypeCategory::Integer, evaluate::CIntegerKind));
   }
 
   if (auto &init{std::get<std::optional<parser::ScalarIntConstantExpr>>(
@@ -6534,7 +6537,7 @@ bool DeclarationVisitor::Pre(const parser::Enumerator &enumerator) {
       // F2023 7.6.1 errata f23/013: a BOZ enumerator initializer
       // has the value specified by INT(boz-literal-constant, C_INT).
       const evaluate::DynamicType cIntType{
-          TypeCategory::Integer, evaluate::CInteger::kind};
+          TypeCategory::Integer, evaluate::CIntegerKind};
       if (MaybeExpr maybeExpr{EvaluateExpr(expr)}) {
         if (auto converted{
                 evaluate::ConvertToType(cIntType, std::move(*maybeExpr))}) {
@@ -6560,8 +6563,8 @@ bool DeclarationVisitor::Pre(const parser::Enumerator &enumerator) {
 
   if (symbol) {
     if (enumerationState_.value) {
-      symbol->get<ObjectEntityDetails>().set_init(SomeExpr{
-          evaluate::Expr<evaluate::CInteger>{*enumerationState_.value}});
+      symbol->get<ObjectEntityDetails>().set_init(
+          SomeExpr{evaluate::MakeCIntegerExpr(*enumerationState_.value)});
     } else {
       context().SetError(*symbol);
     }
@@ -6635,7 +6638,7 @@ void DeclarationVisitor::Post(const parser::EnumerationTypeStmt &x) {
   Symbol &ordinalSym{MakeSymbol(currScope(), ordinalName, Attrs{})};
   ordinalSym.set_details(ObjectEntityDetails{});
   ordinalSym.SetType(
-      currScope().MakeNumericType(TypeCategory::Integer, KindExpr{4}));
+      currScope().MakeNumericType(TypeCategory::Integer, MakeKindExpr(4)));
   ordinalSym.set(Symbol::Flag::CompilerCreated);
   symbol.get<DerivedTypeDetails>().add_component(ordinalSym);
 }
@@ -6681,7 +6684,7 @@ bool DeclarationVisitor::Pre(const parser::EnumerationEnumeratorStmt &x) {
     CHECK(ordinalIter != currScope().end());
     const Symbol &ordinalSym{*ordinalIter->second};
     enumCtor.Add(ordinalSym,
-        evaluate::AsGenericExpr(evaluate::Expr<evaluate::CInteger>{ordinal}));
+        evaluate::AsGenericExpr(evaluate::MakeCIntegerExpr(ordinal)));
     enumerator.get<ObjectEntityDetails>().set_init(
         SomeExpr{evaluate::Expr<evaluate::SomeDerived>{
             evaluate::Constant<evaluate::SomeDerived>{std::move(enumCtor)}}});
@@ -7085,7 +7088,7 @@ void DeclarationVisitor::Post(const parser::IntrinsicTypeSpec::Character &) {
   }
   if (!charInfo_.kind) {
     charInfo_.kind =
-        KindExpr{context().GetDefaultKind(TypeCategory::Character)};
+        MakeKindExpr(context().GetDefaultKind(TypeCategory::Character));
   }
   SetDeclTypeSpec(currScope().MakeCharacterType(
       std::move(*charInfo_.length), std::move(*charInfo_.kind)));
@@ -9563,11 +9566,11 @@ const DeclTypeSpec &ConstructVisitor::ToDeclTypeSpec(
   if (length) {
     return currScope().MakeCharacterType(
         ParamValue{SomeIntExpr{*std::move(length)}, common::TypeParamAttr::Len},
-        KindExpr{type.kind()});
+        MakeKindExpr(type.kind()));
   } else {
     return currScope().MakeCharacterType(
         ParamValue::Deferred(common::TypeParamAttr::Len),
-        KindExpr{type.kind()});
+        MakeKindExpr(type.kind()));
   }
 }
 
@@ -9779,12 +9782,14 @@ public:
   bool Pre(const parser::IoControlSpec::Asynchronous &async) {
     if (auto folded{evaluate::Fold(
             context_.foldingContext(), AnalyzeExpr(context_, async.v))}) {
-      if (auto str{
+      if (auto charVal{
               evaluate::GetScalarConstantValue<evaluate::Ascii>(*folded)}) {
-        for (char ch : *str) {
-          if (ch != ' ') {
-            inAsyncIO_ = ch == 'y' || ch == 'Y';
-            break;
+        if (auto str{charVal->AsStdString()}) {
+          for (char ch : *str) {
+            if (ch != ' ') {
+              inAsyncIO_ = ch == 'y' || ch == 'Y';
+              break;
+            }
           }
         }
       }

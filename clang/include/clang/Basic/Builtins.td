@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 include "clang/Basic/BuiltinsBase.td"
+include "clang/Basic/BuiltinsMeta.td"
 
 class FPMathTemplate : Template<["float", "double", "long double"],
                                 ["f",     "",       "l"]>;

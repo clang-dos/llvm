@@ -293,6 +293,8 @@ defm : BoolField<"slp-split-alternate-instructions", "true",
   "Improve the code quality by splitting alternate instructions">;
 defm : OptionalValueField<"slp-threshold", "int",
   "Only vectorize if you gain more than this number">;
+defm : BoolField<"slp-use-vplan-codegen", "false",
+  "Use VPlan-based codegen in SLP vectorizer">;
 // The scalar loop left by the loop vectorizer runs only a few iterations or the
 // ranges its runtime checks found overlapping, where the checks executed on
 // each iteration are unlikely to pay off, so they get a tighter bound.
@@ -313,6 +315,8 @@ defm : BoolField<"slp-vectorize-poor-throughput", "true",
 // Enable versioning of a basic block with runtime alias checks.
 defm : BoolField<"slp-vectorize-with-runtime-alias-checks", "true",
   "Allow SLP to version a block with runtime alias checks to vectorize trees blocked by may-alias memory dependencies">;
+defm : BoolField<"slp-vplan-codegen-assert-eligible", "false",
+  "Assert that all trees are eligible for VPlan-based codegen with -slp-use-vplan-codegen">;
 defm : BoolField<"vectorize-slp", "true",
   "Run the SLP vectorization passes">;
 defm : BoolField<"view-slp-tree", "false",

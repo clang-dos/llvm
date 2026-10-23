@@ -1,6 +1,8 @@
 # Get sources
 set(LIBCXX_SOURCES
   algorithm.cpp
+  algorithm_float.cpp
+  algorithm_wide.cpp
   any.cpp
   bind.cpp
   call_once.cpp

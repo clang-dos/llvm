@@ -86,6 +86,16 @@ struct __murmur2_or_cityhash<_Size, 32> {
   }
 };
 
+// With a 16-bit size_t (16-bit x86), fold a 32-bit murmur2 hash.
+template <class _Size>
+struct __murmur2_or_cityhash<_Size, 16> {
+  _LIBCPP_HIDE_FROM_ABI _LIBCPP_DISABLE_UBSAN_UNSIGNED_INTEGER_CHECK _Size
+  operator()(const void* __key, _Size __len) const {
+    unsigned long __h = __murmur2_or_cityhash<unsigned long, 32>()(__key, __len);
+    return static_cast<_Size>(__h ^ (__h >> 16));
+  }
+};
+
 template <class _Size>
 struct __murmur2_or_cityhash<_Size, 64> {
   // cityhash64

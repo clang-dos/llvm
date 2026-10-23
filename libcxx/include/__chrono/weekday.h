@@ -34,7 +34,7 @@ class weekday_last;
 class weekday {
 private:
   unsigned char __wd_;
-  static constexpr unsigned char __weekday_from_days(int __days) noexcept;
+  static constexpr unsigned char __weekday_from_days(__calendar_int __days) noexcept;
 
 public:
   weekday() = default;
@@ -73,7 +73,7 @@ public:
 };
 
 // https://howardhinnant.github.io/date_algorithms.html#weekday_from_days
-inline constexpr unsigned char weekday::__weekday_from_days(int __days) noexcept {
+inline constexpr unsigned char weekday::__weekday_from_days(__calendar_int __days) noexcept {
   return static_cast<unsigned char>(static_cast<unsigned>(__days >= -4 ? (__days + 4) % 7 : (__days + 5) % 7 + 6));
 }
 

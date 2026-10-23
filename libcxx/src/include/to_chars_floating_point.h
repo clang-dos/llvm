@@ -60,11 +60,11 @@ struct _Floating_type_traits<float> {
 
     using _Uint_type = uint32_t;
 
-    static constexpr uint32_t _Exponent_mask             = (1u << _Exponent_bits) - 1;
-    static constexpr uint32_t _Normal_mantissa_mask      = (1u << _Mantissa_bits) - 1;
-    static constexpr uint32_t _Denormal_mantissa_mask    = (1u << (_Mantissa_bits - 1)) - 1;
-    static constexpr uint32_t _Special_nan_mantissa_mask = 1u << (_Mantissa_bits - 2);
-    static constexpr uint32_t _Shifted_sign_mask         = 1u << _Sign_shift;
+    static constexpr uint32_t _Exponent_mask             = (uint32_t{1} << _Exponent_bits) - 1;
+    static constexpr uint32_t _Normal_mantissa_mask      = (uint32_t{1} << _Mantissa_bits) - 1;
+    static constexpr uint32_t _Denormal_mantissa_mask    = (uint32_t{1} << (_Mantissa_bits - 1)) - 1;
+    static constexpr uint32_t _Special_nan_mantissa_mask = uint32_t{1} << (_Mantissa_bits - 2);
+    static constexpr uint32_t _Shifted_sign_mask         = uint32_t{1} << _Sign_shift;
     static constexpr uint32_t _Shifted_exponent_mask     = _Exponent_mask << _Exponent_shift;
 };
 

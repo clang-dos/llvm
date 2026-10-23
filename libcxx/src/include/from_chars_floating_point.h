@@ -189,7 +189,7 @@ __fractional_constant_result<_Tp> __parse_fractional_hex_constant(const char* __
 
 struct __exponent_result {
   size_t __offset{size_t(-1)};
-  int __value{0};
+  int32_t __value{0};
   bool __present{false};
 };
 

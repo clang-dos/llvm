@@ -256,8 +256,8 @@ struct __parsed_specifications {
 };
 
 // Validate the struct is small and cheap to copy since the struct is passed by
-// value in formatting functions.
-static_assert(sizeof(__parsed_specifications<char>) == 16);
+// value in formatting functions. With a 16-bit int it is smaller.
+static_assert(sizeof(__parsed_specifications<char>) == (__SIZEOF_INT__ < 4 ? 14 : 16));
 static_assert(is_trivially_copyable_v<__parsed_specifications<char>>);
 #  if _LIBCPP_HAS_WIDE_CHARACTERS
 static_assert(sizeof(__parsed_specifications<wchar_t>) == 16);

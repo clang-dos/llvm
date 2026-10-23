@@ -292,10 +292,16 @@ typedef duration<long long > seconds;
 typedef duration<long, ratio<60> > minutes;
 typedef duration<long, ratio<60 * 60> > hours;
 #if _LIBCPP_STD_VER >= 20
-typedef duration<int, ratio<60 * 60 * 24>> days;
-typedef duration<int, ratio<60 * 60 * 24 * 7>> weeks;
-typedef duration<int, ratio<31556952>> years; // 365.2425 * 60 * 60 * 24
-typedef duration<int, ratio<2629746>> months; // years / 12
+// days needs a signed type of at least 25 bits, which int may not be.
+#  if __SIZEOF_INT__ < 4
+typedef long __calendar_int;
+#  else
+typedef int __calendar_int;
+#  endif
+typedef duration<__calendar_int, ratio<60L * 60 * 24>> days;
+typedef duration<__calendar_int, ratio<60L * 60 * 24 * 7>> weeks;
+typedef duration<__calendar_int, ratio<31556952L>> years; // 365.2425 * 60 * 60 * 24
+typedef duration<__calendar_int, ratio<2629746L>> months; // years / 12
 #endif
 // Duration ==
 

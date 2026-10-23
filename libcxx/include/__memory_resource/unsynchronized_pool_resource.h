@@ -45,13 +45,14 @@ class _LIBCPP_AVAILABILITY_PMR _LIBCPP_EXPORTED_FROM_ABI unsynchronized_pool_res
 
   static const size_t __min_blocks_per_chunk = 16;
   static const size_t __min_bytes_per_chunk  = 1024;
-  static const size_t __max_blocks_per_chunk = (size_t(1) << 20);
-  static const size_t __max_bytes_per_chunk  = (size_t(1) << 30);
+  // A 16-bit size_t (16-bit x86) cannot hold the usual limits.
+  static const size_t __max_blocks_per_chunk = sizeof(size_t) < 4 ? (size_t(1) << 12) : (size_t(1) << (sizeof(size_t) < 4 ? 0 : 20));
+  static const size_t __max_bytes_per_chunk  = sizeof(size_t) < 4 ? (size_t(1) << 15) : (size_t(1) << (sizeof(size_t) < 4 ? 0 : 30));
 
   static const int __log2_smallest_block_size      = 3;
   static const size_t __smallest_block_size        = 8;
-  static const size_t __default_largest_block_size = (size_t(1) << 20);
-  static const size_t __max_largest_block_size     = (size_t(1) << 30);
+  static const size_t __default_largest_block_size = sizeof(size_t) < 4 ? (size_t(1) << 12) : (size_t(1) << (sizeof(size_t) < 4 ? 0 : 20));
+  static const size_t __max_largest_block_size     = sizeof(size_t) < 4 ? (size_t(1) << 15) : (size_t(1) << (sizeof(size_t) < 4 ? 0 : 30));
 
   size_t __pool_block_size(int __i) const;
   int __log2_pool_block_size(int __i) const;

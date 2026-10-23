@@ -20,8 +20,14 @@
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 enum class endian {
+#  if __SIZEOF_INT__ < 4
+  // The values must fit in a 16-bit int.
+  little = 0x1234,
+  big    = 0x4321,
+#  else
   little = 0xDEAD,
   big    = 0xFACE,
+#  endif
 #  if defined(_LIBCPP_LITTLE_ENDIAN)
   native = little
 #  elif defined(_LIBCPP_BIG_ENDIAN)

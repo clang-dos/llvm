@@ -115,6 +115,8 @@ config("cxx_config") {
 
 cxx_sources = [
   "algorithm.cpp",
+  "algorithm_float.cpp",
+  "algorithm_wide.cpp",
   "any.cpp",
   "atomic.cpp",
   "barrier.cpp",
@@ -151,6 +153,7 @@ cxx_sources = [
   "include/ryu/f2s.h",
   "include/ryu/ryu.h",
   "include/sso_allocator.h",
+  "include/sort.h",
   "include/to_chars_floating_point.h",
   "ios.cpp",
   "ios.instantiations.cpp",

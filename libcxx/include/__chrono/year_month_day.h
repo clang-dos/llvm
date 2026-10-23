@@ -73,34 +73,38 @@ public:
 
 // https://howardhinnant.github.io/date_algorithms.html#civil_from_days
 inline constexpr year_month_day year_month_day::__from_days(days __d) noexcept {
-  static_assert(numeric_limits<unsigned>::digits >= 18, "");
-  static_assert(numeric_limits<int>::digits >= 20, "");
-  const int __z        = __d.count() + 719468;
-  const int __era      = (__z >= 0 ? __z : __z - 146096) / 146097;
-  const unsigned __doe = static_cast<unsigned>(__z - __era * 146097);                   // [0, 146096]
-  const unsigned __yoe = (__doe - __doe / 1460 + __doe / 36524 - __doe / 146096) / 365; // [0, 399]
-  const int __yr       = static_cast<int>(__yoe) + __era * 400;
-  const unsigned __doy = __doe - (365 * __yoe + __yoe / 4 - __yoe / 100); // [0, 365]
-  const unsigned __mp  = (5 * __doy + 2) / 153;                           // [0, 11]
-  const unsigned __dy  = __doy - (153 * __mp + 2) / 5 + 1;                // [1, 31]
-  const unsigned __mth = __mp + (__mp < 10 ? 3 : -9);                     // [1, 12]
-  return year_month_day{chrono::year{__yr + (__mth <= 2)}, chrono::month{__mth}, chrono::day{__dy}};
+  using __int  = __calendar_int;
+  using __uint = make_unsigned_t<__calendar_int>;
+  static_assert(numeric_limits<__uint>::digits >= 18, "");
+  static_assert(numeric_limits<__int>::digits >= 20, "");
+  const __int __z        = __d.count() + 719468;
+  const __int __era      = (__z >= 0 ? __z : __z - 146096) / 146097;
+  const __uint __doe = static_cast<__uint>(__z - __era * 146097);                   // [0, 146096]
+  const __uint __yoe = (__doe - __doe / 1460 + __doe / 36524 - __doe / 146096) / 365; // [0, 399]
+  const __int __yr       = static_cast<__int>(__yoe) + __era * 400;
+  const __uint __doy = __doe - (365 * __yoe + __yoe / 4 - __yoe / 100); // [0, 365]
+  const __uint __mp  = (5 * __doy + 2) / 153;                           // [0, 11]
+  const __uint __dy  = __doy - (153 * __mp + 2) / 5 + 1;                // [1, 31]
+  const __uint __mth = __mp + (__mp < 10 ? 3 : -9);                     // [1, 12]
+  return year_month_day{chrono::year{static_cast<int>(__yr + (__mth <= 2))}, chrono::month{static_cast<unsigned>(__mth)}, chrono::day{static_cast<unsigned>(__dy)}};
 }
 
 // https://howardhinnant.github.io/date_algorithms.html#days_from_civil
 inline constexpr days year_month_day::__to_days() const noexcept {
-  static_assert(numeric_limits<unsigned>::digits >= 18, "");
-  static_assert(numeric_limits<int>::digits >= 20, "");
+  using __int  = __calendar_int;
+  using __uint = make_unsigned_t<__calendar_int>;
+  static_assert(numeric_limits<__uint>::digits >= 18, "");
+  static_assert(numeric_limits<__int>::digits >= 20, "");
 
-  const int __yr       = static_cast<int>(__y_) - (__m_ <= February);
-  const unsigned __mth = static_cast<unsigned>(__m_);
-  const unsigned __dy  = static_cast<unsigned>(__d_);
+  const __int __yr       = static_cast<__int>(static_cast<int>(__y_)) - (__m_ <= February);
+  const __uint __mth = static_cast<__uint>(static_cast<unsigned>(__m_));
+  const __uint __dy  = static_cast<__uint>(static_cast<unsigned>(__d_));
 
-  const int __era      = (__yr >= 0 ? __yr : __yr - 399) / 400;
-  const unsigned __yoe = static_cast<unsigned>(__yr - __era * 400);                 // [0, 399]
-  const unsigned __doy = (153 * (__mth + (__mth > 2 ? -3 : 9)) + 2) / 5 + __dy - 1; // [0, 365]
-  const unsigned __doe = __yoe * 365 + __yoe / 4 - __yoe / 100 + __doy;             // [0, 146096]
-  return days{__era * 146097 + static_cast<int>(__doe) - 719468};
+  const __int __era      = (__yr >= 0 ? __yr : __yr - 399) / 400;
+  const __uint __yoe = static_cast<__uint>(__yr - __era * 400);                 // [0, 399]
+  const __uint __doy = (153 * (__mth + (__mth > 2 ? -3 : 9)) + 2) / 5 + __dy - 1; // [0, 365]
+  const __uint __doe = __yoe * 365 + __yoe / 4 - __yoe / 100 + __doy;             // [0, 146096]
+  return days{__era * 146097 + static_cast<__int>(__doe) - 719468};
 }
 
 inline constexpr bool operator==(const year_month_day& __lhs, const year_month_day& __rhs) noexcept {

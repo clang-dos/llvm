@@ -76,8 +76,9 @@ struct heap_node {
 // All pointers returned by fallback_malloc must be at least aligned
 // as RequiredAligned. Note that RequiredAlignment can be greater than
 // alignof(std::max_align_t) on 64 bit systems compiling 32 bit code.
+// On 16-bit targets the biggest alignment is less than a heap_node.
 struct FallbackMaxAlignType {
-} __attribute__((aligned));
+} __attribute__((aligned(__BIGGEST_ALIGNMENT__ < sizeof(heap_node) ? sizeof(heap_node) : __BIGGEST_ALIGNMENT__)));
 const size_t RequiredAlignment = alignof(FallbackMaxAlignType);
 
 static_assert(alignof(FallbackMaxAlignType) % sizeof(heap_node) == 0,

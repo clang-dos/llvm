@@ -47,6 +47,55 @@
 
 #include "include/ryu/common.h"
 #include "include/ryu/d2fixed.h"
+
+#if __SIZEOF_SIZE_T__ < 4
+
+// Ryu's tables for fixed and exponent notation with a precision are over
+// 64 KiB, more than a 16-bit target can hold. Use the C library instead.
+#include <cstdio>
+#include <cstdlib>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+static to_chars_result __d2_snprintf(char* _First, char* const _Last, const double __d,
+  const uint32_t __precision, const char* __format) {
+  const size_t __size = static_cast<size_t>(_Last - _First);
+  if (__precision > 0x7000) {
+    return { _Last, errc::value_too_large };
+  }
+  const int __p = static_cast<int>(__precision);
+  const int __n = std::snprintf(_First, __size, __format, __p, __d);
+  if (__n < 0 || static_cast<size_t>(__n) > __size) {
+    return { _Last, errc::value_too_large };
+  }
+  if (static_cast<size_t>(__n) == __size) {
+    // An exact fit: snprintf left out the last character to make room for
+    // the NUL, which to_chars does not write.
+    char* __tmp = static_cast<char*>(std::malloc(__size + 1));
+    if (__tmp == nullptr) {
+      return { _Last, errc::value_too_large };
+    }
+    std::snprintf(__tmp, __size + 1, __format, __p, __d);
+    std::memcpy(_First, __tmp, __size);
+    std::free(__tmp);
+  }
+  return { _First + __n, errc{} };
+}
+
+[[nodiscard]] to_chars_result __d2fixed_buffered_n(char* _First, char* const _Last, const double __d,
+  const uint32_t __precision) {
+  return __d2_snprintf(_First, _Last, __d, __precision, "%.*f");
+}
+
+[[nodiscard]] to_chars_result __d2exp_buffered_n(char* _First, char* const _Last, const double __d,
+  uint32_t __precision) {
+  return __d2_snprintf(_First, _Last, __d, __precision, "%.*e");
+}
+
+_LIBCPP_END_NAMESPACE_STD
+
+#else // __SIZEOF_SIZE_T__ < 4
+
 #include "include/ryu/d2fixed_full_table.h"
 #include "include/ryu/d2s.h"
 #include "include/ryu/d2s_intrinsics.h"
@@ -666,5 +715,7 @@ void __append_nine_digits(uint32_t __digits, char* const __result) {
 }
 
 _LIBCPP_END_NAMESPACE_STD
+
+#endif // __SIZEOF_SIZE_T__ < 4
 
 // clang-format on

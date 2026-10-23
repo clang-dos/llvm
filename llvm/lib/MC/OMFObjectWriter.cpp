@@ -233,12 +233,16 @@ OMFObjectWriter::classifySection(const MCSectionELF &Sec) const {
   for (SegmentKind K : {SK_InitBegin, SK_InitEnd, SK_FiniBegin, SK_FiniEnd})
     if (Name == Segments[K].Name)
       return K;
+  // As in the usual ELF linker scripts, .init_array* includes names such as
+  // picolibc's .fini_array_onexit. Init priorities in the names are not
+  // kept: the linker puts the entries in module order.
   auto IsTable = [&](StringRef Prefix) {
     return Name == Prefix || Name.starts_with((Prefix + ".").str());
   };
-  if (IsTable(".init_array") || IsTable(".preinit_array") || IsTable(".ctors"))
+  if (Name.starts_with(".init_array") || Name.starts_with(".preinit_array") ||
+      IsTable(".ctors"))
     return SK_Init;
-  if (IsTable(".fini_array") || IsTable(".dtors"))
+  if (Name.starts_with(".fini_array") || IsTable(".dtors"))
     return SK_Fini;
   if (Flags & ELF::SHF_EXECINSTR)
     return SK_Text;

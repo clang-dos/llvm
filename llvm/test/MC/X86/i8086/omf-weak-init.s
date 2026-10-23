@@ -1,6 +1,6 @@
 # Undefined weak symbols become WKEXT weak externals that default to
 # __omf_weak_null. .init_array and .fini_array go to the word-aligned XI and
-# YI segments, which are written together with XIB, XIE, YIB and YIE.
+# YI segments (also names such as .fini_array_onexit), which are written together with XIB, XIE, YIB and YIE.
 # RUN: llvm-mc -triple=i8086-pc-msdos -filetype=obj %s -o %t.obj
 # RUN: %python %S/Inputs/omfdump.py %t.obj | FileCheck %s
 
@@ -8,7 +8,7 @@
 # CHECK-NEXT: SEGDEF XI align=word combine=public big=0 use32=0 len=0002 class=DATA
 # CHECK-NEXT: SEGDEF XIE align=word combine=public big=0 use32=0 len=0000 class=DATA
 # CHECK-NEXT: SEGDEF YIB align=word combine=public big=0 use32=0 len=0000 class=DATA
-# CHECK-NEXT: SEGDEF YI align=word combine=public big=0 use32=0 len=0004 class=DATA
+# CHECK-NEXT: SEGDEF YI align=word combine=public big=0 use32=0 len=0006 class=DATA
 # CHECK-NEXT: SEGDEF YIE align=word combine=public big=0 use32=0 len=0000 class=DATA
 # CHECK:      EXTDEF '_weak_func' type=0
 # CHECK-NEXT: EXTDEF '_strong' type=0
@@ -34,4 +34,6 @@ _weak_def:
 	.short	f
 	.section .fini_array.100,"aw",@fini_array
 	.short	f
+	.short	f
+	.section .fini_array_onexit,"aw"
 	.short	f

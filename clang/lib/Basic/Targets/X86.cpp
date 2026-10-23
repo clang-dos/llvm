@@ -535,7 +535,8 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
       Builder.defineMacro("__x86_64h");
       Builder.defineMacro("__x86_64h__");
     }
-  } else {
+  } else if (getTriple().getArch() != llvm::Triple::i8086) {
+    // X86_16TargetInfo defines the macros of the i8086 triple.
     DefineStd(Builder, "i386", Opts);
   }
 
@@ -554,6 +555,14 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
   using namespace llvm::X86;
   switch (CPU) {
   case CK_None:
+    break;
+  case CK_i8086:
+  case CK_i8088:
+  case CK_i186:
+  case CK_V20:
+  case CK_V30:
+  case CK_i286:
+    // X86_16TargetInfo defines the CPU macros of 16-bit CPUs.
     break;
   case CK_i386:
     // The rest are coming from the i386 define above.
@@ -1699,6 +1708,13 @@ std::optional<unsigned> X86TargetInfo::getCPUCacheLineSize() const {
     // The following currently have unknown cache line sizes (but they are probably all 64):
     // Core
     case CK_None:
+    // 16-bit CPUs have no cache.
+    case CK_i8086:
+    case CK_i8088:
+    case CK_i186:
+    case CK_V20:
+    case CK_V30:
+    case CK_i286:
       return std::nullopt;
   }
   llvm_unreachable("Unknown CPU kind");
@@ -1847,12 +1863,12 @@ std::string X86TargetInfo::convertConstraint(const char *&Constraint) const {
 }
 
 void X86TargetInfo::fillValidCPUList(SmallVectorImpl<StringRef> &Values) const {
-  bool Only64Bit = getTriple().getArch() != llvm::Triple::x86;
-  llvm::X86::fillValidCPUArchList(Values, Only64Bit);
+  llvm::X86::fillValidCPUArchList(Values, isOnly64BitCPUs(), allow16BitCPUs());
 }
 
 void X86TargetInfo::fillValidTuneCPUList(SmallVectorImpl<StringRef> &Values) const {
-  llvm::X86::fillValidTuneCPUList(Values);
+  llvm::X86::fillValidTuneCPUList(Values, /*Only64Bit=*/false,
+                                  allow16BitCPUs());
 }
 
 ArrayRef<const char *> X86TargetInfo::getGCCRegNames() const {
@@ -1907,5 +1923,67 @@ void MicrosoftX86_64TargetInfo::adjust(DiagnosticsEngine &Diags,
     UseMSVCCompatGlobalAlign = false;
     LargeArrayMinWidth = 128;
     LargeArrayAlign = 128;
+  }
+}
+
+bool X86_16TargetInfo::initFeatureMap(
+    llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags, StringRef CPU,
+    const std::vector<std::string> &FeaturesVec) const {
+  // Without a CPU, assume the original 8086, which has no x87 coprocessor.
+  return X86_32TargetInfo::initFeatureMap(
+      Features, Diags, CPU.empty() ? "i8086" : CPU, FeaturesVec);
+}
+
+void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
+                                        MacroBuilder &Builder) const {
+  X86_32TargetInfo::getTargetDefines(Opts, Builder);
+
+  // The macros of other 16-bit DOS compilers.
+  Builder.defineMacro("__I86__");
+  Builder.defineMacro("_M_I86");
+  switch (CPU) {
+  case llvm::X86::CK_i186:
+  case llvm::X86::CK_V20:
+  case llvm::X86::CK_V30:
+    Builder.defineMacro("_M_I186");
+    break;
+  case llvm::X86::CK_i286:
+    Builder.defineMacro("_M_I286");
+    break;
+  default:
+    break;
+  }
+
+  switch (Model) {
+  case llvm::X86::MemoryModel16::Tiny:
+    Builder.defineMacro("__TINY__");
+    Builder.defineMacro("_M_I86TM");
+    break;
+  case llvm::X86::MemoryModel16::Small:
+    Builder.defineMacro("__SMALL__");
+    Builder.defineMacro("_M_I86SM");
+    break;
+  case llvm::X86::MemoryModel16::Medium:
+    Builder.defineMacro("__MEDIUM__");
+    Builder.defineMacro("_M_I86MM");
+    break;
+  case llvm::X86::MemoryModel16::Compact:
+    Builder.defineMacro("__COMPACT__");
+    Builder.defineMacro("_M_I86CM");
+    break;
+  case llvm::X86::MemoryModel16::Large:
+    Builder.defineMacro("__LARGE__");
+    Builder.defineMacro("_M_I86LM");
+    break;
+  case llvm::X86::MemoryModel16::Huge:
+    Builder.defineMacro("__HUGE__");
+    Builder.defineMacro("_M_I86HM");
+    break;
+  }
+
+  if (getTriple().isOSMSDOS()) {
+    DefineStd(Builder, "MSDOS", Opts);
+    Builder.defineMacro("__DOS__");
+    Builder.defineMacro("_DOS");
   }
 }

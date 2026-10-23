@@ -632,6 +632,9 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
       return std::make_unique<X86_32TargetInfo>(Triple, Opts);
     }
 
+  case llvm::Triple::i8086:
+    return std::make_unique<X86_16TargetInfo>(Triple, Opts);
+
   case llvm::Triple::x86_64:
     if (Triple.isOSDarwin() || Triple.isOSBinFormatMachO())
       return std::make_unique<DarwinX86_64TargetInfo>(Triple, Opts);

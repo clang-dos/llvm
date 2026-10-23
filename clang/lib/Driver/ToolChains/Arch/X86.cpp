@@ -72,6 +72,10 @@ std::string x86::getX86TargetCPU(const Driver &D, const ArgList &Args,
   if (!Triple.isX86())
     return ""; // This routine is only handling x86 targets.
 
+  // The i8086 triple defaults to the original 8086.
+  if (Triple.getArch() == llvm::Triple::i8086)
+    return "i8086";
+
   bool Is64Bit = Triple.getArch() == llvm::Triple::x86_64;
 
   // FIXME: Need target hooks.

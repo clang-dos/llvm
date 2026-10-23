@@ -851,6 +851,7 @@ std::string tools::getCPUName(const Driver &D, const ArgList &Args,
 
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
+  case llvm::Triple::i8086:
     return x86::getX86TargetCPU(D, Args, T);
 
   case llvm::Triple::hexagon:
@@ -931,6 +932,7 @@ void tools::getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
     break;
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
+  case llvm::Triple::i8086:
     x86::getX86TargetFeatures(D, Triple, Args, Features);
     break;
   case llvm::Triple::hexagon:

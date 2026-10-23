@@ -1,0 +1,16 @@
+// RUN: %clang_cc1 -triple i8086-unknown-unknown -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,SMALL --implicit-check-not=__i386__ --implicit-check-not=__MSDOS__
+// RUN: %clang_cc1 -triple i8086-unknown-msdos -target-abi tiny -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,TINY,DOS --implicit-check-not=__i386__
+// RUN: %clang_cc1 -triple i8086-unknown-msdos -target-cpu i286 -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,I286
+
+// CHECK-DAG: #define _M_I86 1
+// I286-DAG: #define _M_I286 1
+// SMALL-DAG: #define _M_I86SM 1
+// TINY-DAG: #define _M_I86TM 1
+// DOS-DAG: #define __DOS__ 1
+// CHECK-DAG: #define __I86__ 1
+// CHECK-DAG: #define __INT_MAX__ 32767
+// CHECK-DAG: #define __LONG_MAX__ 2147483647L
+// DOS-DAG: #define __MSDOS__ 1
+// SMALL-DAG: #define __SMALL__ 1
+// CHECK-DAG: #define __SIZEOF_POINTER__ 2
+// TINY-DAG: #define __TINY__ 1

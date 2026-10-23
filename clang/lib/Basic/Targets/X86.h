@@ -351,9 +351,19 @@ public:
     return true;
   }
 
+  // Whether only 64-bit capable CPUs can be selected.
+  bool isOnly64BitCPUs() const {
+    return getTriple().getArch() == llvm::Triple::x86_64;
+  }
+
+  // Whether CPUs older than the 80386 can be selected.
+  bool allow16BitCPUs() const {
+    return getTriple().getArch() == llvm::Triple::i8086;
+  }
+
   bool isValidCPUName(StringRef Name) const override {
-    bool Only64Bit = getTriple().getArch() != llvm::Triple::x86;
-    return llvm::X86::parseArchX86(Name, Only64Bit) != llvm::X86::CK_None;
+    return llvm::X86::parseArchX86(Name, isOnly64BitCPUs(), allow16BitCPUs()) !=
+           llvm::X86::CK_None;
   }
 
   bool isValidTuneCPUName(StringRef Name) const override {
@@ -363,15 +373,15 @@ public:
     // Allow 32-bit only CPUs regardless of 64-bit mode unlike isValidCPUName.
     // NOTE: gcc rejects 32-bit mtune CPUs in 64-bit mode. But being lenient
     // since mtune was ignored by clang for so long.
-    return llvm::X86::parseTuneCPU(Name) != llvm::X86::CK_None;
+    return llvm::X86::parseTuneCPU(Name, /*Only64Bit=*/false,
+                                   allow16BitCPUs()) != llvm::X86::CK_None;
   }
 
   void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override;
   void fillValidTuneCPUList(SmallVectorImpl<StringRef> &Values) const override;
 
   bool setCPU(StringRef Name) override {
-    bool Only64Bit = getTriple().getArch() != llvm::Triple::x86;
-    CPU = llvm::X86::parseArchX86(Name, Only64Bit);
+    CPU = llvm::X86::parseArchX86(Name, isOnly64BitCPUs(), allow16BitCPUs());
     return CPU != llvm::X86::CK_None;
   }
 
@@ -707,6 +717,77 @@ public:
     Builder.defineMacro("__INTEL__");
     Builder.defineMacro("__rtems__");
   }
+};
+
+// 16-bit real mode (i8086), for DOS. int is 16 bits, long is 32 bits, and the
+// size of pointers depends on the memory model, which is the target ABI name.
+// Only the tiny and small memory models are supported so far.
+class LLVM_LIBRARY_VISIBILITY X86_16TargetInfo : public X86_32TargetInfo {
+  llvm::X86::MemoryModel16 Model = llvm::X86::MemoryModel16::Small;
+
+public:
+  X86_16TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : X86_32TargetInfo(Triple, Opts) {
+    IntWidth = IntAlign = 16;
+    LongWidth = 32;
+    LongAlign = LongLongAlign = 16;
+    PointerWidth = PointerAlign = 16;
+    FloatAlign = DoubleAlign = 16;
+    // long double is the same as double, as in other 16-bit DOS compilers.
+    LongDoubleWidth = 64;
+    LongDoubleAlign = 16;
+    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+    SuitableAlign = 16;
+    DefaultAlignForAttributeAligned = 16;
+    NewAlign = 16;
+    MinGlobalAlign = 0;
+    SizeType = UnsignedInt;
+    PtrDiffType = SignedInt;
+    IntPtrType = SignedInt;
+    WCharType = UnsignedShort;
+    WIntType = UnsignedInt;
+    Char32Type = UnsignedLong;
+    Int64Type = SignedLongLong;
+    IntMaxType = SignedLongLong;
+    SigAtomicType = SignedInt;
+    RegParmMax = 0;
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 16;
+    resetDataLayout();
+  }
+
+  StringRef getABI() const override {
+    return llvm::X86::getMemoryModel16Name(Model);
+  }
+
+  bool setABI(const std::string &Name) override {
+    std::optional<llvm::X86::MemoryModel16> M =
+        llvm::X86::parseMemoryModel16(Name);
+    // FIXME: Support the memory models with far code or data pointers.
+    if (!M || (*M != llvm::X86::MemoryModel16::Tiny &&
+               *M != llvm::X86::MemoryModel16::Small))
+      return false;
+    Model = *M;
+    resetDataLayout();
+    return true;
+  }
+
+  void getTargetDefines(const LangOptions &Opts,
+                        MacroBuilder &Builder) const override;
+
+  bool
+  initFeatureMap(llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags,
+                 StringRef CPU,
+                 const std::vector<std::string> &FeaturesVec) const override;
+
+  void setMaxAtomicWidth() override {}
+
+  bool supportsExtendIntArgs() const override { return false; }
+
+  // Stack objects can't be aligned beyond 2 bytes.
+  bool allowsLargerPreferedTypeAlignment() const override { return false; }
+
+  bool hasBitIntType() const override { return true; }
+  size_t getMaxBitIntWidth() const override { return 64; }
 };
 
 // x86-64 generic target

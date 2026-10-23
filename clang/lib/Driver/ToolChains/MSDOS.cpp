@@ -152,7 +152,11 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   for (const InputInfo &II : Inputs) {
     if (II.isFilename()) {
-      CmdArgs.push_back("file");
+      // Watcom linkers take libraries only with the library directive.
+      StringRef Ext = llvm::sys::path::extension(II.getFilename());
+      bool IsLib =
+          Ext.equals_insensitive(".a") || Ext.equals_insensitive(".lib");
+      CmdArgs.push_back(IsLib ? "library" : "file");
       CmdArgs.push_back(quoteName(Args, II.getFilename()));
       continue;
     }

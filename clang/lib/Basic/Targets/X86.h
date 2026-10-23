@@ -752,6 +752,8 @@ public:
     SigAtomicType = SignedInt;
     RegParmMax = 0;
     MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 16;
+    // C names get a leading underscore, as the data layout's mangling says.
+    UserLabelPrefix = "_";
     resetDataLayout();
   }
 

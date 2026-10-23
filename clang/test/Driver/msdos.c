@@ -49,3 +49,16 @@
 // BAD: error: unsupported argument 'giant' to option '-mcmodel=' for target 'i8086'
 
 int main(void) { return 0; }
+
+// Real-mode code has no GOT or PLT, so -fPIC and -fPIE don't apply.
+// RUN: %clang --target=i8086-pc-msdos -fPIC -### -c %s 2>&1 | FileCheck %s --check-prefix=NOPIC
+// RUN: %clang --target=i8086-pc-msdos -fPIE -### -c %s 2>&1 | FileCheck %s --check-prefix=NOPIC
+// NOPIC: "-cc1"
+// NOPIC-SAME: "-mrelocation-model" "static"
+// NOPIC-NOT: "-pic-level"
+
+// Archives named on the command line are libraries to the linker.
+// RUN: %clang --target=i8086-pc-msdos --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -### %s %S/Inputs/msdos_tree/lib/small/libfoo.a \
+// RUN:   %S/Inputs/msdos_tree/lib/small/libc.lib 2>&1 | FileCheck %s --check-prefix=ARCHIVE
+// ARCHIVE: "file" "{{.*}}.o" "library" "{{.*}}libfoo.a" "library" "{{.*}}libc.lib"

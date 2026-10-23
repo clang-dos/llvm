@@ -10,7 +10,15 @@
 // CHECK-DAG: #define __I86__ 1
 // CHECK-DAG: #define __INT_MAX__ 32767
 // CHECK-DAG: #define __LONG_MAX__ 2147483647L
+// CHECK-DAG: #define __USER_LABEL_PREFIX__ _
 // DOS-DAG: #define __MSDOS__ 1
 // SMALL-DAG: #define __SMALL__ 1
 // CHECK-DAG: #define __SIZEOF_POINTER__ 2
 // TINY-DAG: #define __TINY__ 1
+
+// The MSDOS driver adds the sysroot's include directory; the host's headers
+// are never searched.
+// RUN: %clang_cc1 -triple i8086-pc-msdos -E -v < /dev/null 2>&1 | FileCheck %s --check-prefix=SEARCH
+// SEARCH: #include <...> search starts here:
+// SEARCH-NOT: /usr/include
+// SEARCH: End of search list.

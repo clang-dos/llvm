@@ -32,7 +32,8 @@ public:
   bool isPIEDefault(const llvm::opt::ArgList &Args) const override {
     return false;
   }
-  bool isPICDefaultForced() const override { return false; }
+  // Real-mode DOS code has no GOT or PLT, so -fPIC and -fPIE are ignored.
+  bool isPICDefaultForced() const override { return true; }
   UnwindTableLevel
   getDefaultUnwindTableLevel(const llvm::opt::ArgList &Args) const override {
     return UnwindTableLevel::None;

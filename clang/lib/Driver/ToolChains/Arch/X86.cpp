@@ -402,3 +402,16 @@ void x86::getX86TargetFeatures(const Driver &D, const llvm::Triple &Triple,
   RESERVE_EGPR(r31)
 #undef RESERVE_EGPR
 }
+
+StringRef x86::getI8086MemoryModel(const Driver &D, const ArgList &Args) {
+  const Arg *A = Args.getLastArg(options::OPT_mcmodel_EQ);
+  if (!A)
+    return "small";
+  StringRef Model = A->getValue();
+  if (llvm::is_contained(
+          {"tiny", "small", "medium", "compact", "large", "huge"}, Model))
+    return Model;
+  D.Diag(diag::err_drv_unsupported_option_argument_for_target)
+      << A->getSpelling() << Model << "i8086";
+  return "small";
+}

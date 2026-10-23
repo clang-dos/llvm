@@ -3051,6 +3051,9 @@ void tools::addMCModel(const Driver &D, const llvm::opt::ArgList &Args,
                        const llvm::Triple &Triple,
                        const llvm::Reloc::Model &RelocationModel,
                        llvm::opt::ArgStringList &CmdArgs) {
+  // For i8086, -mcmodel= is the memory model, passed as -target-abi.
+  if (Triple.getArch() == llvm::Triple::i8086)
+    return;
   if (Arg *A = Args.getLastArg(options::OPT_mcmodel_EQ)) {
     StringRef CM = A->getValue();
     bool Ok = false;

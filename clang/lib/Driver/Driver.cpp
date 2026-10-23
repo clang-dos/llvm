@@ -31,6 +31,7 @@
 #include "ToolChains/LFILinux.h"
 #include "ToolChains/Lanai.h"
 #include "ToolChains/Linux.h"
+#include "ToolChains/MSDOS.h"
 #include "ToolChains/MSP430.h"
 #include "ToolChains/MSVC.h"
 #include "ToolChains/Managarm.h"
@@ -5459,7 +5460,7 @@ InputInfoList Driver::BuildJobsForActionNoCache(
 
 const char *Driver::getDefaultImageName() const {
   llvm::Triple Target(llvm::Triple::normalize(TargetTriple));
-  return Target.isOSWindows() ? "a.exe" : "a.out";
+  return Target.isOSWindows() || Target.isOSMSDOS() ? "a.exe" : "a.out";
 }
 
 /// Create output filename based on ArgValue, which could either be a
@@ -6176,6 +6177,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       break;
     case llvm::Triple::Haiku:
       TC = std::make_unique<toolchains::Haiku>(*this, Target, Args);
+      break;
+    case llvm::Triple::MSDOS:
+      TC = std::make_unique<toolchains::MSDOS>(*this, Target, Args);
       break;
     case llvm::Triple::Darwin:
     case llvm::Triple::MacOSX:

@@ -15,6 +15,7 @@
 #include "Arch/RISCV.h"
 #include "Arch/Sparc.h"
 #include "Arch/SystemZ.h"
+#include "Arch/X86.h"
 #include "Hexagon.h"
 #include "PS4CPU.h"
 #include "ToolChains/Cuda.h"
@@ -1653,6 +1654,7 @@ void Clang::RenderTargetOptions(const llvm::Triple &EffectiveTriple,
 
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
+  case llvm::Triple::i8086:
     AddX86TargetArgs(Args, CmdArgs);
     break;
 
@@ -2228,6 +2230,11 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
                              ArgStringList &CmdArgs) const {
   const Driver &D = getToolChain().getDriver();
   addX86AlignBranchArgs(D, Args, CmdArgs, /*IsLTO=*/false);
+
+  if (getToolChain().getTriple().getArch() == llvm::Triple::i8086) {
+    CmdArgs.push_back("-target-abi");
+    CmdArgs.push_back(x86::getI8086MemoryModel(D, Args).data());
+  }
 
   if (!Args.hasFlag(options::OPT_mred_zone, options::OPT_mno_red_zone, true) ||
       Args.hasArg(options::OPT_mkernel) ||
@@ -9271,6 +9278,12 @@ void ClangAs::AddX86TargetArgs(const ArgList &Args,
   addX86AlignBranchArgs(getToolChain().getDriver(), Args, CmdArgs,
                         /*IsLTO=*/false);
 
+  if (getToolChain().getTriple().getArch() == llvm::Triple::i8086) {
+    CmdArgs.push_back("-target-abi");
+    CmdArgs.push_back(
+        x86::getI8086MemoryModel(getToolChain().getDriver(), Args).data());
+  }
+
   if (Arg *A = Args.getLastArg(options::OPT_masm_EQ)) {
     StringRef Value = A->getValue();
     if (Value == "intel" || Value == "att") {
@@ -9493,6 +9506,7 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
 
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
+  case llvm::Triple::i8086:
     AddX86TargetArgs(Args, CmdArgs);
     break;
 

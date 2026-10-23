@@ -16,6 +16,7 @@
 #define LLVM_MC_MCOMFOBJECTWRITER_H
 
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCValue.h"
 #include "llvm/Support/Compiler.h"
 #include <memory>
 
@@ -34,6 +35,11 @@ public:
 
   Triple::ObjectFormatType getFormat() const override { return Triple::OMF; }
   bool isCodeInDGROUP() const { return CodeInDGROUP; }
+
+  /// Whether \p Target asks for the segment (paragraph) of a symbol rather
+  /// than its offset, as `sym@SEG` does on X86. Such a fixup is a base16
+  /// fixup, which the DOS loader relocates.
+  virtual bool isSegmentReference(const MCValue &Target) const { return false; }
 
   static bool classof(const MCObjectTargetWriter *W) {
     return W->getFormat() == Triple::OMF;

@@ -1214,6 +1214,14 @@ public:
       : X86AsmBackend(CLOpts, T, STI), OSABI(OSABI) {}
 };
 
+class X86OMFObjectTargetWriter : public MCOMFObjectTargetWriter {
+public:
+  using MCOMFObjectTargetWriter::MCOMFObjectTargetWriter;
+  bool isSegmentReference(const MCValue &Target) const override {
+    return Target.getSpecifier() == X86::S_SEG;
+  }
+};
+
 /// Backend for 16-bit DOS OMF objects.
 class OMFX86AsmBackend : public X86AsmBackend {
   bool CodeInDGROUP;
@@ -1225,7 +1233,7 @@ public:
 
   std::unique_ptr<MCObjectTargetWriter>
   createObjectTargetWriter() const override {
-    return std::make_unique<MCOMFObjectTargetWriter>(CodeInDGROUP);
+    return std::make_unique<X86OMFObjectTargetWriter>(CodeInDGROUP);
   }
 };
 

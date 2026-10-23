@@ -37,6 +37,7 @@ constexpr EnumStringDef<MCAsmInfo::AtSpecifierKind> AtSpecifierDefs[] = {
     {{"PLT"}, X86::S_PLT},
     {{"PLTOFF"}, X86::S_PLTOFF},
     {{"SECREL32"}, X86::S_COFF_SECREL},
+    {{"SEG"}, X86::S_SEG},
     {{"SIZE"}, X86::S_SIZE},
     {{"tlscall"}, X86::S_TLSCALL},
     {{"tlsdesc"}, X86::S_TLSDESC},

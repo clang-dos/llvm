@@ -93,6 +93,7 @@ enum {
   S_PCREL,
   S_PLT,
   S_PLTOFF,
+  S_SEG, // sym@SEG: the DOS segment (paragraph) of sym, for OMF.
   S_SIZE,
   S_TLSCALL,
   S_TLSDESC,

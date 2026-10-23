@@ -18,11 +18,17 @@
 //   _BSS   class BSS    zero-initialized data (no LEDATA is written)
 //   STACK  class STACK  sections named .stack, combine type stack
 //
+// Every module defines _TEXT, CONST, _DATA and _BSS, even when empty, so
+// that linkers keep this order whatever module they see first.
+//
 // DGROUP holds CONST, _DATA, _BSS and STACK, and _TEXT as well for the tiny
 // memory model. Non-allocatable sections (debug info, notes) and unwind
 // tables are not written.
 //
-// Fixups are written with no displacement field. As other OMF tools do, the
+// Fixups are 16-bit offsets, segment-relative or self-relative, and base16
+// segment fixups for references the target marks as such (`sym@SEG` on X86),
+// which the DOS loader relocates. Fixups are written with no displacement
+// field. As other OMF tools do, the
 // displacement goes in the LEDATA bytes at the fixup location: for a target
 // in this module that is its offset in its segment plus the addend.
 //
@@ -224,6 +230,14 @@ void OMFObjectWriter::executePostLayoutBinding() {
     Seg.Size += Asm->getSectionAddressSize(Sec);
   }
 
+  // Linkers order segments by class in the order they first see them, so
+  // every module defines the usual segments, even empty, in the usual order
+  // (as DOS compilers do). Then code, data and BSS stay in this order
+  // whichever module comes first. STACK is only defined where it is used.
+  for (unsigned K = 0; K != SK_Count; ++K)
+    if (K != SK_Stack)
+      Segs[K].Present = true;
+
   unsigned Index = 0;
   bool AnyInGroup = false;
   for (unsigned K = 0; K != SK_Count; ++K) {
@@ -284,7 +298,9 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   MCContext &Ctx = getContext();
   SMLoc Loc = Fixup.getLoc();
 
-  if (Target.getSubSym() || Target.getSpecifier()) {
+  bool SegRef =
+      Target.getSpecifier() && TargetObjectWriter->isSegmentReference(Target);
+  if (Target.getSubSym() || (Target.getSpecifier() && !SegRef)) {
     Ctx.reportError(Loc, "unsupported relocation expression in OMF object");
     return;
   }
@@ -295,6 +311,11 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   }
 
   bool PCRel = Fixup.isPCRel();
+  if (SegRef && (PCRel || Target.getConstant())) {
+    Ctx.reportError(Loc, "a segment reference cannot be PC-relative or have "
+                         "an addend");
+    return;
+  }
   switch (Fixup.getKind()) {
   case FK_Data_2:
     break;
@@ -308,7 +329,7 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   R.Seg = SecIt->second.first;
   R.Offset =
       SecIt->second.second + Asm->getFragmentOffset(F) + Fixup.getOffset();
-  R.LocType = OMF::LT_Offset16;
+  R.LocType = SegRef ? OMF::LT_Base16 : OMF::LT_Offset16;
   R.SegRelative = !PCRel;
 
   int64_t Addend = Target.getConstant();
@@ -335,7 +356,8 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     return;
   }
 
-  FixedValue = uint64_t(Addend) & 0xffff;
+  // The loader adds the frame number to a base16 field, so it starts at 0.
+  FixedValue = SegRef ? 0 : uint64_t(Addend) & 0xffff;
   Fixups.push_back(R);
 }
 

@@ -11,13 +11,15 @@
 //
 // Supported records: THEADR, LHEADR, LNAMES, LLNAMES, SEGDEF, GRPDEF,
 // EXTDEF, LEXTDEF, CEXTDEF, COMDEF, LCOMDEF, PUBDEF, LPUBDEF, LEDATA,
-// LIDATA, FIXUPP (with threads) and MODEND. Others (COMENT, LINNUM, COMDAT,
-// ...) are skipped.
+// LIDATA, FIXUPP (with threads), COMDAT and MODEND. COMDATs define symbols
+// but their data and fixups are not kept. Others (COMENT, LINNUM, ...) are
+// skipped.
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Object/OMFObjectFile.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/BinaryFormat/OMF.h"
 #include "llvm/Object/Error.h"
 
@@ -158,6 +160,9 @@ Error OMFObjectFile::parse() {
   SmallVector<int32_t, 32> Externals = {-1}; // External index to symbol.
   int32_t LastDataSeg = -1;
   uint32_t LastDataOffset = 0;
+  // Fixups after a COMDAT record apply to its data, which this reader does
+  // not place in a segment, so they are skipped.
+  bool LastDataIsComdat = false;
   Thread FrameThreads[4], TargetThreads[4];
 
   size_t Pos = 0;
@@ -327,6 +332,34 @@ Error OMFObjectFile::parse() {
       std::copy(Bytes.begin(), Bytes.end(), S.Data.begin() + Offset);
       LastDataSeg = Seg - 1;
       LastDataOffset = Offset;
+      LastDataIsComdat = false;
+      break;
+    }
+
+    case OMF::COMDAT: { // and LCOMDAT
+      uint8_t Flags = R.u8();
+      uint8_t Attr = R.u8();
+      R.u8();       // Alignment.
+      R.word(Is32); // Offset of this piece.
+      R.index();    // Type index.
+      int32_t Seg = -1;
+      if ((Attr & 0x0f) == 0) { // Explicit allocation: a public base.
+        R.index(); // Group.
+        unsigned SegIdx = R.index();
+        if (SegIdx == 0)
+          R.u16(); // Frame number.
+        else if (!CheckSeg(SegIdx))
+          return Bad("bad COMDAT segment");
+        Seg = int32_t(SegIdx) - 1;
+      }
+      unsigned NameIdx = R.index();
+      if (NameIdx == 0 || !CheckName(NameIdx))
+        return Bad("bad COMDAT name index");
+      // A continuation adds data to the COMDAT already defined.
+      if (!(Flags & 0x01))
+        Symbols.push_back({Names[NameIdx], Seg >= 0 ? SK_Defined : SK_Absolute,
+                           bool(Flags & 0x04), Seg, 0, 0, false, true});
+      LastDataIsComdat = true;
       break;
     }
 
@@ -343,7 +376,7 @@ Error OMFObjectFile::parse() {
           T.Index = (IsFrame ? Method < 3 : Method < 4) ? R.index() : 0;
           continue;
         }
-        if (LastDataSeg < 0)
+        if (LastDataSeg < 0 && !LastDataIsComdat)
           return Bad("fixup with no data record before it");
         uint8_t Lo = R.u8();
         Relocation Rel;
@@ -386,7 +419,8 @@ Error OMFObjectFile::parse() {
             return Bad("fixup to an undefined group");
           Rel.TargetName = Groups[TargetIndex];
         }
-        Segments[LastDataSeg].Relocs.push_back(Rel);
+        if (!LastDataIsComdat)
+          Segments[LastDataSeg].Relocs.push_back(Rel);
       }
       break;
 
@@ -395,8 +429,7 @@ Error OMFObjectFile::parse() {
       break;
 
     default:
-      // COMENT, LINNUM, COMDAT, BAKPAT and others carry nothing this reader
-      // needs.
+      // COMENT, LINNUM, BAKPAT and others carry nothing this reader needs.
       break;
     }
 
@@ -405,6 +438,14 @@ Error OMFObjectFile::parse() {
   }
   if (!SeenEnd)
     return malformed("no MODEND record");
+
+  StringSet<> ComdatNames;
+  for (const Symbol &Sym : Symbols)
+    if (Sym.FromComdat)
+      ComdatNames.insert(Sym.Name);
+  for (Symbol &Sym : Symbols)
+    if (Sym.Kind == SK_Undefined && ComdatNames.contains(Sym.Name))
+      Sym.RefersToComdat = true;
 
   for (Segment &S : Segments)
     if (S.Data.size() < S.Size)
@@ -433,6 +474,8 @@ Expected<uint32_t> OMFObjectFile::getSymbolFlags(DataRefImpl Symb) const {
     break;
   case SK_Undefined:
     Flags |= SymbolRef::SF_Undefined;
+    if (S.RefersToComdat)
+      Flags |= SymbolRef::SF_FormatSpecific;
     break;
   case SK_Common:
     Flags |= SymbolRef::SF_Common;

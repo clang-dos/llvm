@@ -41,11 +41,20 @@
 // displacement goes in the LEDATA bytes at the fixup location: for a target
 // in this module that is its offset in its segment plus the addend.
 //
+// A section of its own (a function or variable with -ffunction-sections or
+// -fdata-sections, or a section in a COMDAT group) whose only global symbol
+// is at its start becomes an OMF COMDAT instead: a piece of _TEXT, CONST,
+// _DATA or _BSS named by that symbol, which the linker may drop when nothing
+// uses it. In a COMDAT group (inline functions, templates, vtables) the
+// linker keeps one copy of each name ("pick any"). References to a location
+// in a COMDAT go through an EXTDEF of its name.
+//
 // A defined global symbol named "_start" becomes the module's start address.
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -59,6 +68,8 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include <map>
 
 using namespace llvm;
 
@@ -106,7 +117,8 @@ struct Segment {
 
 struct OMFFixup {
   SegmentKind Seg;  // Segment holding the fixup location.
-  uint64_t Offset;  // Location offset within that segment.
+  int Comdat = -1;  // COMDAT holding the location, or -1 for the segment.
+  uint64_t Offset;  // Location offset within that segment or COMDAT.
   uint8_t LocType;  // OMF::LocationType.
   bool SegRelative; // M bit; false means self-relative.
   // Target: a segment of this module, or an external index.
@@ -171,6 +183,15 @@ class OMFObjectWriter final : public MCObjectWriter {
   DenseMap<const MCSymbol *, unsigned> ExtIndices;
   SmallVector<const MCSymbol *, 16> Externals;
   std::vector<OMFFixup> Fixups;
+  struct Comdat {
+    const MCSectionELF *Sec;
+    const MCSymbol *Sym; // Its name, at offset 0.
+    SegmentKind Base;
+    bool PickAny; // From a COMDAT group: keep any one copy.
+  };
+  SmallVector<Comdat, 0> Comdats;
+  DenseMap<const MCSection *, unsigned> ComdatIndex;
+  unsigned NumLNames = 0;
   unsigned DGroupIndex = 0;
 
   bool inDGROUP(SegmentKind K) const {
@@ -180,6 +201,10 @@ class OMFObjectWriter final : public MCObjectWriter {
   unsigned getExternalIndex(const MCSymbol &Sym);
   bool getSymbolLocation(const MCSymbol &Sym, SegmentKind &Seg,
                          uint64_t &Offset) const;
+  bool getComdatLocation(const MCSymbol &Sym, unsigned &Idx,
+                         uint64_t &Offset) const;
+  void findComdats();
+  void writeComdats();
 
   void writeHeader();
   void writeNamesAndSegments();
@@ -202,6 +227,9 @@ public:
     ExtIndices.clear();
     Externals.clear();
     Fixups.clear();
+    Comdats.clear();
+    ComdatIndex.clear();
+    NumLNames = 0;
     DGroupIndex = 0;
     MCObjectWriter::reset();
   }
@@ -253,10 +281,75 @@ OMFObjectWriter::classifySection(const MCSectionELF &Sec) const {
   return SK_Const;
 }
 
+void OMFObjectWriter::findComdats() {
+  // The global symbols defined in each section. A section that an alias
+  // points into is not a COMDAT, since OMF cannot export the alias.
+  DenseMap<const MCSection *, SmallVector<const MCSymbol *, 1>> Globals;
+  DenseSet<const MCSection *> Excluded;
+  std::map<std::pair<const MCSymbol *, StringRef>, unsigned> GroupParts;
+  for (const MCSymbol &S : Asm->symbols()) {
+    const auto &Sym = static_cast<const MCSymbolELF &>(S);
+    if (Sym.isVariable()) {
+      const MCSymbol *Base = Asm->getBaseSymbol(Sym);
+      if (Base && Base->isInSection())
+        Excluded.insert(&Base->getSection());
+      continue;
+    }
+    if (!Sym.isInSection() || Sym.isTemporary() || !Sym.isBindingSet() ||
+        Sym.getBinding() == ELF::STB_LOCAL)
+      continue;
+    Globals[&Sym.getSection()].push_back(&Sym);
+  }
+
+  for (const MCSection &S : *Asm) {
+    const auto &Sec = static_cast<const MCSectionELF &>(S);
+    std::optional<SegmentKind> K = classifySection(Sec);
+    if (!K || (*K != SK_Text && *K != SK_Const && *K != SK_Data &&
+               *K != SK_Bss))
+      continue;
+    // Only a section of its own: in a group, or named like .text.foo.
+    if (!Sec.getGroup() && Sec.getName().find('.', 1) == StringRef::npos)
+      continue;
+    if (Excluded.count(&Sec) || Asm->getSectionAddressSize(Sec) == 0)
+      continue;
+    auto It = Globals.find(&Sec);
+    const MCSymbol *Sym = nullptr;
+    if (It == Globals.end()) {
+      // A group section with no global symbol, such as a function's jump
+      // table, is named after its group and section, so that it is kept
+      // with the function and its copies in other modules merge.
+      const MCSymbolELF *Sig = Sec.getGroup();
+      if (!Sig)
+        continue;
+      // The section name repeats the function name, so only its first
+      // part (.rodata) is kept, with a count for a second one.
+      StringRef Kind = Sec.getName().substr(1).split('.').first;
+      unsigned &N = GroupParts[{Sig, Kind}];
+      Sym = getContext().getOrCreateSymbol(Sig->getName() + "$" + Kind +
+                                           (N++ ? Twine(N - 1) : Twine()));
+    } else {
+      if (It->second.size() != 1)
+        continue;
+      Sym = It->second.front();
+      uint64_t Offset;
+      if (!Asm->getSymbolOffset(*Sym, Offset) || Offset != 0)
+        continue;
+    }
+    if (Sym->getName().size() > 255)
+      continue;
+    ComdatIndex[&Sec] = Comdats.size();
+    Comdats.push_back({&Sec, Sym, *K, Sec.getGroup() != nullptr});
+  }
+}
+
 void OMFObjectWriter::executePostLayoutBinding() {
+  findComdats();
+
   // Place sections in segments.
   for (const MCSection &S : *Asm) {
     const auto &Sec = static_cast<const MCSectionELF &>(S);
+    if (ComdatIndex.count(&Sec))
+      continue;
     std::optional<SegmentKind> K = classifySection(Sec);
     if (!K)
       continue;
@@ -319,6 +412,18 @@ unsigned OMFObjectWriter::getExternalIndex(const MCSymbol &Sym) {
   return It->second;
 }
 
+bool OMFObjectWriter::getComdatLocation(const MCSymbol &Sym, unsigned &Idx,
+                                        uint64_t &Offset) const {
+  const MCSymbol *Base = Asm->getBaseSymbol(Sym);
+  if (!Base || !Base->isInSection())
+    return false;
+  auto It = ComdatIndex.find(&Base->getSection());
+  if (It == ComdatIndex.end() || !Asm->getSymbolOffset(Sym, Offset))
+    return false;
+  Idx = It->second;
+  return true;
+}
+
 bool OMFObjectWriter::getSymbolLocation(const MCSymbol &Sym, SegmentKind &Seg,
                                         uint64_t &Offset) const {
   const MCSymbol *Base = Asm->getBaseSymbol(Sym);
@@ -339,8 +444,9 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
                                        const MCFixup &Fixup, MCValue Target,
                                        uint64_t &FixedValue) {
   auto SecIt = SectionMap.find(F.getParent());
+  auto CdIt = ComdatIndex.find(F.getParent());
   // Fixups in sections that are not written (debug info) are dropped.
-  if (SecIt == SectionMap.end()) {
+  if (SecIt == SectionMap.end() && CdIt == ComdatIndex.end()) {
     FixedValue = 0;
     return;
   }
@@ -375,9 +481,15 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   }
 
   OMFFixup R;
-  R.Seg = SecIt->second.first;
-  R.Offset =
-      SecIt->second.second + Asm->getFragmentOffset(F) + Fixup.getOffset();
+  if (CdIt != ComdatIndex.end()) {
+    R.Comdat = CdIt->second;
+    R.Seg = Comdats[CdIt->second].Base;
+    R.Offset = Asm->getFragmentOffset(F) + Fixup.getOffset();
+  } else {
+    R.Seg = SecIt->second.first;
+    R.Offset =
+        SecIt->second.second + Asm->getFragmentOffset(F) + Fixup.getOffset();
+  }
   R.LocType = SegRef ? OMF::LT_Base16 : OMF::LT_Offset16;
   R.SegRelative = !PCRel;
 
@@ -389,7 +501,15 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
 
   SegmentKind TargetSeg;
   uint64_t TargetOffset;
-  if (!Sym->isCommon() && getSymbolLocation(*Sym, TargetSeg, TargetOffset)) {
+  unsigned TargetComdat;
+  if (!Sym->isCommon() && getComdatLocation(*Sym, TargetComdat, TargetOffset)) {
+    // A COMDAT is reached through an external of its name.
+    R.IsExternal = true;
+    R.TargetSeg = SK_Text;
+    R.ExtIndex = getExternalIndex(*Comdats[TargetComdat].Sym);
+    Addend += TargetOffset;
+  } else if (!Sym->isCommon() &&
+             getSymbolLocation(*Sym, TargetSeg, TargetOffset)) {
     R.IsExternal = false;
     R.TargetSeg = TargetSeg;
     R.ExtIndex = 0;
@@ -453,6 +573,7 @@ void OMFObjectWriter::writeNamesAndSegments() {
   for (StringRef N : Names)
     LNames.name(N);
   LNames.write(OS);
+  NumLNames = Names.size();
 
   for (unsigned K = 0; K != SK_Count; ++K) {
     const Segment &Seg = Segs[K];
@@ -494,7 +615,8 @@ void OMFObjectWriter::writeExternals() {
   SmallVector<std::pair<unsigned, unsigned>, 4> Weak;
   for (unsigned I = 0, E = Externals.size(); I != E; ++I) {
     const auto *Sym = static_cast<const MCSymbolELF *>(Externals[I]);
-    if (Sym->isCommon() || Sym->getBinding() != ELF::STB_WEAK)
+    if (Sym->isCommon() || !Sym->isUndefined() ||
+        Sym->getBinding() != ELF::STB_WEAK)
       continue;
     MCSymbol *Null = getContext().getOrCreateSymbol("__omf_weak_null");
     if (Null == Sym || !Null->isUndefined())
@@ -576,6 +698,11 @@ void OMFObjectWriter::writePublics() {
         Sym.getBinding() == ELF::STB_LOCAL)
       continue;
     if (Sym.isInSection() && Sym.getSection().getBeginSymbol() == &Sym)
+      continue;
+    // A COMDAT names itself.
+    unsigned CdIdx;
+    uint64_t CdOffset;
+    if (getComdatLocation(Sym, CdIdx, CdOffset))
       continue;
     SegmentKind K;
     uint64_t Offset;
@@ -683,7 +810,7 @@ void OMFObjectWriter::writeSegmentData(SegmentKind K) {
   SmallVector<const OMFFixup *, 32> SegFixups;
   std::vector<bool> InFixup(Seg.Size, false);
   for (const OMFFixup &R : Fixups) {
-    if (R.Seg != K)
+    if (R.Seg != K || R.Comdat >= 0)
       continue;
     SegFixups.push_back(&R);
     InFixup[R.Offset] = InFixup[R.Offset + 1] = true;
@@ -734,6 +861,73 @@ void OMFObjectWriter::writeSegmentData(SegmentKind K) {
   }
 }
 
+void OMFObjectWriter::writeComdats() {
+  if (Comdats.empty())
+    return;
+
+  // COMDAT names are LNAMES, numbered after the segment and class names.
+  Record LNames(OMF::LNAMES);
+  for (const Comdat &C : Comdats) {
+    StringRef Name = C.Sym->getName();
+    if (LNames.size() + Name.size() + 1 > OMF::MaxRecordData) {
+      LNames.write(OS);
+      LNames.clear();
+    }
+    LNames.name(Name);
+  }
+  LNames.write(OS);
+
+  for (unsigned CI = 0, CE = Comdats.size(); CI != CE; ++CI) {
+    const Comdat &C = Comdats[CI];
+    uint64_t Size = Asm->getSectionAddressSize(*C.Sec);
+    if (Size > 0xffff) {
+      getContext().reportError(SMLoc(), "section " + C.Sec->getName() +
+                                            " is larger than 64 KiB");
+      continue;
+    }
+    SmallVector<uint8_t, 0> Image(Size, 0);
+    if (!C.Sec->isBssSection()) {
+      SmallString<256> Buf;
+      raw_svector_ostream VOS(Buf);
+      Asm->writeSectionData(VOS, C.Sec);
+      std::copy(Buf.begin(), Buf.end(), Image.begin());
+    }
+    SmallVector<const OMFFixup *, 8> CdFixups;
+    for (const OMFFixup &R : Fixups)
+      if (R.Comdat == int(CI))
+        CdFixups.push_back(&R);
+
+    Align A = C.Sec->getAlign();
+    uint8_t AlignCode = A.value() == 1   ? OMF::SA_Byte
+                        : A.value() == 2 ? OMF::SA_Word
+                                         : OMF::SA_Para;
+    // Header: flags, attributes, align, offset (2), type, group, segment,
+    // name; at most 10 bytes.
+    const uint64_t MaxChunk = OMF::MaxRecordData - 12;
+    for (uint64_t I = 0; I < Size;) {
+      uint64_t End = std::min(Size, I + MaxChunk);
+      // Do not split a fixup field across two records.
+      for (const OMFFixup *R : CdFixups)
+        if (R->Offset < End && R->Offset + 2 > End)
+          End = R->Offset;
+      Record Cd(OMF::COMDAT);
+      Cd.byte(I == 0 ? 0x00 : 0x01); // Continuation flag.
+      // Selection in the high nibble; allocation 0 is the explicit base.
+      Cd.byte(C.PickAny ? 0x10 : 0x00);
+      Cd.byte(AlignCode);
+      Cd.word(I);
+      Cd.index(0); // Type index.
+      Cd.index(inDGROUP(C.Base) ? DGroupIndex : 0);
+      Cd.index(Segs[C.Base].Index);
+      Cd.index(NumLNames + CI + 1);
+      Cd.bytes(ArrayRef(Image).slice(I, End - I));
+      Cd.write(OS);
+      writeFixups(C.Base, I, End, CdFixups);
+      I = End;
+    }
+  }
+}
+
 void OMFObjectWriter::writeModuleEnd() {
   Record ModEnd(OMF::MODEND);
   const MCSymbol *Start = nullptr;
@@ -772,6 +966,7 @@ uint64_t OMFObjectWriter::writeObject() {
   writePublics();
   for (unsigned K = 0; K != SK_Count; ++K)
     writeSegmentData(SegmentKind(K));
+  writeComdats();
   writeModuleEnd();
   return OS.tell() - StartOffset;
 }

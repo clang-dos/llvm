@@ -9,7 +9,7 @@ import sys
 NAMES = {0x80: 'THEADR', 0x88: 'COMENT', 0x8A: 'MODEND', 0x8C: 'EXTDEF',
          0x90: 'PUBDEF', 0x94: 'LINNUM', 0x96: 'LNAMES', 0x98: 'SEGDEF',
          0x9A: 'GRPDEF', 0x9C: 'FIXUPP', 0xA0: 'LEDATA', 0xA2: 'LIDATA',
-         0xB0: 'COMDEF', 0xB4: 'LEXTDEF', 0xB6: 'LPUBDEF'}
+         0xB0: 'COMDEF', 0xB4: 'LEXTDEF', 0xB6: 'LPUBDEF', 0xC2: 'COMDAT'}
 LOC = {0: 'lobyte', 1: 'offset16', 2: 'base16', 3: 'ptr16:16', 4: 'hibyte',
        5: 'offset16(ldr)', 9: 'offset32', 11: 'ptr16:32', 13: 'offset32(ldr)'}
 
@@ -105,6 +105,15 @@ def dump(path, out=sys.stdout):
                 print('  FIXUP @%03X %s %s frame=F%d%s target=T%d:%s disp=%s' % (
                     off, 'seg' if m else 'self', LOC.get(loc, loc), f,
                     '' if fdat is None else ':%d' % fdat, t + 4 * p, tdat, disp), file=out)
+        elif typ == 0xC2:
+            fl = r.u8(); attr = r.u8(); al = r.u8(); off = r.u16(); r.idx()
+            g = s = 0
+            if attr & 0xF == 0:
+                g = r.idx(); s = r.idx()
+            n = r.idx()
+            print('COMDAT %r flags=%02X attr=%02X align=%d group=%d seg=%d off=%04X len=%d %s' % (
+                lnames[n], fl, attr, al, g, s, off, len(rec) - r.i,
+                bytes(rec[r.i:]).hex()), file=out)
         elif typ == 0xB0:
             while r.more():
                 n = r.name(); r.idx(); kind = r.u8()

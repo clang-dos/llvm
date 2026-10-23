@@ -53,7 +53,7 @@ local:
 	movw	$_buf, %si
 	ret
 
-	.section .text.second,"ax",@progbits
+	.section .text_second,"ax",@progbits
 	.globl	_main
 _main:
 	call	local

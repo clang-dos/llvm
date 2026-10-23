@@ -56,6 +56,10 @@ public:
     int32_t Segment;  // Index into Segments, or -1.
     uint32_t Value;   // Offset within the segment, or the absolute value.
     uint32_t CommonSize;
+    // An EXTDEF of a COMDAT defined in the same module: listed as format
+    // specific, since the module defines the name.
+    bool RefersToComdat = false;
+    bool FromComdat = false; // Defined by a COMDAT record.
   };
 
   static Expected<std::unique_ptr<OMFObjectFile>> create(MemoryBufferRef Object);

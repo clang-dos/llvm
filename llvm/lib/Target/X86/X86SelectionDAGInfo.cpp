@@ -279,6 +279,10 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemset(
   if (DstPtrInfo.getAddrSpace() >= 256)
     return SDValue();
 
+  // The 16-bit ABI does not keep ES equal to DS, which REP STOS needs.
+  if (Subtarget.isTarget16BitABI())
+    return SDValue();
+
   // REP STOS uses EDI on x86-32. Fall back if the user reserved EDI, so the
   // generic expander can avoid emitting REP STOS.
   if (!Subtarget.is64Bit() && Subtarget.isRegisterReservedByUser(X86::EDI))
@@ -398,6 +402,10 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemcpy(
 
   // If to a segment-relative address space, use the default lowering.
   if (DstPtrInfo.getAddrSpace() >= 256 || SrcPtrInfo.getAddrSpace() >= 256)
+    return SDValue();
+
+  // The 16-bit ABI does not keep ES equal to DS, which REP MOVS needs.
+  if (Subtarget.isTarget16BitABI())
     return SDValue();
 
   // REP MOVS uses EDI/ESI on x86-32. fall back only when EDI is

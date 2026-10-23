@@ -2,7 +2,11 @@
 ; The compact memory model: data pointers are far (address space 2), 32-bit
 ; segment:offset values. An access through one loads the segment into ES;
 ; a near global cast to far is accessed through DS as it is.
+; The large model adds far code: functions return with RETF and library
+; calls are CALL FAR.
 ; RUN: llc -mtriple=i8086-pc-msdos -target-abi=compact < %s | FileCheck %s
+; RUN: llc -mtriple=i8086-pc-msdos -target-abi=large < %s \
+; RUN:   | FileCheck %s --check-prefix=LARGE
 
 @g = global i16 0, align 2
 @h = global i16 0, align 2
@@ -18,6 +22,17 @@ define i16 @load(ptr addrspace(2) %p) nounwind {
 ; CHECK-NEXT:    movw %es:(%bx), %ax
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
+;
+; LARGE-LABEL: load:
+; LARGE:       # %bb.0:
+; LARGE-NEXT:    pushw %bp
+; LARGE-NEXT:    movw %sp, %bp
+; LARGE-NEXT:    movw 6(%bp), %bx
+; LARGE-NEXT:    movw 8(%bp), %ax
+; LARGE-NEXT:    movw %ax, %es
+; LARGE-NEXT:    movw %es:(%bx), %ax
+; LARGE-NEXT:    popw %bp
+; LARGE-NEXT:    lretw
   %v = load i16, ptr addrspace(2) %p, align 2
   ret i16 %v
 }
@@ -34,6 +49,18 @@ define void @store(ptr addrspace(2) %p, i16 %v) nounwind {
 ; CHECK-NEXT:    movw %ax, %es:6(%bx)
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
+;
+; LARGE-LABEL: store:
+; LARGE:       # %bb.0:
+; LARGE-NEXT:    pushw %bp
+; LARGE-NEXT:    movw %sp, %bp
+; LARGE-NEXT:    movw 10(%bp), %ax
+; LARGE-NEXT:    movw 6(%bp), %bx
+; LARGE-NEXT:    movw 8(%bp), %cx
+; LARGE-NEXT:    movw %cx, %es
+; LARGE-NEXT:    movw %ax, %es:6(%bx)
+; LARGE-NEXT:    popw %bp
+; LARGE-NEXT:    lretw
   %q = getelementptr inbounds i16, ptr addrspace(2) %p, i16 3
   store i16 %v, ptr addrspace(2) %q, align 2
   ret void
@@ -47,6 +74,14 @@ define i16 @near_global() nounwind {
 ; CHECK-NEXT:    movw _g, %ax
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
+;
+; LARGE-LABEL: near_global:
+; LARGE:       # %bb.0:
+; LARGE-NEXT:    pushw %bp
+; LARGE-NEXT:    movw %sp, %bp
+; LARGE-NEXT:    movw _g, %ax
+; LARGE-NEXT:    popw %bp
+; LARGE-NEXT:    lretw
   %p = addrspacecast ptr @g to ptr addrspace(2)
   %v = load i16, ptr addrspace(2) %p, align 2
   ret i16 %v
@@ -61,6 +96,15 @@ define ptr addrspace(2) @far_global() nounwind {
 ; CHECK-NEXT:    movw $_g, %ax
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
+;
+; LARGE-LABEL: far_global:
+; LARGE:       # %bb.0:
+; LARGE-NEXT:    pushw %bp
+; LARGE-NEXT:    movw %sp, %bp
+; LARGE-NEXT:    movw %ds, %dx
+; LARGE-NEXT:    movw $_g, %ax
+; LARGE-NEXT:    popw %bp
+; LARGE-NEXT:    lretw
   %p = addrspacecast ptr @g to ptr addrspace(2)
   ret ptr addrspace(2) %p
 }
@@ -90,6 +134,30 @@ define i16 @select_load(i1 %c, ptr addrspace(2) %p) nounwind {
 ; CHECK-NEXT:    movw %es:(%bx), %ax
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
+;
+; LARGE-LABEL: select_load:
+; LARGE:       # %bb.0:
+; LARGE-NEXT:    pushw %bp
+; LARGE-NEXT:    movw %sp, %bp
+; LARGE-NEXT:    testb $1, 6(%bp)
+; LARGE-NEXT:    jne .LBB4_1
+; LARGE-NEXT:  # %bb.2:
+; LARGE-NEXT:    movw $_h, %ax
+; LARGE-NEXT:    je .LBB4_5
+; LARGE-NEXT:  .LBB4_4:
+; LARGE-NEXT:    movw 10(%bp), %cx
+; LARGE-NEXT:    jmp .LBB4_6
+; LARGE-NEXT:  .LBB4_1:
+; LARGE-NEXT:    movw 8(%bp), %ax
+; LARGE-NEXT:    jne .LBB4_4
+; LARGE-NEXT:  .LBB4_5:
+; LARGE-NEXT:    movw %ds, %cx
+; LARGE-NEXT:  .LBB4_6:
+; LARGE-NEXT:    movw %cx, %es
+; LARGE-NEXT:    movw %ax, %bx
+; LARGE-NEXT:    movw %es:(%bx), %ax
+; LARGE-NEXT:    popw %bp
+; LARGE-NEXT:    lretw
   %n = addrspacecast ptr @h to ptr addrspace(2)
   %a = load i16, ptr addrspace(2) %p, align 2
   %b = load i16, ptr addrspace(2) %n, align 2
@@ -113,6 +181,20 @@ define void @copy(ptr addrspace(2) %d, ptr addrspace(2) %s, i16 %n) nounwind {
 ; CHECK-NEXT:    addw $10, %sp
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
+;
+; LARGE-LABEL: copy:
+; LARGE:       # %bb.0:
+; LARGE-NEXT:    pushw %bp
+; LARGE-NEXT:    movw %sp, %bp
+; LARGE-NEXT:    pushw 14(%bp)
+; LARGE-NEXT:    pushw 12(%bp)
+; LARGE-NEXT:    pushw 10(%bp)
+; LARGE-NEXT:    pushw 8(%bp)
+; LARGE-NEXT:    pushw 6(%bp)
+; LARGE-NEXT:    lcallw $_memcpy@SEG, $_memcpy
+; LARGE-NEXT:    addw $10, %sp
+; LARGE-NEXT:    popw %bp
+; LARGE-NEXT:    lretw
   call void @llvm.memcpy.p2.p2.i16(ptr addrspace(2) %d, ptr addrspace(2) %s, i16 %n, i1 false)
   ret void
 }
@@ -137,6 +219,23 @@ define i16 @va(i16 %n, ...) nounwind {
 ; CHECK-NEXT:    movw %bp, %sp
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
+;
+; LARGE-LABEL: va:
+; LARGE:       # %bb.0:
+; LARGE-NEXT:    pushw %bp
+; LARGE-NEXT:    movw %sp, %bp
+; LARGE-NEXT:    subw $4, %sp
+; LARGE-NEXT:    movw %ds, %cx
+; LARGE-NEXT:    movw %cx, -2(%bp)
+; LARGE-NEXT:    leaw 8(%bp), %ax
+; LARGE-NEXT:    movw %ax, -4(%bp)
+; LARGE-NEXT:    movw %ds:8(%bp), %ax
+; LARGE-NEXT:    movw %cx, -2(%bp)
+; LARGE-NEXT:    leaw 10(%bp), %cx
+; LARGE-NEXT:    movw %cx, -4(%bp)
+; LARGE-NEXT:    movw %bp, %sp
+; LARGE-NEXT:    popw %bp
+; LARGE-NEXT:    lretw
   %ap = alloca ptr addrspace(2), align 2
   %apc = addrspacecast ptr %ap to ptr addrspace(2)
   call void @llvm.va_start.p2(ptr addrspace(2) %apc)

@@ -3,10 +3,10 @@
 // Functions are in the near code address space (4).
 // RUN: %clang_cc1 -triple i8086-unknown-unknown -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple i8086-unknown-unknown -target-abi tiny -emit-llvm -o - %s | FileCheck %s
-// RUN: not %clang_cc1 -triple i8086-unknown-unknown -target-abi large -emit-llvm -o - %s 2>&1 | FileCheck %s --check-prefix=LARGE
+// RUN: not %clang_cc1 -triple i8086-unknown-unknown -target-abi huge -emit-llvm -o - %s 2>&1 | FileCheck %s --check-prefix=HUGE
 
 // CHECK: target datalayout = "e-m:e-p:16:16-p1:16:16-p2:32:16:16:16-p3:32:16:16:32-p4:16:16-p5:32:16:16:16-p256:16:16-p257:16:16-p258:16:16-i32:16-i64:16-i128:16-f32:16-f64:16-f80:16-n8:16-a:0:16-S16-P4"
-// LARGE: error: unknown target ABI 'large'
+// HUGE: error: unknown target ABI 'huge'
 
 _Static_assert(sizeof(short) == 2, "");
 _Static_assert(sizeof(int) == 2, "");

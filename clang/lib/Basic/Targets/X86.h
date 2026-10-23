@@ -772,9 +772,8 @@ public:
   bool setABI(const std::string &Name) override {
     std::optional<llvm::X86::MemoryModel16> M =
         llvm::X86::parseMemoryModel16(Name);
-    // FIXME: Support the large and huge memory models.
-    if (!M || *M == llvm::X86::MemoryModel16::Large ||
-        *M == llvm::X86::MemoryModel16::Huge)
+    // FIXME: Support the huge memory model.
+    if (!M || *M == llvm::X86::MemoryModel16::Huge)
       return false;
     Model = *M;
     // In the far-data models C pointers are far: 32-bit segment:offset

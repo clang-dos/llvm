@@ -38,6 +38,11 @@
 // NOSTD-NOT: crt0.obj
 // NOSTD-NOT: libc.lib
 
+// Tuning defaults to the target CPU, not to a modern "generic" x86.
+// RUN: %clang --target=i8086-pc-msdos -### -c %s 2>&1 | FileCheck %s --check-prefix=TUNE
+// TUNE: "-target-cpu" "i8086"
+// TUNE-NOT: "-tune-cpu"
+
 // Unknown memory models are rejected.
 // RUN: not %clang --target=i8086-pc-msdos -mcmodel=giant -### -c %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=BAD

@@ -1907,6 +1907,9 @@ def : Pat<(i8 (trunc (srl_su (i32 (anyext GR16:$src)), (i8 8)))),
 def : Pat<(i8 (trunc (srl_su GR32:$src, (i8 8)))),
           (EXTRACT_SUBREG GR32:$src, sub_8bit_hi)>,
       Requires<[Not64BitMode]>;
+// MOVZX needs an 80386; before that, a 16-bit shift right by 8 is selected
+// like any other shift.
+let Predicates = [Has386] in {
 def : Pat<(srl GR16:$src, (i8 8)),
           (EXTRACT_SUBREG
             (MOVZX32rr8_NOREX (EXTRACT_SUBREG GR16:$src, sub_8bit_hi)),
@@ -1915,6 +1918,7 @@ def : Pat<(i32 (zext (srl_su GR16:$src, (i8 8)))),
           (MOVZX32rr8_NOREX (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>;
 def : Pat<(i32 (anyext (srl_su GR16:$src, (i8 8)))),
           (MOVZX32rr8_NOREX (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>;
+}
 def : Pat<(and (srl_su GR32:$src, (i8 8)), (i32 255)),
           (MOVZX32rr8_NOREX (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>;
 def : Pat<(srl (and_su GR32:$src, immff00_ffff), (i8 8)),

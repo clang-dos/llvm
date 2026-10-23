@@ -2289,8 +2289,12 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
   // Handle -mtune.
 
   // Default to "generic" unless -march is present or targetting the PS4/PS5.
+  // For i8086 the CPU itself is the tuning default; "generic" means a modern
+  // x86.
   std::string TuneCPU;
-  if (!Args.hasArg(options::OPT_march_EQ) && !getToolChain().getTriple().isPS())
+  if (!Args.hasArg(options::OPT_march_EQ) &&
+      !getToolChain().getTriple().isPS() &&
+      getToolChain().getTriple().getArch() != llvm::Triple::i8086)
     TuneCPU = "generic";
 
   // Override based on -mtune.

@@ -57483,7 +57483,8 @@ static SDValue combineXorSubCTLZ(SDNode *N, const SDLoc &DL, SelectionDAG &DAG,
                                  const X86Subtarget &Subtarget) {
   assert((N->getOpcode() == ISD::XOR || N->getOpcode() == ISD::SUB) &&
          "Invalid opcode for combing with CTLZ");
-  if (Subtarget.hasFastLZCNT())
+  // There is no BSR before the 80386.
+  if (Subtarget.hasFastLZCNT() || Subtarget.isPre386())
     return SDValue();
 
   EVT VT = N->getValueType(0);

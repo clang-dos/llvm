@@ -28,7 +28,7 @@ define i16 @sw(i16 %a) {
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    addw %ax, %ax
 ; CHECK-NEXT:    movw %ax, %bx
-; CHECK-NEXT:    jmpw *.LJTI1_0(%bx)
+; CHECK-NEXT:    jmpw *%cs:.LJTI1_0(%bx)
 ; CHECK-NEXT:  .LBB1_2: # %a0
 ; CHECK-NEXT:    movw $10, %ax
 ; CHECK-NEXT:    popw %bp

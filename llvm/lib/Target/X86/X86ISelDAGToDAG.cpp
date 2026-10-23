@@ -3287,6 +3287,14 @@ bool X86DAGToDAGISel::selectAddr(SDNode *Parent, SDValue N, SDValue &Base,
       AM.Segment = CurDAG->getRegister(X86::FS, MVT::i16);
     if (AddrSpace == X86AS::SS)
       AM.Segment = CurDAG->getRegister(X86::SS, MVT::i16);
+    // On 16-bit DOS, jump tables are in the code segment.
+    const MachinePointerInfo &PtrInfo =
+        cast<MemSDNode>(Parent)->getPointerInfo();
+    if (Subtarget->isTarget16BitABI() && !AM.Segment.getNode() &&
+        isa<const PseudoSourceValue *>(PtrInfo.V) &&
+        cast<const PseudoSourceValue *>(PtrInfo.V)->kind() ==
+            PseudoSourceValue::JumpTable)
+      AM.Segment = CurDAG->getRegister(X86::CS, MVT::i16);
   }
 
   // Save the DL and VT before calling matchAddress, it can invalidate N.

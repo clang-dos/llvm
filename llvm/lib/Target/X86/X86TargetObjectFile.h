@@ -45,6 +45,17 @@ namespace llvm {
     const MCExpr *getDebugThreadLocalSymbol(const MCSymbol *Sym) const override;
   };
 
+  /// This implementation is used for 16-bit DOS (OMF objects). Jump tables
+  /// go in the function's code section, where they are read through CS.
+  /// Then the linker keeps them only with their function.
+  class X86OMFTargetObjectFile : public X86ELFTargetObjectFile {
+  public:
+    bool shouldPutJumpTableInFunctionSection(bool UsesLabelDifference,
+                                             const Function &F) const override {
+      return true;
+    }
+  };
+
   /// This implementation is used for X86_64 ELF targets, and defers to
   /// X86ELFTargetObjectFile for commonalities with 32-bit targets.
   class X86_64ELFTargetObjectFile : public X86ELFTargetObjectFile {

@@ -119,6 +119,8 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
 
   if (TT.isX86_64())
     return std::make_unique<X86_64ELFTargetObjectFile>();
+  if (TT.getArch() == Triple::i8086)
+    return std::make_unique<X86OMFTargetObjectFile>();
   return std::make_unique<X86ELFTargetObjectFile>();
 }
 

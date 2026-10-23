@@ -61,6 +61,17 @@ void MSDOS::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   addSystemInclude(DriverArgs, CC1Args, Dir);
 }
 
+void MSDOS::AddClangCXXStdlibIncludeArgs(const ArgList &DriverArgs,
+                                         ArgStringList &CC1Args) const {
+  if (DriverArgs.hasArg(options::OPT_nostdinc, options::OPT_nostdlibinc,
+                        options::OPT_nostdincxx))
+    return;
+  // libc++ in <sysroot>/include/c++/v1, as on other bare targets.
+  SmallString<128> Dir(computeSysRoot());
+  llvm::sys::path::append(Dir, "include", "c++", "v1");
+  addSystemInclude(DriverArgs, CC1Args, Dir);
+}
+
 Tool *MSDOS::buildLinker() const { return new tools::msdos::Linker(*this); }
 
 /// Watcom linkers join their arguments into one directive string, so a file
@@ -128,6 +139,10 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("com");
   CmdArgs.push_back("option");
   CmdArgs.push_back("quiet");
+  // Drop code that nothing references. With COMDATs this removes unused
+  // functions, such as most of an explicitly instantiated libc++ template.
+  CmdArgs.push_back("option");
+  CmdArgs.push_back("eliminate");
   // DOS ignores a stack segment in a .COM program; the startup code may still
   // define an empty one to mark the end of BSS.
   if (IsCOM) {
@@ -178,7 +193,12 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Default libraries are linked when the sysroot has them.
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
-    for (StringRef Name : {"c", "clang_rt.builtins"})
+    // C++ programs also get libc++ and libc++abi.
+    SmallVector<StringRef, 4> Names;
+    if (TC.ShouldLinkCXXStdlib(Args))
+      Names.append({"c++", "c++abi"});
+    Names.append({"c", "clang_rt.builtins"});
+    for (StringRef Name : Names)
       if (std::optional<std::string> Path = findLibrary(TC, Args, Name)) {
         CmdArgs.push_back("library");
         CmdArgs.push_back(quoteName(Args, *Path));

@@ -581,15 +581,25 @@ CodeGenModule::CodeGenModule(ASTContext &C,
   PointerAlignInBytes =
       C.toCharUnitsFromBits(C.getTargetInfo().getPointerAlign(LangAS::Default))
           .getQuantity();
-  SizeSizeInBytes =
-    C.toCharUnitsFromBits(C.getTargetInfo().getMaxPointerWidth()).getQuantity();
+  const TargetInfo &TI = C.getTargetInfo();
+  unsigned SizeWidth = TI.getMaxPointerWidth();
+  SizeSizeInBytes = C.toCharUnitsFromBits(SizeWidth).getQuantity();
   IntAlignInBytes =
     C.toCharUnitsFromBits(C.getTargetInfo().getIntAlign()).getQuantity();
   CharTy =
     llvm::IntegerType::get(LLVMContext, C.getTargetInfo().getCharWidth());
   IntTy = llvm::IntegerType::get(LLVMContext, C.getTargetInfo().getIntWidth());
-  IntPtrTy = llvm::IntegerType::get(LLVMContext,
-    C.getTargetInfo().getMaxPointerWidth());
+  // ptrdiff_t can be wider than size_t but no wider than a pointer (i8086
+  // huge16). Array indices are promoted to IntPtrTy, so it is that wide too.
+  unsigned PtrDiffWidth = SizeWidth;
+  unsigned TIPtrDiffWidth =
+      TI.getTypeWidth(TI.getPtrDiffType(LangAS::Default));
+  if (TIPtrDiffWidth > SizeWidth &&
+      TIPtrDiffWidth <= TI.getPointerWidth(LangAS::Default))
+    PtrDiffWidth = TIPtrDiffWidth;
+  IntPtrTy = llvm::IntegerType::get(LLVMContext, PtrDiffWidth);
+  SizeTy = llvm::IntegerType::get(LLVMContext, SizeWidth);
+  PtrDiffTy = llvm::IntegerType::get(LLVMContext, PtrDiffWidth);
   Int8PtrTy = llvm::PointerType::get(LLVMContext,
                                      C.getTargetAddressSpace(LangAS::Default));
   const llvm::DataLayout &DL = M.getDataLayout();

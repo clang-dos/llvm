@@ -856,7 +856,12 @@ std::optional<X86::MemoryModel16> X86::parseMemoryModel16(StringRef Name) {
       .Case("compact", MemoryModel16::Compact)
       .Case("large", MemoryModel16::Large)
       .Case("huge", MemoryModel16::Huge)
+      .Case("huge16", MemoryModel16::Huge)
       .Default(std::nullopt);
+}
+
+unsigned X86::getSizeTWidth16(StringRef ABIName) {
+  return ABIName == "huge" ? 32 : 16;
 }
 
 StringRef X86::getMemoryModel16Name(MemoryModel16 Model) {

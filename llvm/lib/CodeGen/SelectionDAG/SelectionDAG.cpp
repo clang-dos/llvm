@@ -10176,6 +10176,8 @@ static TargetLowering::ArgListEntry getMemLibcallSize(SelectionDAG &DAG,
   if (LibAS == 0)
     return {Size, DL.getIntPtrType(Ctx)};
   Type *Ty = DL.getIndexType(PointerType::get(Ctx, LibAS));
+  if (unsigned Width = TLI.getMemLibcallSizeWidth())
+    Ty = IntegerType::get(Ctx, Width);
   return {DAG.getZExtOrTrunc(Size, dl, EVT::getEVT(Ty)), Ty};
 }
 

@@ -34,6 +34,7 @@ class X86TargetMachine final : public CodeGenTargetMachineImpl {
   bool IsJIT;
   // The i8086 memory model, from the target ABI name.
   X86::MemoryModel16 MemModel16 = X86::MemoryModel16::Small;
+  unsigned SizeTWidth16 = 16;
 
   /// Reset internal state.
   void reset() override;
@@ -50,6 +51,9 @@ public:
 
   /// The i8086 memory model. Only meaningful for the i8086 triple.
   X86::MemoryModel16 getMemoryModel16() const { return MemModel16; }
+  /// The width of size_t in bits, which the ABI name can make 16 in the
+  /// huge model.
+  unsigned getSizeTWidth16() const { return SizeTWidth16; }
 
   const X86Subtarget *getSubtargetImpl(const Function &F) const override;
   // DO NOT IMPLEMENT: There is no such thing as a valid default subtarget,

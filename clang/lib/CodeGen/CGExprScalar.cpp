@@ -5040,6 +5040,8 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
     CharUnits eltSize = CGF.getContext().getTypeSizeInChars(elementType);
     if (!eltSize.isOne())
       divisor = CGF.Builder.CreateNUWMul(CGF.CGM.getSize(eltSize), divisor);
+    // size_t can be narrower than ptrdiff_t (i8086 huge16).
+    divisor = CGF.Builder.CreateZExtOrTrunc(divisor, diffInChars->getType());
 
   // For everything elese, we can just compute it, safe in the
   // assumption that Sema won't let anything through that we can't
@@ -5057,7 +5059,8 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
     if (elementSize.isOne())
       return diffInChars;
 
-    divisor = CGF.CGM.getSize(elementSize);
+    divisor = llvm::ConstantInt::get(diffInChars->getType(),
+                                     elementSize.getQuantity());
   }
 
   if (CGF.getLangOpts().StablePointerSubtraction)

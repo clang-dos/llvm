@@ -29,7 +29,8 @@ void getX86TargetFeatures(const Driver &D, const llvm::Triple &Triple,
                           std::vector<llvm::StringRef> &Features);
 
 /// The i8086 memory model from -mcmodel= (tiny, small, medium, compact,
-/// large or huge), small by default. It is passed on as the target ABI.
+/// large or huge), small by default, or huge16 for the huge model with
+/// -msize-t=16. It is passed on as the target ABI and names the libraries.
 llvm::StringRef getI8086MemoryModel(const Driver &D,
                                     const llvm::opt::ArgList &Args);
 

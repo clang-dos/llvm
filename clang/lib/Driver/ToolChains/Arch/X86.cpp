@@ -408,10 +408,22 @@ StringRef x86::getI8086MemoryModel(const Driver &D, const ArgList &Args) {
   if (!A)
     return "small";
   StringRef Model = A->getValue();
-  if (llvm::is_contained(
-          {"tiny", "small", "medium", "compact", "large", "huge"}, Model))
-    return Model;
-  D.Diag(diag::err_drv_unsupported_option_argument_for_target)
-      << A->getSpelling() << Model << "i8086";
-  return "small";
+  if (!llvm::is_contained(
+          {"tiny", "small", "medium", "compact", "large", "huge"}, Model)) {
+    D.Diag(diag::err_drv_unsupported_option_argument_for_target)
+        << A->getSpelling() << Model << "i8086";
+    return "small";
+  }
+  // -msize-t=16 gives the huge model a 16-bit size_t, as in Open Watcom: the
+  // ABI and the libraries are then "huge16". size_t is 16 bits in the other
+  // models already.
+  if (const Arg *S = Args.getLastArg(options::OPT_msize_t_EQ)) {
+    StringRef Width = S->getValue();
+    if (Width == "16" && Model == "huge")
+      return "huge16";
+    if (!(Width == "16" || (Width == "32" && Model == "huge")))
+      D.Diag(diag::err_drv_unsupported_option_argument_for_target)
+          << S->getSpelling() << Width << ("i8086 " + Model + " model").str();
+  }
+  return Model;
 }

@@ -444,6 +444,10 @@ public:
   /// are cast to it when a memory intrinsic becomes a library call.
   virtual unsigned getMemLibcallAddressSpace() const { return 0; }
 
+  /// Return the width of the size argument of the memcpy, memmove and memset
+  /// library functions, or 0 for the index width of their address space.
+  virtual unsigned getMemLibcallSizeWidth() const { return 0; }
+
   /// Return the type for operands of fence.
   /// TODO: Let fence operands be of i32 type and remove this.
   virtual MVT getFenceOperandTy(const DataLayout &DL) const {

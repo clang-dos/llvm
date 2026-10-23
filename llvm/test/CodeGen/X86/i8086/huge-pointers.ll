@@ -5,6 +5,7 @@
 ; from or stored to is added to the offset.
 ; RUN: opt -passes=x86-huge-pointers -S < %s | FileCheck %s --check-prefix=IR
 ; RUN: llc -mtriple=i8086-pc-msdos -target-abi=huge < %s | FileCheck %s
+; RUN: llc -mtriple=i8086-pc-msdos -target-abi=huge16 < %s | FileCheck %s --check-prefix=HUGE16
 
 target triple = "i8086-pc-msdos"
 
@@ -77,6 +78,15 @@ define void @fill(ptr addrspace(3) %p, i32 %n) nounwind {
 ; CHECK-NEXT:  pushw 10(%bp)
 ; CHECK:       lcallw $_memset@SEG, $_memset
 ; CHECK-NEXT:  addw $10, %sp
+; With a 16-bit size_t (huge16) the size is one word.
+; HUGE16-LABEL: fill:
+; HUGE16:       pushw 10(%bp)
+; HUGE16-NEXT:  movw $1, %ax
+; HUGE16-NEXT:  pushw %ax
+; HUGE16-NEXT:  pushw 8(%bp)
+; HUGE16-NEXT:  pushw 6(%bp)
+; HUGE16-NEXT:  lcallw $_memset@SEG, $_memset
+; HUGE16-NEXT:  addw $8, %sp
   call void @llvm.memset.p3.i32(ptr addrspace(3) %p, i8 1, i32 %n, i1 false)
   ret void
 }

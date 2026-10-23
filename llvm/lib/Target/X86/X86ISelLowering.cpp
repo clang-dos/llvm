@@ -64309,6 +64309,12 @@ bool X86TargetLowering::shouldPreservePtrArith(const Function &F,
   return Subtarget.isTarget16BitABI() && PtrVT == MVT::i32;
 }
 
+unsigned X86TargetLowering::getMemLibcallSizeWidth() const {
+  if (!Subtarget.isTarget16BitABI())
+    return 0;
+  return Subtarget.getSizeTWidth16();
+}
+
 unsigned X86TargetLowering::getMemLibcallAddressSpace() const {
   if (!Subtarget.isTarget16BitABI())
     return 0;

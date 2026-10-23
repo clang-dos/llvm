@@ -214,8 +214,9 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
     if (!Model)
       reportFatalUsageError("unknown i8086 memory model '" + ABIName +
                             "'; expected tiny, small, medium, compact, "
-                            "large or huge");
+                            "large, huge or huge16");
     MemModel16 = *Model;
+    SizeTWidth16 = X86::getSizeTWidth16(ABIName);
   }
 
   setMachineOutliner(true);

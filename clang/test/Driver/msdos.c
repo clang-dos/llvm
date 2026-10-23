@@ -48,6 +48,23 @@
 // RUN:   | FileCheck %s --check-prefix=BAD
 // BAD: error: unsupported argument 'giant' to option '-mcmodel=' for target 'i8086'
 
+// -msize-t=16 gives the huge model a 16-bit size_t: the ABI and the
+// libraries are huge16. Other models have a 16-bit size_t already.
+// RUN: %clang --target=i8086-pc-msdos --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -mcmodel=huge -msize-t=16 -fuse-ld=wlink -### %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=HUGE16
+// HUGE16: "-target-abi" "huge16"
+// HUGE16: "file" "{{.*}}lib{{/|\\\\}}huge16{{/|\\\\}}crt0.obj"
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=huge -msize-t=32 -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=HUGE32
+// HUGE32: "-target-abi" "huge"
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=large -msize-t=16 -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=LARGE16
+// LARGE16: "-target-abi" "large"
+// RUN: not %clang --target=i8086-pc-msdos -mcmodel=large -msize-t=32 -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=LARGE32
+// LARGE32: error: unsupported argument '32' to option '-msize-t=' for target 'i8086 large model'
+
 int main(void) { return 0; }
 
 // Real-mode code has no GOT or PLT, so -fPIC and -fPIE don't apply.

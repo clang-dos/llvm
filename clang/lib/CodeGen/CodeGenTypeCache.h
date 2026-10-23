@@ -44,12 +44,12 @@ struct CodeGenTypeCache {
   /// char
   llvm::IntegerType *CharTy;
 
-  /// intptr_t, size_t, and ptrdiff_t, which we assume are the same size.
-  union {
-    llvm::IntegerType *IntPtrTy;
-    llvm::IntegerType *SizeTy;
-    llvm::IntegerType *PtrDiffTy;
-  };
+  /// intptr_t, size_t, and ptrdiff_t. They are the same size on most
+  /// targets, but i8086 in the huge16 model has a 16-bit size_t and a 32-bit
+  /// ptrdiff_t.
+  llvm::IntegerType *IntPtrTy;
+  llvm::IntegerType *SizeTy;
+  llvm::IntegerType *PtrDiffTy;
 
   /// void*, void** in the target's default address space (often 0)
   union {

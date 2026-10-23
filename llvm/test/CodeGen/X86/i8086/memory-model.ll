@@ -3,7 +3,7 @@
 
 ; RUN: not llc -mtriple=i8086-unknown-unknown -target-abi=giant < %s 2>&1 \
 ; RUN:   | FileCheck %s --check-prefix=BADMODEL
-; BADMODEL: unknown i8086 memory model 'giant'; expected tiny, small, medium, compact, large or huge
+; BADMODEL: unknown i8086 memory model 'giant'; expected tiny, small, medium, compact, large, huge or huge16
 
 ; RUN: llc -mtriple=i8086-pc-msdos -filetype=obj < %s -o /dev/null
 ; RUN: llc -mtriple=i8086-pc-msdos -target-abi=tiny -filetype=obj < %s -o /dev/null

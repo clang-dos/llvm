@@ -210,8 +210,13 @@ enum class MemoryModel16 {
 };
 
 /// Parse an i8086 memory model name ("tiny", "small", ...). An empty name
-/// means the default, small. Returns std::nullopt for an unknown name.
+/// means the default, small. "huge16" is the huge model with a 16-bit size_t.
+/// Returns std::nullopt for an unknown name.
 LLVM_ABI std::optional<MemoryModel16> parseMemoryModel16(StringRef Name);
+
+/// The width of size_t in bits for an i8086 ABI name: 32 in the huge model,
+/// and 16 in the others and in "huge16", which follows Open Watcom.
+LLVM_ABI unsigned getSizeTWidth16(StringRef ABIName);
 
 /// Returns the canonical name of \p Model.
 LLVM_ABI StringRef getMemoryModel16Name(MemoryModel16 Model);

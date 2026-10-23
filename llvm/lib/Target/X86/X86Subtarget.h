@@ -326,6 +326,9 @@ public:
   /// The i8086 memory model (tiny, small, medium, compact, large, huge).
   X86::MemoryModel16 getMemoryModel16() const;
 
+  /// The width of size_t in bits on i8086.
+  unsigned getSizeTWidth16() const;
+
   /// Whether functions default to far (CALL FAR / RETF) in this model.
   bool hasFarCode16() const {
     return isTarget16BitABI() && X86::isFarCodeModel16(getMemoryModel16());

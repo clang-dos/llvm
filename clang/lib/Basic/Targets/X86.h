@@ -739,6 +739,7 @@ public:
 // size of pointers depends on the memory model, which is the target ABI name.
 class LLVM_LIBRARY_VISIBILITY X86_16TargetInfo : public X86_32TargetInfo {
   llvm::X86::MemoryModel16 Model = llvm::X86::MemoryModel16::Small;
+  std::string ABIName = "small";
 
 public:
   X86_16TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
@@ -772,9 +773,7 @@ public:
     resetDataLayout();
   }
 
-  StringRef getABI() const override {
-    return llvm::X86::getMemoryModel16Name(Model);
-  }
+  StringRef getABI() const override { return ABIName; }
 
   bool setABI(const std::string &Name) override {
     std::optional<llvm::X86::MemoryModel16> M =
@@ -782,11 +781,13 @@ public:
     if (!M)
       return false;
     Model = *M;
+    ABIName = Name.empty() ? "small" : Name;
     // In the far-data models C pointers are far: 32-bit segment:offset
     // pairs. The stack, globals and constants stay in DGROUP and are
     // addressed with near pointers (address space 0), which clang casts.
     // In the huge model they are huge pointers, which address objects over
-    // 64 KiB, so size_t and ptrdiff_t are 32 bits there.
+    // 64 KiB, so size_t and ptrdiff_t are 32 bits there. In huge16 size_t
+    // stays 16 bits, as in Open Watcom, while ptrdiff_t is 32.
     bool FarData = llvm::X86::isFarDataModel16(Model);
     bool Huge = Model == llvm::X86::MemoryModel16::Huge;
     AddrSpaceMap = Huge      ? &I8086HugeAddrSpaceMap
@@ -794,7 +795,8 @@ public:
                              : &X86AddrSpaceMap;
     PointerWidth = FarData ? 32 : 16;
     IntPtrType = FarData ? SignedLong : SignedInt;
-    SizeType = Huge ? UnsignedLong : UnsignedInt;
+    SizeType = llvm::X86::getSizeTWidth16(Name) == 32 ? UnsignedLong
+                                                      : UnsignedInt;
     PtrDiffType = Huge ? SignedLong : SignedInt;
     resetDataLayout();
     return true;
@@ -847,9 +849,9 @@ public:
     }
   }
 
-  // Clang takes this as the width of size_t, ptrdiff_t and its intptr
-  // type. Far pointers are wider than size_t: objects stay within 64 KiB,
-  // except in the huge model.
+  // Clang takes this as the width of array sizes and of its intptr type.
+  // Far pointers are wider than size_t: objects stay within 64 KiB, except
+  // in the huge model.
   uint64_t getMaxPointerWidth() const override {
     return getTypeWidth(SizeType);
   }

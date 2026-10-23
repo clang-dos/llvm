@@ -5652,6 +5652,10 @@ def inline_asm_EQ : Joined<["-"], "inline-asm=">, Group<m_Group>,
 def mcmodel_EQ : Joined<["-"], "mcmodel=">, Group<m_Group>,
   Visibility<[ClangOption, CC1Option, FlangOption, FC1Option]>,
   MarshallingInfoString<TargetOpts<"CodeModel">, [{"default"}]>;
+def msize_t_EQ : Joined<["-"], "msize-t=">, Group<m_Group>,
+  Flags<[TargetSpecific]>, Visibility<[ClangOption]>,
+  HelpText<"Width of size_t in bits in the i8086 huge memory model: 32 (the "
+           "default) or 16, as in Open Watcom">, Values<"16,32">;
 def mlarge_data_threshold_EQ : Joined<["-"], "mlarge-data-threshold=">, Group<m_Group>,
   Flags<[TargetSpecific]>, Visibility<[ClangOption, CC1Option,FlangOption, FC1Option]>,
   MarshallingInfoInt<TargetOpts<"LargeDataThreshold">, "0">;

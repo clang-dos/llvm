@@ -19,6 +19,7 @@
 #include "llvm/IR/SystemLibraries.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/TargetParser/Triple.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 using namespace llvm;
 
 #define GET_TARGET_LIBRARY_INFO_STRING_TABLE
@@ -1473,6 +1474,10 @@ unsigned TargetLibraryInfoImpl::getSizeTSize(const Module &M) const {
   // others) have larger-than-size_t index sizes on non-default address spaces,
   // making this the best default, unless the library takes pointers in
   // another address space.
+  if (M.getTargetTriple().isX86_16()) {
+    auto *ABI = dyn_cast_or_null<MDString>(M.getModuleFlag("target-abi"));
+    return X86::getSizeTWidth16(ABI ? ABI->getString() : "");
+  }
   return M.getDataLayout().getIndexSizeInBits(getLibCallPointerAddrSpace(M));
 }
 
@@ -1483,7 +1488,7 @@ unsigned llvm::getLibCallPointerAddrSpace(const Module &M) {
       StringRef Name = ABI->getString();
       if (Name == "compact" || Name == "large")
         return 2;
-      if (Name == "huge")
+      if (Name == "huge" || Name == "huge16")
         return 3;
     }
   }

@@ -2855,8 +2855,12 @@ Sema::ForRangeBeginEndInfo Sema::BuildCXXForRangeBeginEndVars(
     // Find the array bound.
     ExprResult BoundExpr;
     if (const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(UnqAT))
+      // ptrdiff_t can be wider than size_t (i8086 huge16).
       BoundExpr = IntegerLiteral::Create(
-          Context, CAT->getSize(), Context.getPointerDiffType(), RangeLoc);
+          Context,
+          CAT->getSize().zext(
+              Context.getTypeSize(Context.getPointerDiffType())),
+          Context.getPointerDiffType(), RangeLoc);
     else if (const VariableArrayType *VAT =
                  dyn_cast<VariableArrayType>(UnqAT)) {
       // For a variably modified type we can't just use the expression within

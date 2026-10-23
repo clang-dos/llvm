@@ -330,6 +330,10 @@ X86::MemoryModel16 X86Subtarget::getMemoryModel16() const {
   return static_cast<const X86TargetMachine &>(TM).getMemoryModel16();
 }
 
+unsigned X86Subtarget::getSizeTWidth16() const {
+  return static_cast<const X86TargetMachine &>(TM).getSizeTWidth16();
+}
+
 bool X86Subtarget::isFarFunction16(const Function &F) const {
   return isTarget16BitABI() && F.getAddressSpace() == X86AS::FAR_CODE;
 }

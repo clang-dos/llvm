@@ -203,7 +203,8 @@ struct __string_impl_base {
 
 struct __unique_impl : __string_impl_base {
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_ALWAYS_INLINE static size_t __hash(__type_name_t __v) _NOEXCEPT {
-    return reinterpret_cast<size_t>(__v);
+    // Pointers can be wider than size_t (i8086 far data).
+    return static_cast<size_t>(reinterpret_cast<uintptr_t>(__v));
   }
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_ALWAYS_INLINE static bool __eq(__type_name_t __lhs, __type_name_t __rhs) _NOEXCEPT {
     return __lhs == __rhs;

@@ -109,10 +109,17 @@ derived_object_info dyn_cast_get_derived_info(const void* static_ptr) {
   const uint8_t* ptr_to_ti_proxy = reinterpret_cast<const uint8_t*>(vtable) + offset_to_ti_proxy;
   info.dynamic_type              = *(reinterpret_cast<const __class_type_info* const*>(ptr_to_ti_proxy));
 #else
-  void** vtable          = strip_vtable(*static_cast<void** const*>(static_ptr));
-  info.offset_to_derived = reinterpret_cast<ptrdiff_t>(vtable[-2]);
+  // A vtable component holds a data or a function pointer, which can differ
+  // in size (i8086 far code), so index the vtable by the larger of the two.
+  union vtable_component {
+    void* data;
+    void (*function)();
+  };
+  const vtable_component* vtable =
+      strip_vtable(*static_cast<const vtable_component* const*>(static_ptr));
+  info.offset_to_derived = *reinterpret_cast<const ptrdiff_t*>(&vtable[-2]);
   info.dynamic_ptr       = static_cast<const char*>(static_ptr) + info.offset_to_derived;
-  info.dynamic_type      = static_cast<const __class_type_info*>(vtable[-1]);
+  info.dynamic_type      = *reinterpret_cast<const __class_type_info* const*>(&vtable[-1]);
 #endif
   return info;
 }

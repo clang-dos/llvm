@@ -48,10 +48,11 @@
 #include "include/ryu/common.h"
 #include "include/ryu/d2fixed.h"
 
-#if __SIZEOF_SIZE_T__ < 4
+#if __SIZEOF_SIZE_T__ < 4 || defined(__I86__)
 
 // Ryu's tables for fixed and exponent notation with a precision are over
-// 64 KiB, more than a 16-bit target can hold. Use the C library instead.
+// 64 KiB, more than a 16-bit target can hold (on i8086, even with a 32-bit
+// size_t, static data goes in one 64 KiB group). Use the C library instead.
 #include <cstdio>
 #include <cstdlib>
 
@@ -94,7 +95,7 @@ static to_chars_result __d2_snprintf(char* _First, char* const _Last, const doub
 
 _LIBCPP_END_NAMESPACE_STD
 
-#else // __SIZEOF_SIZE_T__ < 4
+#else // __SIZEOF_SIZE_T__ < 4 || defined(__I86__)
 
 #include "include/ryu/d2fixed_full_table.h"
 #include "include/ryu/d2s.h"
@@ -716,6 +717,6 @@ void __append_nine_digits(uint32_t __digits, char* const __result) {
 
 _LIBCPP_END_NAMESPACE_STD
 
-#endif // __SIZEOF_SIZE_T__ < 4
+#endif // __SIZEOF_SIZE_T__ < 4 || defined(__I86__)
 
 // clang-format on

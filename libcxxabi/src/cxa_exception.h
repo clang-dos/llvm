@@ -72,6 +72,11 @@ struct _LIBCXXABI_HIDDEN __cxa_exception {
     // For binary compatibility it is placed where the compiler
     // previously added padding to 64-bit align unwindHeader.
     size_t referenceCount;
+#if __SIZEOF_SIZE_T__ < __SIZEOF_POINTER__
+    // Keep the layout of __cxa_dependent_exception, whose primaryException
+    // is in this place, where pointers are wider than size_t (i8086 far data).
+    char referenceCountPadding[__SIZEOF_POINTER__ - __SIZEOF_SIZE_T__];
+#endif
 #endif
     _Unwind_Exception unwindHeader;
 };

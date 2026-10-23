@@ -33,6 +33,9 @@ def : Pat<(extloadi16i8 addr:$src),
 def : Pat<(extloadi16i1 addr:$src),
           (INSERT_SUBREG (i16 (IMPLICIT_DEF)), (MOV8rm addr:$src), sub_8bit)>;
 
+// r & 0xff is an AND, not MOVZX.
+def : Pat<(and GR16:$src, 0xff), (AND16ri GR16:$src, 0xff)>;
+
 // The high byte of a 16-bit register.
 def : Pat<(srl GR16:$src, (i8 8)),
           (AND16ri (INSERT_SUBREG (i16 (IMPLICIT_DEF)),
@@ -45,6 +48,13 @@ def : Pat<(i8 (trunc (srl GR16:$src, (i8 8)))),
 // inserter emits.
 def : Pat<(X86setcc timm:$cond, EFLAGS),
           (CMOV_GR8 (MOV8ri 0), (MOV8ri 1), timm:$cond)>;
+
+// UD2 needs an 80286 or later, and to an 8086 0F is POP CS. Trap with INT3 in
+// a loop instead, so a program without a debugger stops there.
+let isTrap = 1, isBarrier = 1, hasSideEffects = 1, mayLoad = 1,
+    SchedRW = [WriteSystem] in
+def TRAP_8086 : PseudoI<(outs), (ins), [(trap)]>;
+def : Pat<(ubsantrap (i32 timm)), (TRAP_8086)>;
 
 } // Predicates = [IsPre386], AddedComplexity = 100
 

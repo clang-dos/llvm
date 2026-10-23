@@ -2627,6 +2627,16 @@ void X86AsmPrinter::emitInstruction(const MachineInstr *MI) {
     EmitSEHInstruction(MI);
     return;
   }
+  case X86::TRAP_8086: {
+    // int3; jmp back to it.
+    MCSymbol *Loop = OutContext.createTempSymbol();
+    OutStreamer->emitLabel(Loop);
+    EmitAndCountInstruction(MCInstBuilder(X86::INT3));
+    EmitAndCountInstruction(
+        MCInstBuilder(X86::JMP_1)
+            .addExpr(MCSymbolRefExpr::create(Loop, OutContext)));
+    return;
+  }
   case X86::UBSAN_UD1:
     EmitAndCountInstruction(MCInstBuilder(X86::UD1Lm)
                                 .addReg(X86::EAX)

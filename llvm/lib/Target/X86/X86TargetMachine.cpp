@@ -124,6 +124,9 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
 
 static Reloc::Model getEffectiveRelocModel(const Triple &TT, bool JIT,
                                            std::optional<Reloc::Model> RM) {
+  // Real-mode DOS code has no GOT or PLT: segment fixups do the relocation.
+  if (TT.getArch() == Triple::i8086)
+    return Reloc::Static;
   bool is64Bit = TT.isX86_64();
   if (!RM) {
     // JIT codegen should use static relocations by default, since it's

@@ -461,7 +461,7 @@ void MemCmpExpansion::emitLoadCompareByteBlock(unsigned BlockIndex,
   Builder.SetInsertPoint(BB);
   const LoadPair Loads =
       getLoadPair(Type::getInt8Ty(CI->getContext()), nullptr,
-                  Type::getInt32Ty(CI->getContext()), OffsetBytes);
+                  CI->getType(), OffsetBytes);
   Value *Diff = Builder.CreateSub(Loads.Lhs, Loads.Rhs);
 
   PhiRes->addIncoming(Diff, BB);
@@ -621,7 +621,7 @@ void MemCmpExpansion::emitLoadCompareBlockMultipleLoads(unsigned BlockIndex,
   // since early exit to ResultBlock was not taken (no difference was found in
   // any of the bytes).
   if (BlockIndex == LoadCmpBlocks.size() - 1) {
-    Value *Zero = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 0);
+    Value *Zero = ConstantInt::get(CI->getType(), 0);
     PhiRes->addIncoming(Zero, LoadCmpBlocks[BlockIndex]);
   }
 }
@@ -685,7 +685,7 @@ void MemCmpExpansion::emitLoadCompareBlock(unsigned BlockIndex,
   // since early exit to ResultBlock was not taken (no difference was found in
   // any of the bytes).
   if (BlockIndex == LoadCmpBlocks.size() - 1) {
-    Value *Zero = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 0);
+    Value *Zero = ConstantInt::get(CI->getType(), 0);
     PhiRes->addIncoming(Zero, LoadCmpBlocks[BlockIndex]);
   }
 }
@@ -699,7 +699,7 @@ void MemCmpExpansion::emitMemCmpResultBlock() {
   if (IsUsedForZeroCmp) {
     BasicBlock::iterator InsertPt = ResBlock.BB->getFirstInsertionPt();
     Builder.SetInsertPoint(InsertPt);
-    Value *Res = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 1);
+    Value *Res = ConstantInt::get(CI->getType(), 1);
     PhiRes->addIncoming(Res, ResBlock.BB);
     Builder.CreateBr(EndBlock);
     if (DTU)
@@ -713,8 +713,8 @@ void MemCmpExpansion::emitMemCmpResultBlock() {
                                   ResBlock.PhiSrc2);
 
   Value *Res =
-      Builder.CreateSelect(Cmp, Constant::getAllOnesValue(Builder.getInt32Ty()),
-                           ConstantInt::get(Builder.getInt32Ty(), 1));
+      Builder.CreateSelect(Cmp, Constant::getAllOnesValue(CI->getType()),
+                           ConstantInt::get(CI->getType(), 1));
   setExplicitlyUnknownBranchWeightsIfProfiled(*cast<Instruction>(Res),
                                               DEBUG_TYPE, CI->getFunction());
 
@@ -733,7 +733,7 @@ void MemCmpExpansion::setupResultBlockPHINodes() {
 
 void MemCmpExpansion::setupEndBlockPHINodes() {
   Builder.SetInsertPoint(EndBlock->begin());
-  PhiRes = Builder.CreatePHI(Type::getInt32Ty(CI->getContext()), 2, "phi.res");
+  PhiRes = Builder.CreatePHI(CI->getType(), 2, "phi.res");
 }
 
 Value *MemCmpExpansion::getMemCmpExpansionZeroCase() {
@@ -755,7 +755,7 @@ Value *MemCmpExpansion::getMemCmpEqZeroOneBlock() {
   unsigned LoadIndex = 0;
   Value *Cmp = getCompareLoadPairs(0, LoadIndex);
   assert(LoadIndex == getNumLoads() && "some entries were not consumed");
-  return Builder.CreateZExt(Cmp, Type::getInt32Ty(CI->getContext()));
+  return Builder.CreateZExt(Cmp, CI->getType());
 }
 
 /// A memcmp expansion that only has one block of load and compare can bypass
@@ -774,10 +774,12 @@ Value *MemCmpExpansion::getMemCmpOneBlock() {
                        std::max(MaxLoadSize, (unsigned)PowerOf2Ceil(Size)) * 8);
 
   // The i8 and i16 cases don't need compares. We zext the loaded values and
-  // subtract them to get the suitable negative, zero, or positive i32 result.
-  if (Size == 1 || Size == 2) {
+  // subtract them to get the suitable negative, zero, or positive result. This
+  // needs a result wider than the loads (int may be only 16 bits).
+  unsigned ResultBits = CI->getType()->getIntegerBitWidth();
+  if (Size * 8 < ResultBits && (Size == 1 || Size == 2)) {
     const LoadPair Loads = getLoadPair(LoadSizeType, BSwapSizeType,
-                                       Builder.getInt32Ty(), /*Offset*/ 0);
+                                       CI->getType(), /*Offset*/ 0);
     return Builder.CreateSub(Loads.Lhs, Loads.Rhs);
   }
 
@@ -837,7 +839,7 @@ Value *MemCmpExpansion::getMemCmpResult(const LoadPair &Loads) {
   }
 
   // The result of memcmp is negative, zero, or positive.
-  return Builder.CreateIntrinsic(Builder.getInt32Ty(), Intrinsic::ucmp,
+  return Builder.CreateIntrinsic(CI->getType(), Intrinsic::ucmp,
                                  {Loads.Lhs, Loads.Rhs});
 }
 

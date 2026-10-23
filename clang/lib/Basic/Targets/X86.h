@@ -871,6 +871,28 @@ public:
   }
   uint64_t getPointerAlignV(LangAS) const override { return 16; }
 
+  // __near functions are in address space 4 and __far (or __huge) ones in
+  // 5. Those of the memory model's kind need no qualifier.
+  std::optional<LangAS>
+  getFunctionAddressSpaceForQualifier(LangAS AS) const override {
+    if (!isTargetAddressSpace(AS))
+      return std::nullopt;
+    unsigned Code;
+    switch (toTargetAddressSpace(AS)) {
+    case 0:
+      Code = 4;
+      break;
+    case 2:
+    case 3:
+      Code = 5;
+      break;
+    default:
+      return std::nullopt;
+    }
+    LangAS CodeAS = getLangASFromTargetAS(Code);
+    return CodeAS == getFunctionAddressSpace() ? LangAS::Default : CodeAS;
+  }
+
   // A near pointer converts to a far or huge one, and far and huge pointers
   // to each other, as in Open Watcom; far or huge to near needs a cast.
   bool isAddressSpaceSupersetOf(LangAS A, LangAS B) const override {

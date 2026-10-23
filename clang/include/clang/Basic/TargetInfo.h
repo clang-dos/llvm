@@ -516,6 +516,16 @@ public:
     return std::nullopt;
   }
 
+  /// The address space of a function that a data address space qualifier
+  /// qualifies, LangAS::Default for the target's function address space, or
+  /// none if it cannot (C forbids it). On i8086 __near and __far (address
+  /// spaces 0 and 2) make a function near or far (code address spaces 4 and
+  /// 5), as in Open Watcom: `void __far f(void)`, `void (__far *p)(void)`.
+  virtual std::optional<LangAS>
+  getFunctionAddressSpaceForQualifier(LangAS AS) const {
+    return std::nullopt;
+  }
+
   /// The address space of the C++ ABI's own globals (vtables, VTTs, type_info
   /// objects and type names), when it is not that of other globals: in the
   /// i8086 far-data models they are far data, outside DGROUP.

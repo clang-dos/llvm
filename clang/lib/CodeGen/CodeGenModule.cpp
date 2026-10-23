@@ -5806,8 +5806,13 @@ llvm::Constant *CodeGenModule::GetOrCreateLLVMFunction(
     IsIncompleteFunction = true;
   }
 
+  // A function can have an address space of its own (i8086 __far).
+  unsigned FnAS = getDataLayout().getProgramAddressSpace();
+  if (const auto *FD = dyn_cast_or_null<FunctionDecl>(D))
+    if (FD->getType().hasAddressSpace())
+      FnAS = getContext().getTargetAddressSpace(FD->getType().getAddressSpace());
   llvm::Function *F =
-      llvm::Function::Create(FTy, llvm::Function::ExternalLinkage,
+      llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, FnAS,
                              Entry ? StringRef() : MangledName, &getModule());
 
   // Store the declaration associated with this function so it is potentially

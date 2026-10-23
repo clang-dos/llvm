@@ -25,3 +25,23 @@ void f(char *p) {
   fp = p;
   np = p; // fardata-error {{changes address space of pointer}}
 }
+
+// On functions they make the function near or far, as in Open Watcom: the
+// qualifier of the result type, or of a function pointer's pointee.
+int __far ff(int);
+int * __far ffp(void);
+char __far *nfp(void); // A near function (in small) returning a far pointer.
+int __near nf(int);
+int (__far *pff)(int) = ff;
+int __far (*pff2)(int) = ff;
+int (__near *pnf)(int) = nf;
+_Static_assert(sizeof(pff) == 4, "");
+_Static_assert(sizeof(pnf) == 2, "");
+int (__far *bad1)(int) = nf; // expected-error {{changes address space of pointer}}
+int (__near *bad2)(int) = ff; // expected-error {{changes address space of pointer}}
+void g(void) {
+  char __far *c = nfp();
+  int *i = ffp();
+  (void)c;
+  (void)i;
+}

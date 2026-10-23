@@ -5238,6 +5238,17 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       FunctionType::ExtInfo EI(
           getCCForDeclaratorChunk(S, D, DeclType.getAttrs(), FTI, chunkIndex));
 
+      // An address space on the result type can make the function near or
+      // far instead (i8086, as in Open Watcom: void __far f(void)).
+      LangAS FnAS = LangAS::Default;
+      if (T.hasAddressSpace())
+        if (std::optional<LangAS> AS =
+                Context.getTargetInfo().getFunctionAddressSpaceForQualifier(
+                    T.getAddressSpace())) {
+          FnAS = *AS;
+          T = Context.removeAddrSpaceQualType(T);
+        }
+
       // OpenCL disallows functions without a prototype, but it doesn't enforce
       // strict prototypes as in C23 because it allows a function definition to
       // have an identifier list. See OpenCL 3.0 6.11/g for more details.
@@ -5466,6 +5477,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         }
         T = Context.getFunctionType(T, ParamTys, EPI);
       }
+      if (FnAS != LangAS::Default)
+        T = Context.getAddrSpaceQualType(T, FnAS);
       break;
     }
     case DeclaratorChunk::MemberPointer: {
@@ -6677,8 +6690,23 @@ static void HandleAddressSpaceTypeAttribute(QualType &Type,
   Sema &S = State.getSema();
 
   // ISO/IEC TR 18037 S5.3 (amending C99 6.7.3): "A function type shall not be
-  // qualified by an address-space qualifier."
+  // qualified by an address-space qualifier." A target can take some as
+  // function kinds instead (i8086 __near and __far).
   if (Type->isFunctionType()) {
+    LangAS DataAS;
+    if (Attr.getKind() == ParsedAttr::AT_AddressSpace &&
+        Attr.getNumArgs() == 1 &&
+        !Attr.getArgAsExpr(0)->isValueDependent() &&
+        BuildAddressSpaceIndex(S, DataAS, Attr.getArgAsExpr(0),
+                               Attr.getLoc())) {
+      if (std::optional<LangAS> FnAS =
+              S.Context.getTargetInfo().getFunctionAddressSpaceForQualifier(
+                  DataAS)) {
+        if (*FnAS != LangAS::Default)
+          Type = S.Context.getAddrSpaceQualType(Type, *FnAS);
+        return;
+      }
+    }
     S.Diag(Attr.getLoc(), diag::err_attribute_address_function_type);
     Attr.setInvalid();
     return;

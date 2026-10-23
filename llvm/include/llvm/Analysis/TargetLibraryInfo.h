@@ -90,6 +90,10 @@ public:
 /// make it available. However, it is somewhat expensive to compute and only
 /// depends on the triple. So users typically interact with the \c
 /// TargetLibraryInfo wrapper below.
+/// The address space of the pointers that the C library takes and returns:
+/// not 0 in the i8086 memory models with far data.
+LLVM_ABI unsigned getLibCallPointerAddrSpace(const Module &M);
+
 class TargetLibraryInfoImpl {
   friend class TargetLibraryInfo;
 

@@ -1471,8 +1471,23 @@ unsigned TargetLibraryInfoImpl::getSizeTSize(const Module &M) const {
   // Hard coding address space zero may seem unfortunate, but a number of
   // configurations of common targets (i386, x86-64 x32, aarch64 x32, possibly
   // others) have larger-than-size_t index sizes on non-default address spaces,
-  // making this the best default.
-  return M.getDataLayout().getIndexSizeInBits(/*AddressSpace=*/0);
+  // making this the best default, unless the library takes pointers in
+  // another address space.
+  return M.getDataLayout().getIndexSizeInBits(getLibCallPointerAddrSpace(M));
+}
+
+unsigned llvm::getLibCallPointerAddrSpace(const Module &M) {
+  // The i8086 memory models with far data, named by the target ABI.
+  if (M.getTargetTriple().isX86_16()) {
+    if (auto *ABI = dyn_cast_or_null<MDString>(M.getModuleFlag("target-abi"))) {
+      StringRef Name = ABI->getString();
+      if (Name == "compact" || Name == "large")
+        return 2;
+      if (Name == "huge")
+        return 3;
+    }
+  }
+  return 0;
 }
 
 TargetLibraryInfoWrapperPass::TargetLibraryInfoWrapperPass()

@@ -10164,6 +10164,21 @@ static SDValue getMemLibcallPointer(SelectionDAG &DAG, const SDLoc &dl,
   return DAG.getAddrSpaceCast(dl, LibVT, Ptr, SrcAS, LibAS);
 }
 
+/// The size argument of a memory intrinsic libcall: size_t, which is the
+/// index type of the library's address space when that is not 0.
+static TargetLowering::ArgListEntry getMemLibcallSize(SelectionDAG &DAG,
+                                                      const SDLoc &dl,
+                                                      SDValue Size) {
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+  unsigned LibAS = TLI.getMemLibcallAddressSpace();
+  const DataLayout &DL = DAG.getDataLayout();
+  LLVMContext &Ctx = *DAG.getContext();
+  if (LibAS == 0)
+    return {Size, DL.getIntPtrType(Ctx)};
+  Type *Ty = DL.getIndexType(PointerType::get(Ctx, LibAS));
+  return {DAG.getZExtOrTrunc(Size, dl, EVT::getEVT(Ty)), Ty};
+}
+
 /// The length of a memory intrinsic (e.g. number of bytes to copy) is unsigned
 /// and may have any integer type. We zero-extend or truncate it to the pointer
 /// type of the narrower address space being accessed.
@@ -10357,7 +10372,7 @@ SDValue SelectionDAG::getMemcpy(
       PointerType::get(*getContext(), TLI->getMemLibcallAddressSpace());
   Args.emplace_back(getMemLibcallPointer(*this, dl, Dst, DstPtrInfo), PtrTy);
   Args.emplace_back(getMemLibcallPointer(*this, dl, Src, SrcPtrInfo), PtrTy);
-  Args.emplace_back(Size, getDataLayout().getIntPtrType(*getContext()));
+  Args.push_back(getMemLibcallSize(*this, dl, Size));
   // FIXME: pass in SDLoc
   TargetLowering::CallLoweringInfo CLI(*this);
   bool IsTailCall = false;
@@ -10482,7 +10497,7 @@ SDValue SelectionDAG::getMemmove(SDValue Chain, const SDLoc &dl, SDValue Dst,
       PointerType::get(*getContext(), TLI->getMemLibcallAddressSpace());
   Args.emplace_back(getMemLibcallPointer(*this, dl, Dst, DstPtrInfo), PtrTy);
   Args.emplace_back(getMemLibcallPointer(*this, dl, Src, SrcPtrInfo), PtrTy);
-  Args.emplace_back(Size, getDataLayout().getIntPtrType(*getContext()));
+  Args.push_back(getMemLibcallSize(*this, dl, Size));
   // FIXME:  pass in SDLoc
   TargetLowering::CallLoweringInfo CLI(*this);
 
@@ -10616,7 +10631,7 @@ SDValue SelectionDAG::getMemset(SDValue Chain, const SDLoc &dl, SDValue Dst,
   if (UseBZero) {
     TargetLowering::ArgListTy Args;
     Args.emplace_back(LibDst, LibPtrTy);
-    Args.emplace_back(Size, DL.getIntPtrType(Ctx));
+    Args.push_back(getMemLibcallSize(*this, dl, Size));
     CLI.setLibCallee(
         Libcalls->getLibcallImplCallingConv(BzeroImpl), Type::getVoidTy(Ctx),
         getExternalSymbol(BzeroImpl, TLI->getPointerTy(DL)), std::move(Args));
@@ -10629,7 +10644,7 @@ SDValue SelectionDAG::getMemset(SDValue Chain, const SDLoc &dl, SDValue Dst,
     Args.emplace_back(getAnyExtOrTrunc(Src, dl, IntVT),
                       Type::getIntNTy(Ctx, LibInfo->getIntSize()),
                       LibInfo->getExtAttrForI32Param());
-    Args.emplace_back(Size, DL.getIntPtrType(Ctx));
+    Args.push_back(getMemLibcallSize(*this, dl, Size));
 
     CLI.setLibCallee(Libcalls->getLibcallImplCallingConv(MemsetImpl),
                      Dst.getValueType().getTypeForEVT(Ctx),

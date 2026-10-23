@@ -96,10 +96,6 @@ namespace llvm {
                                 Type *Ty, LibFunc DoubleFn, LibFunc FloatFn,
                                 LibFunc LongDoubleFn, LibFunc &TheLibFunc);
 
-  /// The address space of the pointers that the C library takes and
-  /// returns: not 0 in the i8086 memory models with far data.
-  LLVM_ABI unsigned getLibCallPointerAddrSpace(const Module &M);
-
   /// Emit a call to the strlen function to the builder, for the specified
   /// pointer. Ptr is required to be some pointer type, and the return value has
   /// 'size_t' type.

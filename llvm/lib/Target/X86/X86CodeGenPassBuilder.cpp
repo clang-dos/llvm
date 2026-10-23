@@ -114,8 +114,10 @@ void X86CodeGenPassBuilder::addIRPasses(PassManagerWrapper &PMW) {
 }
 
 void X86CodeGenPassBuilder::addPreISel(PassManagerWrapper &PMW) {
-  // Only add this pass for 32-bit x86 Windows.
   const Triple &TT = TM.getTargetTriple();
+  if (TT.isX86_16())
+    addFunctionPass(X86HugePointersPass(), PMW);
+  // Only add this pass for 32-bit x86 Windows.
   if (TT.isOSWindows() && TT.isX86_32()) {
     flushFPMsToMPM(PMW);
     addModulePass(X86WinEHStatePass(), PMW);

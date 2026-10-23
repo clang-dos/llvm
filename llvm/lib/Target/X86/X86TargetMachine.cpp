@@ -93,6 +93,7 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86Target() {
   initializeX86LoadValueInjectionRetHardeningLegacyPass(PR);
   initializeX86OptimizeLEAsLegacyPass(PR);
   initializeX86PartialReductionLegacyPass(PR);
+  initializeX86HugePointersLegacyPass(PR);
   initializeX86ReturnThunksLegacyPass(PR);
   initializeX86DAGToDAGISelLegacyPass(PR);
   initializeX86ArgumentStackSlotLegacyPass(PR);
@@ -519,8 +520,11 @@ bool X86PassConfig::addILPOpts() {
 }
 
 bool X86PassConfig::addPreISel() {
-  // Only add this pass for 32-bit x86 Windows.
   const Triple &TT = TM->getTargetTriple();
+  // After CodeGenPrepare, which may sink address computations.
+  if (TT.isX86_16())
+    addPass(createX86HugePointersLegacyPass());
+  // Only add this pass for 32-bit x86 Windows.
   if (TT.isOSWindows() && TT.isX86_32())
     addPass(createX86WinEHStateLegacyPass());
   return true;

@@ -1683,20 +1683,6 @@ static IntegerType *getSizeTTy(IRBuilderBase &B, const TargetLibraryInfo *TLI) {
   return B.getIntNTy(TLI->getSizeTSize(*M));
 }
 
-unsigned llvm::getLibCallPointerAddrSpace(const Module &M) {
-  // The i8086 memory models with far data, named by the target ABI.
-  if (M.getTargetTriple().isX86_16()) {
-    if (auto *ABI = dyn_cast_or_null<MDString>(M.getModuleFlag("target-abi"))) {
-      StringRef Name = ABI->getString();
-      if (Name == "compact" || Name == "large")
-        return 2;
-      if (Name == "huge")
-        return 3;
-    }
-  }
-  return 0;
-}
-
 static Value *emitLibCall(LibFunc TheLibFunc, Type *ReturnType,
                           ArrayRef<Type *> ParamTypes,
                           ArrayRef<Value *> Operands, IRBuilderBase &B,

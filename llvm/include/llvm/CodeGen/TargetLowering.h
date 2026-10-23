@@ -1137,6 +1137,12 @@ public:
     return VT.isSimple() && RegClassForVT[VT.getSimpleVT().SimpleTy] != nullptr;
   }
 
+  /// Return true if \p VT is the type the target uses for condition-code
+  /// (flags) values, and that type is not legal. Such values may appear in the
+  /// DAG after type legalization even though the type is illegal. For example,
+  /// X86 types EFLAGS as i32, which is not a legal type on the 8086.
+  virtual bool isIllegalFlagsType(EVT VT) const { return false; }
+
   class ValueTypeActionImpl {
     /// ValueTypeActions - For each value type, keep a LegalizeTypeAction enum
     /// that indicates how instruction selection should deal with the type.

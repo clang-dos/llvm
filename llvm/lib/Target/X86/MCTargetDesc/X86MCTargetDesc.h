@@ -88,6 +88,11 @@ StringRef getCPULevel16Name(CPULevel16 Level);
 /// true for the i8086 triple with a 8086, 80186 or 80286 CPU.
 bool isPre386Subtarget(const MCSubtargetInfo &STI);
 
+/// Whether \p MI has a memory operand with 16-bit registers that cannot be
+/// encoded: 16-bit addresses use BX, BP, SI or DI alone, or one of BX/BP plus
+/// one of SI/DI, with no scale.
+bool hasInvalid16BitAddress(const MCInst &MI, const MCInstrInfo &MCII);
+
 /// \param Op operand # of the memory operand.
 ///
 /// \returns true if the specified instruction has a 16-bit memory operand.

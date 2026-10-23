@@ -189,6 +189,10 @@ X86Subtarget::classifyGlobalFunctionReference(const GlobalValue *GV,
   if (TM.shouldAssumeDSOLocal(GV))
     return X86II::MO_NO_FLAG;
 
+  // DOS programs are linked statically, so there is no PLT.
+  if (isTarget16BitABI())
+    return X86II::MO_NO_FLAG;
+
   // Functions on COFF can be non-DSO local for three reasons:
   // - They are intrinsic functions (!GV)
   // - They are marked dllimport

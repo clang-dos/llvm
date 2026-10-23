@@ -92,6 +92,7 @@ def IsSPIRV : LibcallPredicate<[{TT.isSPIRV()}]>;
 
 def IsX86_32 : LibcallPredicate<[{TT.getArch() == Triple::x86}]>;
 def IsX86_64 : LibcallPredicate<[{TT.getArch() == Triple::x86_64}]>;
+def IsX86_16 : LibcallPredicate<[{TT.getArch() == Triple::i8086}]>;
 def IsX86 : LibcallPredicate<[{TT.isX86()}]>;
 def IsXCore : LibcallPredicate<[{TT.getArch() == Triple::xcore}]>;
 
@@ -3606,8 +3607,10 @@ defvar MemChkLibcalls = [__memcpy_chk, __memset_chk, __memmove_chk];
 
 def isX86_32WindowsMSVCOrItanium : RuntimeLibcallAvailability<
   (all_of IsX86_32, (any_of IsWindowsMSVCEnv, IsWindowsItaniumEnv))>;
+// The i8086 (16-bit) target uses the same 64-bit div/rem/mul helpers.
 def isX86_32NotWindowsMSVCOrItanium : RuntimeLibcallAvailability<
-  (all_of IsX86_32, (not IsWindowsMSVCEnv), (not IsWindowsItaniumEnv))>;
+  (all_of (any_of IsX86_32, IsX86_16), (not IsWindowsMSVCEnv),
+          (not IsWindowsItaniumEnv))>;
 
 // X86's compiler-rt extras. These include the x86_32 div/rem/mul
 // helpers that replace the generic ones.

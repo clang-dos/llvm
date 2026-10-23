@@ -205,6 +205,10 @@ bool X86CallFrameOptimizationImpl::isProfitable(MachineFunction &MF,
   if (CannotReserveFrame)
     return true;
 
+  // The 8086 cannot address memory through SP, so pushes are always better.
+  if (STI->isTarget16BitABI())
+    return true;
+
   Align StackAlign = TFL->getStackAlign();
 
   int64_t Advantage = 0;
@@ -307,6 +311,12 @@ X86CallFrameOptimizationImpl::classifyInstruction(
     case X86::MOV64mi32:
     case X86::MOV64mr:
       return Convert;
+    case X86::MOV16mi:
+    case X86::MOV16mr:
+      // Stack slots are 16 bits wide in the 16-bit (i8086) ABI.
+      if (SlotSize == 2)
+        return Convert;
+      break;
   }
 
   // Not all calling conventions have only stack MOVs between the stack
@@ -380,7 +390,8 @@ void X86CallFrameOptimizationImpl::collectCallInfo(
   // Skip over DEBUG_VALUE.
   // For globals in PIC mode, we can have some LEAs here. Skip them as well.
   // TODO: Extend this to something that covers more cases.
-  while (I->getOpcode() == X86::LEA32r || I->isDebugInstr())
+  while (I->getOpcode() == X86::LEA32r || I->getOpcode() == X86::LEA16r ||
+         I->isDebugInstr())
     ++I;
 
   Register StackPtr = RegInfo.getStackRegister();
@@ -505,6 +516,7 @@ void X86CallFrameOptimizationImpl::adjustCallSequence(
 
   const DebugLoc &DL = FrameSetup->getDebugLoc();
   bool Is64Bit = STI->is64Bit();
+  bool Is16Bit = SlotSize == 2;
   // Now, iterate through the vector in reverse order, and replace the store to
   // stack with pushes. MOVmi/MOVmr doesn't have any defs, so no need to
   // replace uses.
@@ -524,12 +536,24 @@ void X86CallFrameOptimizationImpl::adjustCallSequence(
     case X86::OR64mi32:
     case X86::MOV32mi:
     case X86::MOV64mi32:
-      PushOpcode = Is64Bit ? X86::PUSH64i32 : X86::PUSH32i;
-      Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode)).add(PushOp);
+    case X86::MOV16mi:
+      if (Is16Bit && !STI->has186()) {
+        // The 8086 cannot push an immediate, so materialize it first.
+        Register Reg = MRI->createVirtualRegister(&X86::GR16RegClass);
+        BuildMI(MBB, Context.Call, DL, TII->get(X86::MOV16ri), Reg).add(PushOp);
+        Push = BuildMI(MBB, Context.Call, DL, TII->get(X86::PUSH16r))
+                   .addReg(Reg, RegState::Kill);
+      } else {
+        PushOpcode = Is16Bit   ? X86::PUSH16i
+                     : Is64Bit ? X86::PUSH64i32
+                               : X86::PUSH32i;
+        Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode)).add(PushOp);
+      }
       Push->cloneMemRefs(MF, *Store);
       break;
     case X86::MOV32mr:
-    case X86::MOV64mr: {
+    case X86::MOV64mr:
+    case X86::MOV16mr: {
       Register Reg = PushOp.getReg();
 
       // If storing a 32-bit vreg on 64-bit targets, extend to a 64-bit vreg
@@ -554,7 +578,9 @@ void X86CallFrameOptimizationImpl::adjustCallSequence(
       // conservative about that.
       MachineInstr *DefMov = nullptr;
       if (!SlowPUSHrmm && (DefMov = canFoldIntoRegPush(FrameSetup, Reg))) {
-        PushOpcode = Is64Bit ? X86::PUSH64rmm : X86::PUSH32rmm;
+        PushOpcode = Is16Bit   ? X86::PUSH16rmm
+                     : Is64Bit ? X86::PUSH64rmm
+                               : X86::PUSH32rmm;
         Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode));
 
         unsigned NumOps = DefMov->getDesc().getNumOperands();
@@ -563,7 +589,9 @@ void X86CallFrameOptimizationImpl::adjustCallSequence(
         Push->cloneMergedMemRefs(MF, {DefMov, &*Store});
         DefMov->eraseFromParent();
       } else {
-        PushOpcode = Is64Bit ? X86::PUSH64r : X86::PUSH32r;
+        PushOpcode = Is16Bit   ? X86::PUSH16r
+                     : Is64Bit ? X86::PUSH64r
+                               : X86::PUSH32r;
         Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode))
                    .addReg(Reg, getUndefRegState(RegIsUndef))
                    .getInstr();
@@ -621,7 +649,8 @@ MachineInstr *X86CallFrameOptimizationImpl::canFoldIntoRegPush(
   // Make sure the def is a MOV from memory.
   // If the def is in another block, give up.
   if ((DefMI->getOpcode() != X86::MOV32rm &&
-       DefMI->getOpcode() != X86::MOV64rm) ||
+       DefMI->getOpcode() != X86::MOV64rm &&
+       DefMI->getOpcode() != X86::MOV16rm) ||
       DefMI->getParent() != FrameSetup->getParent())
     return nullptr;
 

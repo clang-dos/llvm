@@ -53,6 +53,13 @@ enum ProcessorFeatures {
 
 enum CPUKind {
   CK_None,
+  // 16-bit CPUs, only valid for the i8086 triple.
+  CK_i8086,
+  CK_i8088,
+  CK_i186,
+  CK_V20,
+  CK_V30,
+  CK_i286,
   CK_i386,
   CK_i486,
   CK_WinChipC6,
@@ -146,17 +153,23 @@ enum CPUKind {
 };
 
 /// Parse \p CPU string into a CPUKind. Will only accept 64-bit capable CPUs if
-/// \p Only64Bit is true.
-LLVM_ABI CPUKind parseArchX86(StringRef CPU, bool Only64Bit = false);
-LLVM_ABI CPUKind parseTuneCPU(StringRef CPU, bool Only64Bit = false);
+/// \p Only64Bit is true. CPUs older than the 80386 are only accepted if
+/// \p Allow16Bit is true, which is the case for the i8086 triple.
+LLVM_ABI CPUKind parseArchX86(StringRef CPU, bool Only64Bit = false,
+                              bool Allow16Bit = false);
+LLVM_ABI CPUKind parseTuneCPU(StringRef CPU, bool Only64Bit = false,
+                              bool Allow16Bit = false);
 
 /// Provide a list of valid CPU names. If \p Only64Bit is true, the list will
-/// only contain 64-bit capable CPUs.
+/// only contain 64-bit capable CPUs. CPUs older than the 80386 are only listed
+/// if \p Allow16Bit is true.
 LLVM_ABI void fillValidCPUArchList(SmallVectorImpl<StringRef> &Values,
-                                   bool Only64Bit = false);
+                                   bool Only64Bit = false,
+                                   bool Allow16Bit = false);
 /// Provide a list of valid -mtune names.
 LLVM_ABI void fillValidTuneCPUList(SmallVectorImpl<StringRef> &Values,
-                                   bool Only64Bit = false);
+                                   bool Only64Bit = false,
+                                   bool Allow16Bit = false);
 
 /// Get the key feature prioritizing target multiversioning.
 LLVM_ABI ProcessorFeatures getKeyFeature(CPUKind Kind);
@@ -177,6 +190,12 @@ LLVM_ABI bool validateCPUSpecificCPUDispatch(StringRef Name);
 LLVM_ABI std::array<uint32_t, 4>
 getCpuSupportsMask(ArrayRef<StringRef> FeatureStrs);
 LLVM_ABI unsigned getFeaturePriority(ProcessorFeatures Feat);
+
+/// Whether \p Kind is a CPU older than the 80386, which only the i8086 triple
+/// supports.
+inline bool is16BitCPU(CPUKind Kind) {
+  return Kind >= CK_i8086 && Kind <= CK_i286;
+}
 
 /// Memory models of the 16-bit real-mode (i8086) target. The memory model
 /// decides the default size of code and data pointers, and so the data

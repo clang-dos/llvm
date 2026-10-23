@@ -96,6 +96,8 @@ include "X86InstrSystem.td"
 
 // Compiler Pseudo Instructions and Pat Patterns
 include "X86InstrCompiler.td"
+// Patterns for CPUs before the 80386.
+include "X86InstrI8086.td"
 include "X86InstrVecCompiler.td"
 
 // Assembler mnemonic/instruction aliases

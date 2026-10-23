@@ -316,6 +316,14 @@ public:
 
 FunctionPass *createX86FixupBWInstsLegacyPass();
 
+/// Return a Machine IR pass that constrains the registers of memory operands
+/// to the ones the 8086 can use for addressing.
+FunctionPass *createX86FixupAddr16LegacyPass();
+
+/// Return a Machine IR pass that stops post-RA passes from renaming the
+/// registers of 8086 memory operands.
+FunctionPass *createX86ProtectAddr16LegacyPass();
+
 /// Return a Machine IR pass that reassigns instruction chains from one domain
 /// to another, when profitable.
 class X86DomainReassignmentPass
@@ -500,6 +508,8 @@ public:
 FunctionPass *createX86ArgumentStackSlotLegacyPass();
 
 void initializeCompressEVEXLegacyPass(PassRegistry &);
+void initializeX86FixupAddr16LegacyPass(PassRegistry &);
+void initializeX86ProtectAddr16LegacyPass(PassRegistry &);
 void initializeX86FixupBWInstLegacyPass(PassRegistry &);
 void initializeFixupLEAsLegacyPass(PassRegistry &);
 void initializeX86ArgumentStackSlotLegacyPass(PassRegistry &);

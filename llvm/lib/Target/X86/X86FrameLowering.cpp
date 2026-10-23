@@ -75,9 +75,13 @@ getCalleeSavedSpillRC(MCRegister Reg, const X86Subtarget &STI,
 X86FrameLowering::X86FrameLowering(const X86Subtarget &STI,
                                    MaybeAlign StackAlignOverride)
     : TargetFrameLowering(StackGrowsDown, StackAlignOverride.valueOrOne(),
-                          STI.is64Bit()             ? -8
+                          STI.is64Bit()            ? -8
                           : STI.isTarget16BitABI() ? -2
-                                                   : -4),
+                                                   : -4,
+                          /*TransientStackAlignment=*/Align(1),
+                          // The 16-bit ABI can't realign the stack, so stack
+                          // objects are limited to the stack alignment.
+                          /*StackRealignable=*/!STI.isTarget16BitABI()),
       STI(STI), TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {
   // Cache a bunch of frame-related predicates for this subtarget.
   SlotSize = TRI->getSlotSize();
@@ -4090,10 +4094,15 @@ bool X86FrameLowering::adjustStackWithPops(MachineBasicBlock &MBB,
   const MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
   const MachineOperand &RegMask = Prev->getOperand(1);
 
-  auto &RegClass =
-      Is64Bit ? X86::GR64_NOREX_NOSPRegClass : X86::GR32_NOREX_NOSPRegClass;
+  static const MCPhysReg Regs16[] = {X86::AX, X86::CX, X86::DX,
+                                     X86::BX, X86::SI, X86::DI};
+  ArrayRef<MCPhysReg> Candidates =
+      STI.isTarget16BitABI() ? ArrayRef<MCPhysReg>(Regs16)
+                             : (Is64Bit ? X86::GR64_NOREX_NOSPRegClass
+                                        : X86::GR32_NOREX_NOSPRegClass)
+                                   .getRegisters();
   // Try to find up to NumPops free registers.
-  for (auto Candidate : RegClass) {
+  for (MCPhysReg Candidate : Candidates) {
     // Poor man's liveness:
     // Since we're immediately after a call, any register that is clobbered
     // by the call and not defined by it can be considered dead.
@@ -4129,7 +4138,10 @@ bool X86FrameLowering::adjustStackWithPops(MachineBasicBlock &MBB,
     Regs[FoundRegs++] = Regs[0];
 
   for (int i = 0; i < NumPops; ++i)
-    BuildMI(MBB, MBBI, DL, TII.get(STI.is64Bit() ? X86::POP64r : X86::POP32r),
+    BuildMI(MBB, MBBI, DL,
+            TII.get(STI.is64Bit()            ? X86::POP64r
+                    : STI.isTarget16BitABI() ? X86::POP16r
+                                             : X86::POP32r),
             Regs[i]);
 
   return true;

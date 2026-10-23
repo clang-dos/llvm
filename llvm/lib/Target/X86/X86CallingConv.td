@@ -509,24 +509,33 @@ def RetCC_X86_64 : CallingConv<[
 // i8086 (16-bit ABI) Return Value Calling Convention
 //===----------------------------------------------------------------------===//
 
-// i8 in AL, i16 and near pointers in AX, i32 and far pointers in DX:AX. Wider
-// values come back through a hidden pointer, since only AX and DX are used.
+// i8 in AL, i16 and near pointers in AX, i32 and far pointers in DX:AX, and
+// i64 in BX:CX:DX:AX. Wider values come back through a hidden pointer.
 def RetCC_X86_16_C : CallingConv<[
   CCIfType<[i1], CCPromoteToType<i8>>,
   CCIfType<[i8], CCAssignToReg<[AL, DL]>>,
-  CCIfType<[i16], CCAssignToReg<[AX, DX]>>
+  CCIfType<[i16], CCAssignToReg<[AX, DX, CX, BX]>>,
+  // With an x87, floating-point values are returned in ST0.
+  CCIfType<[f32, f64, f80], CCAssignToReg<[FP0]>>
 ]>;
 
-// This is the return-value convention used for the entire X86 backend.
-let Entry = 1 in
-def RetCC_X86 : CallingConv<[
-  CCIfSubtarget<"isTarget16BitABI()", CCDelegateTo<RetCC_X86_16_C>>,
-
+// The return-value convention for everything but the 16-bit ABI.
+def RetCC_X86_Not16 : CallingConv<[
   // Check if this is the Intel OpenCL built-ins calling convention
   CCIfCC<"CallingConv::Intel_OCL_BI", CCDelegateTo<RetCC_Intel_OCL_BI>>,
 
   CCIfSubtarget<"is64Bit()", CCDelegateTo<RetCC_X86_64>>,
   CCDelegateTo<RetCC_X86_32>
+]>;
+
+// This is the return-value convention used for the entire X86 backend.
+let Entry = 1 in
+def RetCC_X86 : CallingConv<[
+  // If a value does not fit in the 16-bit registers, the return is demoted
+  // to a hidden pointer instead of falling through to the 32-bit rules.
+  CCIfSubtarget<"isTarget16BitABI()", CCDelegateTo<RetCC_X86_16_C>>,
+
+  CCIfNotSubtarget<"isTarget16BitABI()", CCDelegateTo<RetCC_X86_Not16>>
 ]>;
 
 //===----------------------------------------------------------------------===//
@@ -1131,7 +1140,12 @@ def CC_X86_64 : CallingConv<[
 def CC_X86_16_C : CallingConv<[
   CCIfByVal<CCPassByVal<2, 2>>,
   CCIfType<[i1, i8], CCPromoteToType<i16>>,
-  CCIfType<[i16], CCAssignToStack<2, 2>>
+  CCIfType<[i16], CCAssignToStack<2, 2>>,
+  // Wider integers are split into i16 parts, and so are floating-point values
+  // without an x87. With an x87 they are passed on the stack.
+  CCIfType<[f32], CCAssignToStack<4, 2>>,
+  CCIfType<[f64], CCAssignToStack<8, 2>>,
+  CCIfType<[f80], CCAssignToStack<10, 2>>
 ]>;
 
 // This is the argument convention used for the entire X86 backend.

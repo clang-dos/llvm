@@ -862,3 +862,12 @@ def FixedRegisters : RegisterCategory<[DEBUG_REG, CONTROL_REG, CCR, FPCCR,
                                        DFCCR, TILE, VK1PAIR, VK2PAIR, VK4PAIR,
                                        VK8PAIR, VK16PAIR]>;
 def GeneralPurposeRegisters : RegisterCategory<[GR64, GR32, GR16, GR8]>;
+
+// 8086 addressing registers, used only for i8086 code (see X86FixupAddr16.cpp).
+// They are defined last and do not generate pressure sets, and their 32-bit
+// and 64-bit counterparts already exist, so other targets are not affected.
+let GeneratePressureSet = 0 in {
+def I8086_BX : RegisterClass<"X86", [i16], 16, (add BX)>;
+def I8086_BXSI : RegisterClass<"X86", [i16], 16, (add BX, SI)>;
+def I8086_SIDI : RegisterClass<"X86", [i16], 16, (add SI, DI)>;
+}

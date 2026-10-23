@@ -285,6 +285,16 @@ constexpr EnumStringDef<ProcInfo> ProcessorDefs[] = {
  // Empty processor. Include X87 and CMPXCHG8 for backwards compatibility.
   { {""}, {CK_None, ~0U, FeatureX87 | FeatureCMPXCHG8B, '\0', false} },
   { {"generic"}, {CK_None, ~0U, FeatureX87 | FeatureCMPXCHG8B | Feature64BIT, 'A', true} },
+  // 16-bit processors, for the i8086 triple. The x87 coprocessor is optional
+  // on these, so it is not enabled by default.
+  { {"i8086"}, {CK_i8086, ~0U, FeatureBitset(), '\0', false} },
+  { {"i8088"}, {CK_i8088, ~0U, FeatureBitset(), '\0', false} },
+  { {"i186"}, {CK_i186, ~0U, FeatureBitset(), '\0', false} },
+  { {"i80186"}, {CK_i186, ~0U, FeatureBitset(), '\0', false} },
+  { {"v20"}, {CK_V20, ~0U, FeatureBitset(), '\0', false} },
+  { {"v30"}, {CK_V30, ~0U, FeatureBitset(), '\0', false} },
+  { {"i286"}, {CK_i286, ~0U, FeatureBitset(), '\0', false} },
+  { {"i80286"}, {CK_i286, ~0U, FeatureBitset(), '\0', false} },
   // i386-generation processors.
   { {"i386"}, {CK_i386, ~0U, FeatureX87, '\0', false} },
   // i486-generation processors.
@@ -476,34 +486,41 @@ constexpr auto Processors = BUILD_ENUM_STRINGS(ProcessorDefs);
 
 constexpr const char *NoTuneList[] = {"x86-64-v2", "x86-64-v3", "x86-64-v4"};
 
-X86::CPUKind llvm::X86::parseArchX86(StringRef CPU, bool Only64Bit) {
+// Whether \p P can be named with -march or -mtune.
+template <typename ProcT>
+static bool isValidProcessor(const ProcT &P, bool Only64Bit, bool Allow16Bit) {
+  return !P.value().OnlyForCPUDispatchSpecific &&
+         (P.value().Features[FEATURE_64BIT] || !Only64Bit) &&
+         (Allow16Bit || !X86::is16BitCPU(P.value().Kind));
+}
+
+X86::CPUKind llvm::X86::parseArchX86(StringRef CPU, bool Only64Bit,
+                                     bool Allow16Bit) {
   for (const auto &P : Processors)
-    if (!P.value().OnlyForCPUDispatchSpecific && P.name() == CPU &&
-        (P.value().Features[FEATURE_64BIT] || !Only64Bit))
+    if (P.name() == CPU && isValidProcessor(P, Only64Bit, Allow16Bit))
       return P.value().Kind;
 
   return CK_None;
 }
 
-X86::CPUKind llvm::X86::parseTuneCPU(StringRef CPU, bool Only64Bit) {
+X86::CPUKind llvm::X86::parseTuneCPU(StringRef CPU, bool Only64Bit,
+                                     bool Allow16Bit) {
   if (llvm::is_contained(NoTuneList, CPU))
     return CK_None;
-  return parseArchX86(CPU, Only64Bit);
+  return parseArchX86(CPU, Only64Bit, Allow16Bit);
 }
 
 void llvm::X86::fillValidCPUArchList(SmallVectorImpl<StringRef> &Values,
-                                     bool Only64Bit) {
+                                     bool Only64Bit, bool Allow16Bit) {
   for (const auto &P : Processors)
-    if (!P.value().OnlyForCPUDispatchSpecific && !P.name().empty() &&
-        (P.value().Features[FEATURE_64BIT] || !Only64Bit))
+    if (!P.name().empty() && isValidProcessor(P, Only64Bit, Allow16Bit))
       Values.emplace_back(P.name());
 }
 
 void llvm::X86::fillValidTuneCPUList(SmallVectorImpl<StringRef> &Values,
-                                     bool Only64Bit) {
+                                     bool Only64Bit, bool Allow16Bit) {
   for (const auto &P : Processors)
-    if (!P.value().OnlyForCPUDispatchSpecific && !P.name().empty() &&
-        (P.value().Features[FEATURE_64BIT] || !Only64Bit) &&
+    if (!P.name().empty() && isValidProcessor(P, Only64Bit, Allow16Bit) &&
         !llvm::is_contained(NoTuneList, P.name()))
       Values.emplace_back(P.name());
 }

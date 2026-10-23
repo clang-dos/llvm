@@ -778,6 +778,7 @@ bool X86InstrInfo::isReMaterializableImpl(
   case X86::KSET1W:
   case X86::MMX_SET0:
   case X86::MOV32ImmSExti8:
+  case X86::MOV16r0:
   case X86::MOV32r0:
   case X86::MOV32r1:
   case X86::MOV32r_1:
@@ -948,7 +949,12 @@ void X86InstrInfo::reMaterialize(MachineBasicBlock &MBB,
     // The instruction clobbers EFLAGS. Re-materialize as MOV32ri to avoid side
     // effects.
     int Value;
+    unsigned MovOpc = X86::MOV32ri;
     switch (Orig.getOpcode()) {
+    case X86::MOV16r0:
+      MovOpc = X86::MOV16ri;
+      Value = 0;
+      break;
     case X86::MOV32r0:
       Value = 0;
       break;
@@ -963,9 +969,7 @@ void X86InstrInfo::reMaterialize(MachineBasicBlock &MBB,
     }
 
     const DebugLoc &DL = Orig.getDebugLoc();
-    BuildMI(MBB, I, DL, get(X86::MOV32ri))
-        .add(Orig.getOperand(0))
-        .addImm(Value);
+    BuildMI(MBB, I, DL, get(MovOpc)).add(Orig.getOperand(0)).addImm(Value);
   } else {
     MachineInstr *MI = MBB.getParent()->CloneMachineInstr(&Orig);
     MBB.insert(I, MI);
@@ -6330,6 +6334,8 @@ bool X86InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   switch (MI.getOpcode()) {
   case X86::MOV32r0:
     return Expand2AddrUndef(MIB, get(X86::XOR32rr));
+  case X86::MOV16r0:
+    return Expand2AddrUndef(MIB, get(X86::XOR16rr));
   case X86::MOV32r1:
     return expandMOV32r1(MIB, *this, /*MinusOne=*/false);
   case X86::MOV32r_1:
@@ -7633,6 +7639,11 @@ MachineInstr *X86InstrInfo::foldMemoryOperandCustom(
             makeM0Inst(*this, (Size == 4) ? X86::MOV32mi : X86::MOV64mi32, MOs,
                        InsertPt, MI))
       return NewMI;
+    break;
+  case X86::MOV16r0:
+    if (Size == 2)
+      if (auto *NewMI = makeM0Inst(*this, X86::MOV16mi, MOs, InsertPt, MI))
+        return NewMI;
     break;
   }
 

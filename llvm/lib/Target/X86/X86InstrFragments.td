@@ -514,6 +514,9 @@ def gi_addr   : GIComplexOperandMatcher<s32, "selectAddr">,
 def lea32addr : ComplexPattern<i32, 5, "selectLEAAddr",
                                [add, sub, mul, X86mul_imm, shl, or, xor, frameindex],
                                []>;
+def lea16addr : ComplexPattern<i16, 5, "selectLEAAddr",
+                               [add, sub, mul, X86mul_imm, shl, or, xor, frameindex],
+                               []>;
 // In 64-bit mode 8/16/32-bit LEAs can use RIP-relative addressing.
 def lea64_iaddr : ComplexPattern<iAny, 5, "selectLEA64_Addr",
                                  [add, sub, mul, X86mul_imm, shl, or, xor,

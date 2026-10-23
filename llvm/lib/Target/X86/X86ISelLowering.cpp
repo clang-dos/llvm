@@ -73,7 +73,9 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
                                      const X86Subtarget &STI)
     : TargetLowering(TM, STI), Subtarget(STI) {
   bool UseX87 = !Subtarget.useSoftFloat() && Subtarget.hasX87();
-  MVT PtrVT = Subtarget.isTarget64BitLP64() ? MVT::i64 : MVT::i32;
+  MVT PtrVT = Subtarget.isTarget16BitABI()    ? MVT::i16
+              : Subtarget.isTarget64BitLP64() ? MVT::i64
+                                              : MVT::i32;
 
   // Set up the TargetLowering object.
 
@@ -2898,6 +2900,35 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
                        ISD::INTRINSIC_WO_CHAIN,
                        ISD::INTRINSIC_W_CHAIN});
 
+  // The 16-bit (i8086) ABI.
+  if (Subtarget.isTarget16BitABI()) {
+    for (auto Op :
+         {ISD::ConstantPool, ISD::JumpTable, ISD::GlobalAddress,
+          ISD::GlobalTLSAddress, ISD::ExternalSymbol, ISD::BlockAddress})
+      setOperationAction(Op, MVT::i16, Custom);
+    // Shifts of i32 values use the generic expansion.
+    setOperationAction({ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS},
+                       MVT::i16, Expand);
+    // On an 80386, i32 is legal but still passed in i16 parts.
+    setOperationAction({ISD::BUILD_PAIR, ISD::EXTRACT_ELEMENT}, MVT::i32,
+                       Expand);
+  }
+  if (Subtarget.isPre386()) {
+    // There is no MOVSX. Sign extension from i8 uses CBW, which needs the
+    // value in AL, so it is selected from SIGN_EXTEND.
+    setLoadExtAction(ISD::SEXTLOAD, MVT::i16, MVT::i8, Expand);
+    setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Custom);
+    // There is no two-operand IMUL: use the one-operand MUL.
+    setOperationAction(ISD::MUL, MVT::i16, Expand);
+    setOperationAction({ISD::SMUL_LOHI, ISD::UMUL_LOHI}, MVT::i16, Legal);
+    // There is no SHLD/SHRD, BSF/BSR or POPCNT.
+    for (MVT VT : {MVT::i8, MVT::i16})
+      setOperationAction({ISD::FSHL, ISD::FSHR, ISD::CTTZ,
+                          ISD::CTTZ_ZERO_POISON, ISD::CTLZ,
+                          ISD::CTLZ_ZERO_POISON, ISD::CTPOP},
+                         VT, Expand);
+  }
+
   computeRegisterProperties(Subtarget.getRegisterInfo());
 
   MaxStoresPerMemset = 16; // For @llvm.memset -> sequence of stores
@@ -2921,6 +2952,12 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
   PredictableSelectIsExpensive = Subtarget.getSchedModel().isOutOfOrder();
   EnableExtLdPromotion = true;
   setPrefFunctionAlignment(Align(16));
+
+  // 16-bit (i8086) code is small and the CPUs have no caches: don't pad.
+  if (Subtarget.isTarget16BitABI()) {
+    setPrefLoopAlignment(Align(1));
+    setPrefFunctionAlignment(Align(1));
+  }
 
   verifyIntrinsicTables();
 
@@ -24100,8 +24137,10 @@ static SDValue EmitCmp(SDValue Op0, SDValue Op1, X86::CondCode X86CC,
   // with an immediate. 16 bit immediates are to be avoided unless the target
   // isn't slowed down by length changing prefixes, we're optimizing for
   // codesize or the comparison is with a folded load.
+  // In 16-bit code, 16-bit immediates have no prefix.
   if (CmpVT == MVT::i16 && !Subtarget.hasFastImm16() &&
-      !X86::mayFoldLoad(Op0, Subtarget) && !X86::mayFoldLoad(Op1, Subtarget) &&
+      !Subtarget.isTarget16BitABI() && !X86::mayFoldLoad(Op0, Subtarget) &&
+      !X86::mayFoldLoad(Op1, Subtarget) &&
       !DAG.getMachineFunction().getFunction().hasMinSize()) {
     auto *COp0 = dyn_cast<ConstantSDNode>(Op0);
     auto *COp1 = dyn_cast<ConstantSDNode>(Op1);
@@ -26136,9 +26175,11 @@ SDValue X86TargetLowering::LowerSELECT(SDValue Op, SelectionDAG &DAG) const {
   //        legal, but EmitLoweredSelect() can not deal with these extensions
   //        being inserted between two CMOV's. (in i16 case too TBN)
   //        https://bugs.llvm.org/show_bug.cgi?id=40974
-  if ((Op.getValueType() == MVT::i8 && Subtarget.canUseCMOV()) ||
-      (Op.getValueType() == MVT::i16 && !X86::mayFoldLoad(Op1, Subtarget) &&
-       !X86::mayFoldLoad(Op2, Subtarget))) {
+  //        In 16-bit code, i16 is the native size and is not promoted.
+  if (!Subtarget.isTarget16BitABI() &&
+      ((Op.getValueType() == MVT::i8 && Subtarget.canUseCMOV()) ||
+       (Op.getValueType() == MVT::i16 && !X86::mayFoldLoad(Op1, Subtarget) &&
+        !X86::mayFoldLoad(Op2, Subtarget)))) {
     Op1 = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, Op1);
     Op2 = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, Op2);
     SDValue Ops[] = { Op2, Op1, CC, Cond };
@@ -34871,9 +34912,34 @@ static SDValue LowerPARTIAL_REDUCE_MLA(SDValue Op,
 
 /// Provide custom lowering hooks for some operations.
 SDValue X86TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
+  // Before the 80386, a node with an i32 or wider operand is custom lowered
+  // during type legalization. Leave it to the generic expansion, which splits
+  // it into 16-bit halves.
+  if (Subtarget.isPre386()) {
+    // Generic nodes have no EFLAGS operands, so an i32 here is an integer.
+    auto IsIllegalInt = [&](EVT VT) {
+      return VT.isScalarInteger() && !isTypeLegal(VT);
+    };
+    for (EVT VT : Op->values())
+      if (IsIllegalInt(VT))
+        return SDValue();
+    for (const SDValue &O : Op->op_values())
+      if (IsIllegalInt(O.getValueType()))
+        return SDValue();
+  }
+
   switch (Op.getOpcode()) {
   // clang-format off
   default: llvm_unreachable("Should not custom lower this!");
+  case ISD::SIGN_EXTEND_INREG: {
+    // Before the 80386: (sext (trunc x)), which is selected to CBW.
+    assert(Subtarget.isPre386() && Op.getValueType() == MVT::i16 &&
+           cast<VTSDNode>(Op.getOperand(1))->getVT() == MVT::i8 &&
+           "Unexpected SIGN_EXTEND_INREG");
+    SDLoc DL(Op);
+    SDValue Lo = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, Op.getOperand(0));
+    return DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i16, Lo);
+  }
   case ISD::ATOMIC_FENCE:       return LowerATOMIC_FENCE(Op, Subtarget, DAG);
   case ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS:
     return LowerCMP_SWAP(Op, Subtarget, DAG);
@@ -35057,6 +35123,12 @@ SDValue X86TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
 void X86TargetLowering::ReplaceNodeResults(SDNode *N,
                                            SmallVectorImpl<SDValue>&Results,
                                            SelectionDAG &DAG) const {
+  // Before the 80386, i32 and wider integers are split into 16-bit halves by
+  // the generic type legalizer. The custom expansions below assume 32-bit
+  // registers.
+  if (Subtarget.isPre386())
+    return;
+
   SDLoc dl(N);
   unsigned Opc = N->getOpcode();
   bool NoImplicitFloatOps =
@@ -64415,6 +64487,14 @@ bool X86TargetLowering::preferABDSToABSWithNSW(EVT VT) const {
 bool X86TargetLowering::preferSextInRegOfTruncate(EVT TruncVT, EVT VT,
                                                   EVT ExtVT) const {
   return Subtarget.hasAVX512() || !VT.isVector();
+}
+
+const TargetRegisterClass *
+X86TargetLowering::getRegClassFor(MVT VT, bool isDivergent) const {
+  // Copies of EFLAGS keep their i32 type on the 8086.
+  if (isIllegalFlagsType(VT))
+    return &X86::CCRRegClass;
+  return TargetLowering::getRegClassFor(VT, isDivergent);
 }
 
 bool X86TargetLowering::isTypeDesirableForOp(unsigned Opc, EVT VT) const {

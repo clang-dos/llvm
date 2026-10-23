@@ -990,16 +990,18 @@ void SelectionDAGLegalize::LegalizeOp(SDNode *Node) {
 
 #ifndef NDEBUG
   for (unsigned i = 0, e = Node->getNumValues(); i != e; ++i)
-    assert(TLI.getTypeAction(*DAG.getContext(), Node->getValueType(i)) ==
-             TargetLowering::TypeLegal &&
+    assert((TLI.getTypeAction(*DAG.getContext(), Node->getValueType(i)) ==
+                TargetLowering::TypeLegal ||
+            TLI.isIllegalFlagsType(Node->getValueType(i))) &&
            "Unexpected illegal type!");
 
   for (const SDValue &Op : Node->op_values())
     assert((TLI.getTypeAction(*DAG.getContext(), Op.getValueType()) ==
-              TargetLowering::TypeLegal ||
+                TargetLowering::TypeLegal ||
+            TLI.isIllegalFlagsType(Op.getValueType()) ||
             Op.getOpcode() == ISD::TargetConstant ||
             Op.getOpcode() == ISD::Register) &&
-            "Unexpected illegal type!");
+           "Unexpected illegal type!");
 #endif
 
   // Figure out the correct action; the way to query this varies by opcode

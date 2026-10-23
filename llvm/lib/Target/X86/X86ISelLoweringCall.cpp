@@ -101,9 +101,22 @@ handleMaskRegisterForCallingConv(unsigned NumElts, CallingConv::ID CC,
   return {MVT::INVALID_SIMPLE_VALUE_TYPE, 0};
 }
 
+// In the 16-bit (i8086) ABI, scalars wider than 16 bits are passed and
+// returned in 16-bit parts, also on an 80386, so that code built for different
+// CPUs can call each other. So are floating-point values without an x87.
+static bool isSplitTo16BitParts(const X86Subtarget &Subtarget, EVT VT) {
+  if (!Subtarget.isTarget16BitABI() || VT.isVector() ||
+      VT.getSizeInBits() <= 16)
+    return false;
+  return VT.isInteger() || !Subtarget.hasX87();
+}
+
 MVT X86TargetLowering::getRegisterTypeForCallingConv(LLVMContext &Context,
                                                      CallingConv::ID CC,
                                                      EVT VT) const {
+  if (isSplitTo16BitParts(Subtarget, VT))
+    return MVT::i16;
+
   if (VT.isVector()) {
     if (VT.getVectorElementType() == MVT::i1 && Subtarget.hasAVX512()) {
       unsigned NumElts = VT.getVectorNumElements();
@@ -140,6 +153,9 @@ MVT X86TargetLowering::getRegisterTypeForCallingConv(LLVMContext &Context,
 unsigned X86TargetLowering::getNumRegistersForCallingConv(LLVMContext &Context,
                                                           CallingConv::ID CC,
                                                           EVT VT) const {
+  if (isSplitTo16BitParts(Subtarget, VT))
+    return divideCeil(VT.getSizeInBits(), 16);
+
   if (VT.isVector()) {
     if (VT.getVectorElementType() == MVT::i1 && Subtarget.hasAVX512()) {
       unsigned NumElts = VT.getVectorNumElements();
@@ -283,6 +299,10 @@ Align X86TargetLowering::getByValTypeAlignment(Type *Ty,
   if (Subtarget.is64Bit())
     return std::max(DL.getABITypeAlign(Ty), Align::Constant<8>());
 
+  // Stack slots are 2 bytes in the 16-bit (i8086) ABI.
+  if (Subtarget.isTarget16BitABI())
+    return Align(2);
+
   Align Alignment(4);
   if (Subtarget.hasSSE1())
     getMaxByValAlign(Ty, Alignment);
@@ -338,6 +358,8 @@ EVT X86TargetLowering::getOptimalMemOpType(
   // slower and would certainly be a lot more code.
   if (Subtarget.is64Bit() && Op.size() >= 8)
     return MVT::i64;
+  if (Subtarget.isTarget16BitABI())
+    return MVT::i16;
   return MVT::i32;
 }
 
@@ -944,9 +966,10 @@ X86TargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     SDValue Val = DAG.getCopyFromReg(RetOps[0], dl, SRetReg,
                                      getPointerTy(MF.getDataLayout()));
 
-    Register RetValReg
-        = (Subtarget.is64Bit() && !Subtarget.isTarget64BitILP32()) ?
-          X86::RAX : X86::EAX;
+    Register RetValReg =
+        Subtarget.isTarget16BitABI()                               ? X86::AX
+        : (Subtarget.is64Bit() && !Subtarget.isTarget64BitILP32()) ? X86::RAX
+                                                                   : X86::EAX;
     Chain = DAG.getCopyToReg(Chain, dl, RetValReg, Val, Glue);
     Glue = Chain.getValue(1);
 
@@ -2119,6 +2142,13 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                M->getModuleFlag("cf-protection-branch");
   if (IsNoTrackIndirectCall)
     isTailCall = false;
+
+  // FIXME: Tail calls are not implemented for the 16-bit (i8086) ABI yet.
+  if (Subtarget.isTarget16BitABI()) {
+    if (CB && CB->isMustTailCall())
+      report_fatal_error("musttail calls are not supported for i8086 yet");
+    isTailCall = false;
+  }
 
   MachineFunction::CallSiteInfo CSInfo;
   if (CallConv == CallingConv::X86_INTR)

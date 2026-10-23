@@ -211,6 +211,14 @@ def IsLP64  : Predicate<"Subtarget->isTarget64BitLP64()">;
 def NotLP64 : Predicate<"!Subtarget->isTarget64BitLP64()">;
 def In16BitABIMode : Predicate<"Subtarget->isTarget16BitABI()">,
                      AssemblerPredicate<(all_of Is16BitABI), "16-bit ABI">;
+// Code generation for an 8086, 80186 or 80286 must not use 80386 instructions
+// (32-bit registers, MOVZX/MOVSX, SETcc, Jcc rel16, ...). Only i8086 triples
+// can be pre-386.
+def IsPre386 : Predicate<"Subtarget->isPre386()">;
+def Has386   : Predicate<"!Subtarget->isPre386()">;
+// Shifts and rotates by an immediate other than 1 need an 80186.
+def Has186   : Predicate<"Subtarget->has186()">;
+def No186    : Predicate<"!Subtarget->has186()">;
 def In16BitMode  : Predicate<"Subtarget->is16Bit()">,
                              AssemblerPredicate<(all_of Is16Bit), "16-bit mode">;
 def Not16BitMode : Predicate<"!Subtarget->is16Bit()">,

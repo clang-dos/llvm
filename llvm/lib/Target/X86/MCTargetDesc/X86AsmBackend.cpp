@@ -766,11 +766,6 @@ void X86AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
 bool X86AsmBackend::mayNeedRelaxation(unsigned Opcode,
                                       ArrayRef<MCOperand> Operands,
                                       const MCSubtargetInfo &STI) const {
-  // Before the 80386 there is no Jcc rel16, so a short conditional branch
-  // can't be relaxed to one. An out-of-range Jcc then gives a fixup error.
-  // FIXME: relax to an inverted Jcc over a near JMP instead.
-  if (Opcode == X86::JCC_1 && X86_MC::isPre386Subtarget(STI))
-    return false;
   unsigned SkipOperands = X86::isCCMPCC(Opcode) ? 2 : 0;
   return isRelaxableBranch(Opcode) ||
          (X86::getOpcodeForLongImmediateForm(Opcode) != Opcode &&
@@ -811,6 +806,12 @@ void X86AsmBackend::relaxInstruction(MCInst &Inst,
                                      const MCSubtargetInfo &STI) const {
   // The only relaxations X86 does is from a 1byte pcrel to a 4byte pcrel.
   bool Is16BitMode = STI.hasFeature(X86::Is16Bit);
+  // Before the 80386 there is no Jcc rel16. Use an inverted short Jcc over a
+  // near JMP instead.
+  if (Inst.getOpcode() == X86::JCC_1 && X86_MC::isPre386Subtarget(STI)) {
+    Inst.setOpcode(X86::JCC_8086);
+    return;
+  }
   unsigned RelaxedOp = getRelaxedOpcode(Inst, Is16BitMode);
   assert(RelaxedOp != Inst.getOpcode());
   Inst.setOpcode(RelaxedOp);
@@ -1166,8 +1167,21 @@ bool X86AsmBackend::writeNopData(raw_ostream &OS, uint64_t Count,
       "\x8d\xb4\x00\x00",
   };
 
-  const char(*Nops)[11] =
-      STI->hasFeature(X86::Is16Bit) ? Nops16Bit : Nops32Bit;
+  // The 8086 has no 0x66 prefix, so use a 16-bit move for two bytes.
+  static const char Nops8086[4][11] = {
+      // nop
+      "\x90",
+      // mov %si,%si
+      "\x89\xf6",
+      // lea 0(%si),%si
+      "\x8d\x74\x00",
+      // lea 0w(%si),%si
+      "\x8d\xb4\x00\x00",
+  };
+
+  const char(*Nops)[11] = X86_MC::isPre386Subtarget(*STI) ? Nops8086
+                          : STI->hasFeature(X86::Is16Bit) ? Nops16Bit
+                                                          : Nops32Bit;
 
   uint64_t MaxNopLength = (uint64_t)getMaximumNopSize(*STI);
 

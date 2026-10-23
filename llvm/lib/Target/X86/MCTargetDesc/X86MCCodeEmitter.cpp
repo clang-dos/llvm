@@ -1516,6 +1516,19 @@ void X86MCCodeEmitter::encodeInstruction(const MCInst &MI,
   const MCInstrDesc &Desc = MCII.get(Opcode);
   uint64_t TSFlags = Desc.TSFlags;
 
+  // A relaxed conditional branch before the 80386: an inverted short Jcc over
+  // a near JMP.
+  if (Opcode == X86::JCC_8086) {
+    unsigned CC = MI.getOperand(1).getImm();
+    // Inverting the low bit of a condition code gives the opposite condition.
+    emitByte(0x70 | (CC ^ 1), CB);
+    emitByte(3, CB);
+    emitByte(0xE9, CB);
+    emitImmediate(MI.getOperand(0), MI.getLoc(), FK_Data_2, /*PCRel=*/true,
+                  CB.size() - 3, CB, Fixups);
+    return;
+  }
+
   // Pseudo instructions don't get encoded.
   if (X86II::isPseudo(TSFlags))
     return;

@@ -103,6 +103,34 @@ X86RegisterInfo::getMatchingSuperRegClass(const TargetRegisterClass *A,
   return X86GenRegisterInfo::getMatchingSuperRegClass(A, B, SubIdx);
 }
 
+// Whether RC is one of the 8086 addressing classes that X86FixupAddr16 uses.
+static bool isAddr16RegClass(const TargetRegisterClass *RC) {
+  return X86::I8086_BXSIRegClass.hasSubClassEq(RC) ||
+         X86::I8086_SIDIRegClass.hasSubClassEq(RC);
+}
+
+bool X86RegisterInfo::shouldCoalesce(
+    MachineInstr *MI, const TargetRegisterClass *SrcRC, unsigned SubReg,
+    const TargetRegisterClass *DstRC, unsigned DstSubReg,
+    const TargetRegisterClass *NewRC, LiveIntervals &LIS) const {
+  // X86FixupAddr16 copies 8086 base and index registers into the one or two
+  // registers that can address memory, right before the memory operand.
+  // Don't let coalescing spread these classes over long live ranges, which
+  // can leave the allocator without registers: only allow it when the
+  // register that would be constrained is used just by this copy.
+  if (!isAddr16RegClass(NewRC))
+    return true;
+  const MachineRegisterInfo &MRI = MI->getMF()->getRegInfo();
+  for (auto [Reg, RC] : {std::pair(MI->getOperand(0).getReg(), DstRC),
+                         std::pair(MI->getOperand(1).getReg(), SrcRC)}) {
+    if (RC == NewRC)
+      continue;
+    if (!Reg.isVirtual() || !MRI.hasOneNonDBGUse(Reg) || !MRI.hasOneDef(Reg))
+      return false;
+  }
+  return true;
+}
+
 const TargetRegisterClass *
 X86RegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
                                            const MachineFunction &MF) const {
@@ -121,6 +149,11 @@ X86RegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
   // enabled for relocation.
   const X86Subtarget &Subtarget = MF.getSubtarget<X86Subtarget>();
   if (!Subtarget.getCLOpts().enable_apx_for_relocation && isNonRex2RegClass(RC))
+    return RC;
+
+  // The 8086 addressing classes are set by X86FixupAddr16 to meet constraints
+  // that the operand register classes do not express. Never inflate them.
+  if (Subtarget.isTarget16BitABI() && isAddr16RegClass(RC))
     return RC;
 
   const TargetRegisterClass *Super = RC;

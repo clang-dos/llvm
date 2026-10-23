@@ -146,6 +146,12 @@ void X86AsmPrinter::EmitAndCountInstruction(MCInst &Inst) {
                        " or later CPU, but the target CPU is an " +
                        X86_MC::getCPULevel16Name(Have));
   }
+  if (Subtarget && Subtarget->isTarget16BitABI() &&
+      X86_MC::hasInvalid16BitAddress(Inst, *Subtarget->getInstrInfo()))
+    OutContext.reportError(
+        SMLoc(), Twine("generated instruction '") +
+                     Subtarget->getInstrInfo()->getName(Inst.getOpcode()) +
+                     "' has a memory operand that the 8086 cannot encode");
   OutStreamer->emitInstruction(Inst, getSubtargetInfo());
   SMShadowTracker.count(Inst, getSubtargetInfo(), CodeEmitter.get());
 }
@@ -425,7 +431,8 @@ void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
       X86::optimizeShiftRotateWithImmediateOne(OutMI) ||
       X86::optimizeVPCMPWithImmediateOneOrSix(OutMI) ||
       X86::optimizeMOVSX(OutMI) || X86::optimizeINCDEC(OutMI, In64BitMode) ||
-      X86::optimizeMOV(OutMI, In64BitMode) ||
+      X86::optimizeMOV(OutMI, In64BitMode,
+                       AsmPrinter.getSubtarget().isTarget16BitABI()) ||
       X86::optimizeToFixedRegisterOrShortImmediateForm(OutMI))
     return;
 

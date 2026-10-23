@@ -81,6 +81,9 @@ public:
   bool runOnMachineFunction(MachineFunction &MF);
 
 private:
+  bool lowerCopiesWithPushPop(ArrayRef<MachineInstr *> Copies);
+
+private:
   MachineRegisterInfo *MRI = nullptr;
   const X86Subtarget *Subtarget = nullptr;
   const X86InstrInfo *TII = nullptr;
@@ -260,6 +263,46 @@ static EFLAGSClobber getClobberType(const MachineInstr &MI) {
   return InevitableClobber;
 }
 
+bool X86FlagsCopyLoweringImpl::lowerCopiesWithPushPop(
+    ArrayRef<MachineInstr *> Copies) {
+  DenseMap<MachineInstr *, Register> Saved;
+  SmallVector<MachineInstr *, 4> DeadDefs;
+  for (MachineInstr *CopyI : Copies) {
+    MachineInstr *CopyDefI = MRI->getVRegDef(CopyI->getOperand(1).getReg());
+    if (CopyDefI->getOpcode() != TargetOpcode::COPY ||
+        CopyDefI->getOperand(1).getReg() != X86::EFLAGS)
+      report_fatal_error("cannot lower an EFLAGS copy for this CPU");
+
+    Register &Reg = Saved[CopyDefI];
+    if (!Reg) {
+      // %reg = COPY $eflags -> PUSHF; POP %reg
+      Reg = MRI->createVirtualRegister(&X86::GR16RegClass);
+      MachineBasicBlock &MBB = *CopyDefI->getParent();
+      const DebugLoc &DL = CopyDefI->getDebugLoc();
+      // PUSHF also reads DF, whose value doesn't matter here.
+      MachineInstr *PushF = BuildMI(MBB, *CopyDefI, DL, TII->get(X86::PUSHF16));
+      PushF->findRegisterUseOperand(X86::DF, /*TRI=*/nullptr)->setIsUndef();
+      BuildMI(MBB, *CopyDefI, DL, TII->get(X86::POP16r), Reg);
+      DeadDefs.push_back(CopyDefI);
+    }
+
+    // $eflags = COPY %reg -> PUSH %reg; POPF
+    MachineBasicBlock &MBB = *CopyI->getParent();
+    const DebugLoc &DL = CopyI->getDebugLoc();
+    BuildMI(MBB, *CopyI, DL, TII->get(X86::PUSH16r)).addReg(Reg);
+    MachineInstr *PopF = BuildMI(MBB, *CopyI, DL, TII->get(X86::POPF16));
+    PopF->findRegisterDefOperand(X86::DF, /*TRI=*/nullptr)->setIsDead();
+    CopyI->eraseFromParent();
+  }
+  for (MachineInstr *CopyDefI : DeadDefs) {
+    if (MRI->use_nodbg_empty(CopyDefI->getOperand(0).getReg()))
+      CopyDefI->eraseFromParent();
+    else
+      report_fatal_error("cannot lower an EFLAGS copy for this CPU");
+  }
+  return true;
+}
+
 bool X86FlagsCopyLoweringImpl::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << PASS_KEY << " : " << MF.getName()
                     << " **********\n");
@@ -300,6 +343,11 @@ bool X86FlagsCopyLoweringImpl::runOnMachineFunction(MachineFunction &MF) {
       if (MI.getOpcode() == TargetOpcode::COPY &&
           MI.getOperand(0).getReg() == X86::EFLAGS)
         Copies.insert(&MI);
+
+  // CPUs older than the 80386 have no SETcc. Save the flags with PUSHF and
+  // POP, and restore them with PUSH and POPF.
+  if (Subtarget->isPre386())
+    return lowerCopiesWithPushPop(Copies.getArrayRef());
 
   // Try to elminate the copys by transform the instructions between copy and
   // copydef to the NF (no flags update) variants, e.g.

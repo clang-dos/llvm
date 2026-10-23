@@ -198,6 +198,14 @@ namespace llvm {
     /// instruction encodings are longer and some i16 instructions are slow.
     bool isTypeDesirableForOp(unsigned Opc, EVT VT) const override;
 
+    /// EFLAGS values are typed i32, which is not legal before the 80386.
+    bool isIllegalFlagsType(EVT VT) const override {
+      return VT == MVT::i32 && !isTypeLegal(MVT::i32);
+    }
+
+    const TargetRegisterClass *
+    getRegClassFor(MVT VT, bool isDivergent = false) const override;
+
     /// Return true if the target has native support for the
     /// specified value type and it is 'desirable' to use the type. e.g. On x86
     /// i16 is legal, but undesirable since i16 instruction encodings are longer

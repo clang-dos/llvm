@@ -586,6 +586,38 @@ X86_MC::CPULevel16 X86_MC::getRequiredCPULevel16(const MCInst &MI,
   }
 }
 
+bool X86_MC::hasInvalid16BitAddress(const MCInst &MI, const MCInstrInfo &MCII) {
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  int MemOp = X86II::getMemoryOperandNo(Desc.TSFlags);
+  if (MemOp < 0)
+    return false;
+  MemOp += X86II::getOperandBias(Desc);
+  if (MI.getNumOperands() < unsigned(MemOp) + X86::AddrNumOperands)
+    return false;
+
+  const MCOperand &Base = MI.getOperand(MemOp + X86::AddrBaseReg);
+  const MCOperand &Scale = MI.getOperand(MemOp + X86::AddrScaleAmt);
+  const MCOperand &Index = MI.getOperand(MemOp + X86::AddrIndexReg);
+  MCRegister BaseReg = Base.isReg() ? Base.getReg() : MCRegister();
+  MCRegister IndexReg = Index.isReg() ? Index.getReg() : MCRegister();
+
+  const MCRegisterClass &GR16 = getX86MCRegisterClass(X86::GR16RegClassID);
+  if (!(BaseReg && GR16.contains(BaseReg)) &&
+      !(IndexReg && GR16.contains(IndexReg)))
+    return false;
+
+  auto IsBXBP = [](MCRegister R) { return R == X86::BX || R == X86::BP; };
+  auto IsSIDI = [](MCRegister R) { return R == X86::SI || R == X86::DI; };
+  if (!BaseReg)
+    return true;
+  if (!IndexReg)
+    return !IsBXBP(BaseReg) && !IsSIDI(BaseReg);
+  if (Scale.isImm() && Scale.getImm() != 1)
+    return true;
+  return !((IsBXBP(BaseReg) && IsSIDI(IndexReg)) ||
+           (IsSIDI(BaseReg) && IsBXBP(IndexReg)));
+}
+
 MCSubtargetInfo *X86_MC::createX86MCSubtargetInfo(const Triple &TT,
                                                   StringRef CPU, StringRef FS) {
   std::string ArchFS = X86_MC::ParseX86Triple(TT);

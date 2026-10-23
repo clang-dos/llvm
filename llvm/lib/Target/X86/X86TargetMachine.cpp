@@ -67,6 +67,8 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86Target() {
   initializeX86PreTileConfigLegacyPass(PR);
   initializeGlobalISel(PR);
   initializeWinEHStateLegacyPass(PR);
+  initializeX86FixupAddr16LegacyPass(PR);
+  initializeX86ProtectAddr16LegacyPass(PR);
   initializeX86FixupBWInstLegacyPass(PR);
   initializeCompressEVEXLegacyPass(PR);
   initializeFixupLEAsLegacyPass(PR);
@@ -383,6 +385,7 @@ public:
   void addMachineSSAOptimization() override;
   void addPreRegAlloc() override;
   bool addRegAssignAndRewriteFast() override;
+  void addPostRewrite() override;
   void addPostRegAlloc() override;
   void addPreEmitPass() override;
   void addPreEmitPass2() override;
@@ -523,7 +526,15 @@ void X86PassConfig::addPreRegAlloc() {
     addPass(createX86OptimizeLEAsLegacyPass());
     addPass(createX86CallFrameOptimizationLegacyPass());
     addPass(createX86AvoidStoreForwardingBlocksLegacyPass());
+  } else if (TM->getTargetTriple().isX86_16()) {
+    // The 8086 cannot address through SP, so outgoing arguments are always
+    // pushed.
+    addPass(createX86CallFrameOptimizationLegacyPass());
   }
+
+  // Legalize 8086 memory operands. This does nothing for other targets.
+  if (TM->getTargetTriple().isX86_16())
+    addPass(createX86FixupAddr16LegacyPass());
 
   addPass(createX86SuppressAPXForRelocationLegacyPass());
 
@@ -541,6 +552,11 @@ bool X86PassConfig::addRegAssignAndRewriteFast() {
   bool ToReturn = TargetPassConfig::addRegAssignAndRewriteFast();
   addPass(createX86FastTileConfigLegacyPass());
   return ToReturn;
+}
+
+void X86PassConfig::addPostRewrite() {
+  if (TM->getTargetTriple().isX86_16())
+    addPass(createX86ProtectAddr16LegacyPass());
 }
 
 void X86PassConfig::addMachineSSAOptimization() {

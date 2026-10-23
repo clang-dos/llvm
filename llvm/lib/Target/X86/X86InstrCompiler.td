@@ -324,12 +324,23 @@ def MOV32r0  : I<0, Pseudo, (outs GR32:$dst), (ins), "",
 // Other widths can also make use of the 32-bit xor, which may have a smaller
 // encoding and avoid partial register updates.
 let AddedComplexity = 10 in {
+let Predicates = [Has386] in {
 def : Pat<(i8 0), (EXTRACT_SUBREG (MOV32r0), sub_8bit)>;
 def : Pat<(i16 0), (EXTRACT_SUBREG (MOV32r0), sub_16bit)>;
+}
 def : Pat<(i64 0), (SUBREG_TO_REG (MOV32r0), sub_32bit)>;
 }
 
-let Predicates = [OptForSize, Not64BitMode],
+// Before the 80386, zero a 16-bit register with a 16-bit xor.
+let Defs = [EFLAGS], isReMaterializable = 1, isAsCheapAsAMove = 1,
+    isPseudo = 1, isMoveImm = 1, AddedComplexity = 10,
+    Predicates = [IsPre386] in
+def MOV16r0  : I<0, Pseudo, (outs GR16:$dst), (ins), "",
+                 [(set GR16:$dst, 0)]>, Sched<[WriteZero]>;
+let AddedComplexity = 10, Predicates = [IsPre386] in
+def : Pat<(i8 0), (EXTRACT_SUBREG (MOV16r0), sub_8bit)>;
+
+let Predicates = [OptForSize, Not64BitMode, Has386],
     AddedComplexity = 10 in {
   let SchedRW = [WriteALU] in {
   // Pseudo instructions for materializing 1 and -1 using XOR+INC/DEC,
@@ -1483,6 +1494,12 @@ def : Pat<(X86call (i32 texternalsym:$dst)),
           (CALLpcrel32 texternalsym:$dst)>;
 def : Pat<(X86call (i32 imm:$dst)),
           (CALLpcrel32 imm:$dst)>, Requires<[CallImmAddr]>;
+
+// Near calls in the 16-bit (i8086) ABI.
+def : Pat<(X86call (i16 tglobaladdr:$dst)),
+          (CALLpcrel16 tglobaladdr:$dst)>;
+def : Pat<(X86call (i16 texternalsym:$dst)),
+          (CALLpcrel16 texternalsym:$dst)>;
 
 def : Pat<(X86call_globaladdr tglobaladdr:$dst),
           (CALL64m RIP, 1, zero_reg, tglobaladdr:$dst, zero_reg)>;

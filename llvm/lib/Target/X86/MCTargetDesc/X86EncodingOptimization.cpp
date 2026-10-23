@@ -340,8 +340,9 @@ static bool isARegister(MCRegister Reg) {
   return Reg == X86::AL || Reg == X86::AX || Reg == X86::EAX || Reg == X86::RAX;
 }
 
-/// Simplify things like MOV32rm to MOV32o32a.
-bool X86::optimizeMOV(MCInst &MI, bool In64BitMode) {
+/// Simplify things like MOV32rm to MOV32o32a. With \p Use16BitAddress (the
+/// 16-bit i8086 ABI), use the forms with a 16-bit offset.
+bool X86::optimizeMOV(MCInst &MI, bool In64BitMode, bool Use16BitAddress) {
   // Don't make these simplifications in 64-bit mode; other assemblers don't
   // perform them because they make the code larger.
   if (In64BitMode)
@@ -365,6 +366,24 @@ bool X86::optimizeMOV(MCInst &MI, bool In64BitMode) {
     FROM_TO(MOV16rm, MOV16ao32)
     FROM_TO(MOV32mr, MOV32o32a)
     FROM_TO(MOV32rm, MOV32ao32)
+  }
+  if (Use16BitAddress) {
+    switch (NewOpc) {
+    case X86::MOV8o32a:
+      NewOpc = X86::MOV8o16a;
+      break;
+    case X86::MOV8ao32:
+      NewOpc = X86::MOV8ao16;
+      break;
+    case X86::MOV16o32a:
+      NewOpc = X86::MOV16o16a;
+      break;
+    case X86::MOV16ao32:
+      NewOpc = X86::MOV16ao16;
+      break;
+    default:
+      return false;
+    }
   }
   bool IsStore = MI.getOperand(0).isReg() && MI.getOperand(1).isReg();
   unsigned AddrBase = IsStore;

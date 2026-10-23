@@ -298,6 +298,18 @@ namespace {
         AM.IndexReg = Neg;
       }
 
+      // The 8086 has no scaled index, so double the index explicitly. (A
+      // 32-bit LEA on an 80386 uses 32-bit addressing, which has one.)
+      if (Subtarget->isTarget16BitABI() && VT == MVT::i16 && AM.Scale != 1 &&
+          AM.IndexReg.getNode()) {
+        for (unsigned S = AM.Scale; S > 1; S >>= 1)
+          AM.IndexReg =
+              SDValue(CurDAG->getMachineNode(X86::ADD16rr, DL, VT, MVT::i32,
+                                             AM.IndexReg, AM.IndexReg),
+                      0);
+        Scale = getI8Imm(1, DL);
+      }
+
       if (AM.IndexReg.getNode())
         Index = AM.IndexReg;
       else
@@ -481,9 +493,15 @@ namespace {
       MVT VT = N->getSimpleValueType(0);
 
       // Create zero.
-      SDVTList VTs = CurDAG->getVTList(MVT::i32, MVT::i32);
+      bool Pre386 = Subtarget->isPre386();
+      assert((!Pre386 || VT == MVT::i16 || VT == MVT::i8) &&
+             "Unexpected type before the 80386");
+      MVT ZeroVT = Pre386 ? MVT::i16 : MVT::i32;
+      SDVTList VTs = CurDAG->getVTList(ZeroVT, MVT::i32);
       SDValue Zero =
-          SDValue(CurDAG->getMachineNode(X86::MOV32r0, dl, VTs, {}), 0);
+          SDValue(CurDAG->getMachineNode(Pre386 ? X86::MOV16r0 : X86::MOV32r0,
+                                         dl, VTs, {}),
+                  0);
       if (VT == MVT::i64) {
         Zero = SDValue(
             CurDAG->getMachineNode(
@@ -503,8 +521,10 @@ namespace {
 
       // Create a 64-bit instruction if the result is 64-bits otherwise use the
       // 32-bit version.
-      unsigned Opc = VT == MVT::i64 ? X86::SBB64rr : X86::SBB32rr;
-      MVT SBBVT = VT == MVT::i64 ? MVT::i64 : MVT::i32;
+      unsigned Opc = VT == MVT::i64 ? X86::SBB64rr
+                     : Pre386       ? X86::SBB16rr
+                                    : X86::SBB32rr;
+      MVT SBBVT = VT == MVT::i64 ? MVT::i64 : ZeroVT;
       VTs = CurDAG->getVTList(SBBVT, MVT::i32);
       return SDValue(
           CurDAG->getMachineNode(Opc, dl, VTs,
@@ -2117,9 +2137,11 @@ bool X86DAGToDAGISel::matchAddress(SDValue N, X86ISelAddressMode &AM) {
   // negated: this copies the index into the base, but only the index is negated
   // when the address is emitted, so the result would be index + (-index) - that
   // is, zero - rather than (-index) * 2.
+  // The 8086 cannot use the same register as base and index, so it doubles
+  // the index instead.
   if (AM.Scale == 2 && !AM.NegateIndex &&
       AM.BaseType == X86ISelAddressMode::RegBase &&
-      AM.Base_Reg.getNode() == nullptr) {
+      AM.Base_Reg.getNode() == nullptr && !Subtarget->isTarget16BitABI()) {
     AM.Base_Reg = AM.IndexReg;
     AM.Scale = 1;
   }
@@ -5567,6 +5589,23 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
 
   switch (Opcode) {
   default: break;
+  case ISD::SIGN_EXTEND: {
+    // Before the 80386 there is no MOVSX: sign-extend i8 with CBW.
+    if (!Subtarget->isPre386() || NVT != MVT::i16 ||
+        Node->getOperand(0).getSimpleValueType() != MVT::i8)
+      break;
+    SDValue InGlue = CurDAG
+                         ->getCopyToReg(CurDAG->getEntryNode(), dl, X86::AL,
+                                        Node->getOperand(0), SDValue())
+                         .getValue(1);
+    InGlue =
+        SDValue(CurDAG->getMachineNode(X86::CBW, dl, MVT::Glue, InGlue), 0);
+    SDValue Result = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl, X86::AX,
+                                            MVT::i16, InGlue);
+    ReplaceUses(SDValue(Node, 0), Result);
+    CurDAG->RemoveDeadNode(Node);
+    return;
+  }
   case ISD::INTRINSIC_W_CHAIN: {
     unsigned IntNo = Node->getConstantOperandVal(1);
     switch (IntNo) {
@@ -6140,10 +6179,17 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     unsigned Opc, MOpc;
     unsigned LoReg, HiReg;
     bool IsSigned = Opcode == ISD::SMUL_LOHI;
-    bool UseMULX = !IsSigned && Subtarget->hasBMI2();
+    bool UseMULX = !IsSigned && Subtarget->hasBMI2() && NVT != MVT::i16;
     bool UseMULXHi = UseMULX && SDValue(Node, 0).use_empty();
     switch (NVT.SimpleTy) {
     default: llvm_unreachable("Unsupported VT!");
+    case MVT::i16:
+      // Before the 80386 this is the only 16-bit multiply.
+      Opc = IsSigned ? X86::IMUL16r : X86::MUL16r;
+      MOpc = IsSigned ? X86::IMUL16m : X86::MUL16m;
+      LoReg = X86::AX;
+      HiReg = X86::DX;
+      break;
     case MVT::i32:
       Opc = UseMULXHi  ? X86::MULX32Hrr
             : UseMULX  ? GET_EGPR_IF_ENABLED(X86::MULX32rr)
@@ -6314,7 +6360,27 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     bool signBitIsZero = CurDAG->SignBitIsZero(N0);
 
     SDValue InGlue;
-    if (NVT == MVT::i8) {
+    if (NVT == MVT::i8 && Subtarget->isPre386()) {
+      // There is no MOVZX/MOVSX: put the dividend in AL, then sign-extend it
+      // into AH with CBW or clear AH.
+      InGlue =
+          CurDAG
+              ->getCopyToReg(CurDAG->getEntryNode(), dl, X86::AL, N0, SDValue())
+              .getValue(1);
+      if (isSigned && !signBitIsZero) {
+        InGlue =
+            SDValue(CurDAG->getMachineNode(X86::CBW, dl, MVT::Glue, InGlue), 0);
+      } else {
+        SDValue Zero = SDValue(
+            CurDAG->getMachineNode(X86::MOV8ri, dl, MVT::i8,
+                                   CurDAG->getTargetConstant(0, dl, MVT::i8)),
+            0);
+        InGlue = CurDAG
+                     ->getCopyToReg(CurDAG->getEntryNode(), dl, X86::AH, Zero,
+                                    InGlue)
+                     .getValue(1);
+      }
+    } else if (NVT == MVT::i8) {
       // Special case for div8, just use a move with zero extension to AX to
       // clear the upper 8 bits (AH).
       SDValue Tmp0, Tmp1, Tmp2, Tmp3, Tmp4, Chain;
@@ -6349,9 +6415,18 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
         // Zero out the high part, effectively zero extending the input.
         SDVTList VTs = CurDAG->getVTList(MVT::i32, MVT::i32);
         SDValue ClrNode =
-            SDValue(CurDAG->getMachineNode(X86::MOV32r0, dl, VTs, {}), 0);
+            NVT == MVT::i16 && Subtarget->isPre386()
+                ? SDValue()
+                : SDValue(CurDAG->getMachineNode(X86::MOV32r0, dl, VTs, {}), 0);
         switch (NVT.SimpleTy) {
         case MVT::i16:
+          if (Subtarget->isPre386()) {
+            ClrNode = SDValue(CurDAG->getMachineNode(
+                                  X86::MOV16r0, dl,
+                                  CurDAG->getVTList(MVT::i16, MVT::i32), {}),
+                              0);
+            break;
+          }
           ClrNode =
               SDValue(CurDAG->getMachineNode(
                           TargetOpcode::EXTRACT_SUBREG, dl, MVT::i16, ClrNode,
@@ -6399,7 +6474,8 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     // won't generate explicit references to the GR8_ABCD_H registers. If
     // the allocator and/or the backend get enhanced to be more robust in
     // that regard, this can be, and should be, removed.
-    if (HiReg == X86::AH && !SDValue(Node, 1).use_empty()) {
+    if (HiReg == X86::AH && !Subtarget->isPre386() &&
+        !SDValue(Node, 1).use_empty()) {
       SDValue AHCopy = CurDAG->getRegister(X86::AH, MVT::i8);
       unsigned AHExtOpcode =
           isSigned ? X86::MOVSX32rr8_NOREX : X86::MOVZX32rr8_NOREX;
@@ -6832,8 +6908,12 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
       Result = getSBBZero(Node);
     }
 
-    // For less than 32-bits we need to extract from the 32-bit node.
-    if (VT == MVT::i8 || VT == MVT::i16) {
+    // For less than 32-bits we need to extract from the 32-bit node. Before
+    // the 80386 the node is 16 bits.
+    if (Subtarget->isPre386()) {
+      if (VT == MVT::i8)
+        Result = CurDAG->getTargetExtractSubreg(X86::sub_8bit, dl, VT, Result);
+    } else if (VT == MVT::i8 || VT == MVT::i16) {
       int SubIndex = VT == MVT::i16 ? X86::sub_16bit : X86::sub_8bit;
       Result = CurDAG->getTargetExtractSubreg(SubIndex, dl, VT, Result);
     }
@@ -6854,7 +6934,11 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
       if (!SDValue(Node, 0).use_empty()) {
         // For less than 32-bits we need to extract from the 32-bit node.
         MVT VT = Node->getSimpleValueType(0);
-        if (VT == MVT::i8 || VT == MVT::i16) {
+        if (Subtarget->isPre386()) {
+          if (VT == MVT::i8)
+            Result =
+                CurDAG->getTargetExtractSubreg(X86::sub_8bit, dl, VT, Result);
+        } else if (VT == MVT::i8 || VT == MVT::i16) {
           int SubIndex = VT == MVT::i16 ? X86::sub_16bit : X86::sub_8bit;
           Result = CurDAG->getTargetExtractSubreg(SubIndex, dl, VT, Result);
         }

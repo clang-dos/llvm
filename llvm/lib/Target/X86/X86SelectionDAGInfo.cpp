@@ -78,6 +78,7 @@ void X86SelectionDAGInfo::verifyTargetNode(const SelectionDAG &DAG,
     //  * Anything else (register, folded load, or RIP-relative CFGuard call)
     //    uses the register width the subtarget executes in, i.e. i64 whenever
     //    the subtarget runs in 64-bit mode (including x32) and i32 otherwise.
+    //  * Near calls in the 16-bit (i8086) ABI always take an i16 target.
     const X86Subtarget &Subtarget =
         DAG.getMachineFunction().getSubtarget<X86Subtarget>();
     SDValue Target = N->getOperand(1);
@@ -86,6 +87,8 @@ void X86SelectionDAGInfo::verifyTargetNode(const SelectionDAG &DAG,
     bool WantI64 =
         IsDirect ? Subtarget.isTarget64BitLP64() : Subtarget.is64Bit();
     EVT ExpectedVT = WantI64 ? MVT::i64 : MVT::i32;
+    if (Subtarget.isTarget16BitABI())
+      ExpectedVT = MVT::i16;
     EVT VT = Target.getValueType();
     if (VT != ExpectedVT)
       report_fatal_error("invalid node: " + Twine(N->getOperationName(&DAG)) +

@@ -20,9 +20,11 @@ multiclass ShiftRotate<string m, Format RegMRM, Format MemMRM, SDPatternOperator
 
   let Uses = uses in {
     let isConvertibleToThreeAddress = !if(!eq(m, "shl"), 1, 0) in {
-      let Predicates = [NoNDD] in {
+      let Predicates = [NoNDD, Has186] in {
         def 8ri  : BinOpRI8U_R<m, RegMRM, Xi8, node>, Sched<[ri]>, DefEFLAGS;
         def 16ri : BinOpRI8U_R<m, RegMRM, Xi16, node>, Sched<[ri]>, DefEFLAGS, OpSize16;
+      }
+      let Predicates = [NoNDD] in {
         def 32ri : BinOpRI8U_R<m, RegMRM, Xi32, node>, Sched<[ri]>, DefEFLAGS, OpSize32;
         def 64ri : BinOpRI8U_R<m, RegMRM, Xi64, node>, Sched<[ri]>, DefEFLAGS;
       }
@@ -40,8 +42,10 @@ multiclass ShiftRotate<string m, Format RegMRM, Format MemMRM, SDPatternOperator
       }
     }
 
-    def 8mi  : BinOpMI8U_M<m, MemMRM, Xi8, node>, Sched<[mi, WriteRMW]>, DefEFLAGS;
-    def 16mi : BinOpMI8U_M<m, MemMRM, Xi16, node>, Sched<[mi, WriteRMW]>, DefEFLAGS, OpSize16;
+    let Predicates = [Has186] in {
+      def 8mi  : BinOpMI8U_M<m, MemMRM, Xi8, node>, Sched<[mi, WriteRMW]>, DefEFLAGS;
+      def 16mi : BinOpMI8U_M<m, MemMRM, Xi16, node>, Sched<[mi, WriteRMW]>, DefEFLAGS, OpSize16;
+    }
     def 32mi : BinOpMI8U_M<m, MemMRM, Xi32, node>, Sched<[mi, WriteRMW]>, DefEFLAGS, OpSize32;
     def 64mi : BinOpMI8U_M<m, MemMRM, Xi64, node>, Sched<[mi, WriteRMW]>, DefEFLAGS, Requires<[In64BitMode]>;
     let Predicates = [HasNDD, In64BitMode] in {

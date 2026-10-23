@@ -1227,16 +1227,19 @@ public:
 class OMFX86AsmBackend : public X86AsmBackend {
   bool CodeInDGROUP;
   bool FarCode;
+  bool FarData;
 
 public:
   OMFX86AsmBackend(const X86MCOptions &CLOpts, const Target &T,
-                   const MCSubtargetInfo &STI, bool CodeInDGROUP, bool FarCode)
+                   const MCSubtargetInfo &STI, bool CodeInDGROUP, bool FarCode,
+                   bool FarData)
       : X86AsmBackend(CLOpts, T, STI), CodeInDGROUP(CodeInDGROUP),
-        FarCode(FarCode) {}
+        FarCode(FarCode), FarData(FarData) {}
 
   std::unique_ptr<MCObjectTargetWriter>
   createObjectTargetWriter() const override {
-    return std::make_unique<X86OMFObjectTargetWriter>(CodeInDGROUP, FarCode);
+    return std::make_unique<X86OMFObjectTargetWriter>(CodeInDGROUP, FarCode,
+                                                      FarData);
   }
 };
 
@@ -1685,8 +1688,9 @@ MCAsmBackend *llvm::createX86_32AsmBackend(const Target &T,
     std::optional<X86::MemoryModel16> Model =
         X86::parseMemoryModel16(Options.getABIName());
     bool FarCode = Model && X86::isFarCodeModel16(*Model);
+    bool FarData = Model && X86::isFarDataModel16(*Model);
     return new OMFX86AsmBackend(CLOpts, T, STI, Options.getABIName() == "tiny",
-                                FarCode);
+                                FarCode, FarData);
   }
 
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());

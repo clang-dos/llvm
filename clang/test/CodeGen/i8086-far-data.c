@@ -23,9 +23,18 @@ char limit[32767];
 const char table[40000] = {1};
 // CHECK-DAG: @small = global [100 x i8] zeroinitializer
 char small[100];
-// An incomplete type stays near: its size is not known here.
-// CHECK-DAG: @ext = external global [0 x i8]
+// An extern variable of unknown size may be far data elsewhere. A far
+// reference reaches near data too, so it is far.
+// FAR-DAG: @ext = external addrspace(2) global [0 x i8]
+// HUGE-DAG: @ext = external addrspace(3) global [0 x i8]
+// NEAR-DAG: @ext = external global [0 x i8]
 extern char ext[];
+// Once its size is known it follows the threshold; earlier uses are cast.
+// FAR-DAG: @later = global [10 x i8] zeroinitializer
+// FAR-DAG: load i8, ptr addrspace(2) getelementptr inbounds nuw (i8, ptr addrspace(2) addrspacecast (ptr @later to ptr addrspace(2)), i16 3)
+extern char later[];
+char use_later(void) { return later[3]; }
+char later[10];
 // A pointer into far data is a far pointer.
 // FAR-DAG: @p = global ptr addrspace(2) getelementptr (i8, ptr addrspace(2) @big, i64 10)
 // HUGE-DAG: @p = global ptr addrspace(3) getelementptr (i8, ptr addrspace(3) @big, i64 10)

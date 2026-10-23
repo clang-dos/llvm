@@ -444,6 +444,14 @@ public:
   /// are cast to it when a memory intrinsic becomes a library call.
   virtual unsigned getMemLibcallAddressSpace() const { return 0; }
 
+  /// Return true if memcpy, memmove and memset with a pointer in address
+  /// space \p AS must be expanded into loops before instruction selection,
+  /// because the library cannot take such a pointer (i8086 far pointers in
+  /// the near-data models).
+  virtual bool shouldExpandMemIntrinsicInAddressSpace(unsigned AS) const {
+    return false;
+  }
+
   /// Return the width of the size argument of the memcpy, memmove and memset
   /// library functions, or 0 for the index width of their address space.
   virtual unsigned getMemLibcallSizeWidth() const { return 0; }

@@ -15,6 +15,10 @@
 // SMALL-DAG: #define __SMALL__ 1
 // CHECK-DAG: #define __SIZEOF_POINTER__ 2
 // TINY-DAG: #define __TINY__ 1
+// CHECK-DAG: #define __far __attribute__((address_space(2)))
+// CHECK-DAG: #define __huge __attribute__((address_space(3)))
+// CHECK-DAG: #define __near __attribute__((address_space(0)))
+// CHECK-DAG: #define _far __attribute__((address_space(2)))
 
 // The MSDOS driver adds the sysroot's include directory; the host's headers
 // are never searched.

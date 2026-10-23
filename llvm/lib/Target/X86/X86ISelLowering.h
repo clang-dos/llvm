@@ -150,6 +150,7 @@ namespace llvm {
     /// In the i8086 far-data models the C library takes far pointers.
     unsigned getMemLibcallAddressSpace() const override;
     unsigned getMemLibcallSizeWidth() const override;
+    bool shouldExpandMemIntrinsicInAddressSpace(unsigned AS) const override;
 
     /// i8086 far pointer arithmetic only changes the offset.
     bool shouldPreservePtrArith(const Function &F, EVT PtrVT) const override;

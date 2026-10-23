@@ -334,7 +334,8 @@ namespace {
 /// In the far-data models a variable larger than the data threshold
 /// (-mlarge-data-threshold=, 32767 bytes by default, as in Open Watcom) is
 /// far data instead, in a segment of its own outside DGROUP: address space
-/// 2, or 3 (huge) in the huge models, where it can be over 64 KiB.
+/// 2, or 3 (huge) in the huge models, where it can be over 64 KiB. So is
+/// an extern variable of unknown size (extern char buf[]), which may be one.
 class I8086TargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   I8086TargetCodeGenInfo(CodeGen::CodeGenTypes &CGT)
@@ -359,9 +360,19 @@ private:
     if (!Threshold || !(Model == "compact" || Model == "large" ||
                         Model.starts_with("huge")))
       return false;
+    // Use the definition, or the declaration with the most type information.
+    if (const VarDecl *Def = D->getDefinition())
+      D = Def;
+    else
+      D = D->getMostRecentDecl();
     QualType T = D->getType();
-    if (T->isIncompleteType() || T->isDependentType() ||
-        !T->isConstantSizeType())
+    if (T->isDependentType())
+      return false;
+    // A variable of unknown size declared here may be defined elsewhere as
+    // far data. A far reference reaches a near variable too, so it is far.
+    if (T->isIncompleteType())
+      return D->hasExternalStorage();
+    if (!T->isConstantSizeType())
       return false;
     return CGM.getContext().getTypeSizeInChars(T).getQuantity() >
            int64_t(Threshold);

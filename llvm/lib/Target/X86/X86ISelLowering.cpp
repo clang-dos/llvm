@@ -64315,6 +64315,14 @@ unsigned X86TargetLowering::getMemLibcallSizeWidth() const {
   return Subtarget.getSizeTWidth16();
 }
 
+/// In the i8086 near-data models the library takes near pointers, so the
+/// memory intrinsics of far and huge pointers are expanded.
+bool X86TargetLowering::shouldExpandMemIntrinsicInAddressSpace(
+    unsigned AS) const {
+  return Subtarget.isTarget16BitABI() && getMemLibcallAddressSpace() == 0 &&
+         (AS == X86AS::FAR_DATA || AS == X86AS::HUGE_DATA);
+}
+
 unsigned X86TargetLowering::getMemLibcallAddressSpace() const {
   if (!Subtarget.isTarget16BitABI())
     return 0;

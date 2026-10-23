@@ -1941,6 +1941,20 @@ void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
   // The macros of other 16-bit DOS compilers.
   Builder.defineMacro("__I86__");
   Builder.defineMacro("_M_I86");
+
+  // Pointer and variable qualifiers, as in Open Watcom and Microsoft C: data
+  // that is near (in DGROUP, address space 0), far (address space 2) or
+  // huge (address space 3, over 64 KiB). They qualify the pointed-to type:
+  // `char __far *p` is a far pointer, and `int __far x[1000];` a far
+  // variable.
+  for (const char *Prefix : {"__", "_"}) {
+    Builder.defineMacro(Twine(Prefix) + "near",
+                        "__attribute__((address_space(0)))");
+    Builder.defineMacro(Twine(Prefix) + "far",
+                        "__attribute__((address_space(2)))");
+    Builder.defineMacro(Twine(Prefix) + "huge",
+                        "__attribute__((address_space(3)))");
+  }
   switch (CPU) {
   case llvm::X86::CK_i186:
   case llvm::X86::CK_V20:

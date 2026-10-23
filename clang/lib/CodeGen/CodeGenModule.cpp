@@ -6144,9 +6144,12 @@ CodeGenModule::GetOrCreateLLVMGlobal(StringRef MangledName, llvm::Type *Ty,
   if (Entry) {
     GV->takeName(Entry);
 
-    if (!Entry->use_empty()) {
-      Entry->replaceAllUsesWith(GV);
-    }
+    // The address space can change once the type is complete (i8086 far
+    // data), so earlier uses get a cast.
+    if (!Entry->use_empty())
+      Entry->replaceAllUsesWith(
+          llvm::ConstantExpr::getPointerBitCastOrAddrSpaceCast(
+              GV, Entry->getType()));
 
     Entry->eraseFromParent();
   }

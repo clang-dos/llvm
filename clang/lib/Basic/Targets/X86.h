@@ -870,6 +870,26 @@ public:
                                                : LangAS::Default;
   }
   uint64_t getPointerAlignV(LangAS) const override { return 16; }
+
+  // A near pointer converts to a far or huge one, and far and huge pointers
+  // to each other, as in Open Watcom; far or huge to near needs a cast.
+  bool isAddressSpaceSupersetOf(LangAS A, LangAS B) const override {
+    auto Rank = [&](LangAS AS) -> int {
+      switch (getTargetAddressSpace(AS)) {
+      case 0:
+        return 0;
+      case 2:
+      case 3:
+        return 1;
+      default:
+        return -1;
+      }
+    };
+    if (A == B)
+      return true;
+    int RA = Rank(A), RB = Rank(B);
+    return RA >= 0 && RB >= 0 && RA >= RB;
+  }
 };
 
 // x86-64 generic target

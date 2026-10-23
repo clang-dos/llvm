@@ -44,9 +44,15 @@
 // which the linker places one after another, so that a huge pointer
 // reaches all of it; references into it name the segment that holds the
 // byte. A far section in a section group (an inline vtable) is a COMDAT
-// allocated in the module's shared segment of its kind. Far data segments
-// come right after the code segment, so that a startup module that defines
-// empty ones places all far data between the code and DGROUP.
+// allocated in the module's shared segment of its kind, which keeps room
+// for it.
+//
+// Far data segments come right after the code segment, so that a startup
+// module that defines empty ones places them between the code and DGROUP.
+// In the memory models with far data pointers, FAR_BSS segments come after
+// DGROUP instead, followed by .farend (segment FAR_END, class FAR_END),
+// which marks the end of the program: at the end of the program they take
+// no room in the .EXE file.
 //
 // Fixups are 16-bit offsets, segment-relative or self-relative, and base16
 // segment fixups for references the target marks as such (`sym@SEG` on X86),
@@ -137,6 +143,8 @@ struct Segment {
   // one section. HasNext: the section goes on in the next segment.
   uint64_t PartOffset = 0;
   bool HasNext = false;
+  // Bytes of COMDATs that the linker may add to a shared far segment.
+  uint64_t Reserved = 0;
 };
 
 /// The segments of a module: the fixed kinds first, as in SegmentKind, then
@@ -235,10 +243,11 @@ class OMFObjectWriter final : public MCObjectWriter {
   std::optional<SegmentKind> classifySection(const MCSectionELF &Sec) const;
   void addFarSection(const MCSectionELF &Sec);
   /// The kinds of far data, each with its shared segment.
-  enum FarKind { FK_Data, FK_Const, FK_Bss, FK_Count };
+  enum FarKind { FK_Data, FK_Const, FK_Bss, FK_End, FK_Count };
   static FarKind getFarKind(StringRef Name) {
     return Name.starts_with(".farbss")      ? FK_Bss
            : Name.starts_with(".farrodata") ? FK_Const
+           : Name.starts_with(".farend")    ? FK_End
                                             : FK_Data;
   }
   /// The module's shared far segment of a kind, with room for Size more
@@ -266,13 +275,22 @@ class OMFObjectWriter final : public MCObjectWriter {
     return K < SK_Count ? Segments[K].Combine : Segs[K].Combine;
   }
   /// The segments in SEGDEF order: the code segment, the far data segments,
-  /// then the others.
+  /// then the others; with far data pointers, far BSS goes last.
   SmallVector<SegIdx, 16> segmentOrder() const {
+    bool BssLast = TargetObjectWriter->hasFarData();
+    auto IsLate = [&](SegIdx K) {
+      return BssLast && Segs[K].Class != "FAR_DATA";
+    };
     SmallVector<SegIdx, 16> Order = {SK_Text};
     for (SegIdx K = SK_Count, E = Segs.size(); K != E; ++K)
-      Order.push_back(K);
+      if (!IsLate(K))
+        Order.push_back(K);
     for (SegIdx K = SK_Text + 1; K != SK_Count; ++K)
       Order.push_back(K);
+    for (unsigned Late : {0, 1})
+      for (SegIdx K = SK_Count, E = Segs.size(); K != E; ++K)
+        if (IsLate(K) && (Segs[K].Class == "FAR_END") == bool(Late))
+          Order.push_back(K);
     return Order;
   }
   unsigned getExternalIndex(const MCSymbol &Sym);
@@ -335,7 +353,7 @@ OMFObjectWriter::classifySection(const MCSectionELF &Sec) const {
     return std::nullopt;
   if (Name == ".stack" || Name.starts_with(".stack."))
     return SK_Stack;
-  for (StringRef Far : {".fardata", ".farrodata", ".farbss"})
+  for (StringRef Far : {".fardata", ".farrodata", ".farbss", ".farend"})
     if (Name == Far || Name.starts_with((Far + ".").str()))
       return SK_Count;
   for (SegmentKind K : {SK_InitBegin, SK_InitEnd, SK_FiniBegin, SK_FiniEnd})
@@ -426,19 +444,21 @@ void OMFObjectWriter::findComdats() {
 }
 
 static StringRef farSuffix(unsigned Kind) {
-  static const char *const Suffixes[] = {"_DATA", "_CONST", "_BSS"};
+  static const char *const Suffixes[] = {"_DATA", "_CONST", "_BSS", "_END"};
   return Suffixes[Kind];
 }
 
 SegIdx OMFObjectWriter::getFarPool(FarKind Kind, uint64_t Size, Align A) {
   SegIdx &K = FarPools[Kind];
-  if (K && alignTo(Segs[K].Size, A) + Size <= 0x10000)
+  if (K && alignTo(Segs[K].Size + Segs[K].Reserved, A) + Size <= 0x10000)
     return K;
   K = Segs.size();
   Segment &Seg = Segs.emplace_back();
   Seg.Present = true;
   Seg.Name = ("FAR" + farSuffix(Kind)).str();
-  Seg.Class = Kind == FK_Bss ? "FAR_BSS" : "FAR_DATA";
+  Seg.Class = Kind == FK_Bss   ? "FAR_BSS"
+              : Kind == FK_End ? "FAR_END"
+                               : "FAR_DATA";
   Seg.Combine = OMF::SC_Private;
   return K;
 }
@@ -450,7 +470,7 @@ void OMFObjectWriter::addFarSection(const MCSectionELF &Sec) {
   uint64_t Size = Asm->getSectionAddressSize(Sec);
   // Small far variables share a segment.
   constexpr uint64_t MinOwnSegment = 0x1000;
-  if (Var.empty() || Size < MinOwnSegment) {
+  if (Var.empty() || Size < MinOwnSegment || Kind == FK_End) {
     SegIdx K = getFarPool(Kind, Size, Sec.getAlign());
     Segment &Seg = Segs[K];
     Seg.Size = alignTo(Seg.Size, Sec.getAlign());
@@ -508,9 +528,15 @@ void OMFObjectWriter::executePostLayoutBinding() {
     Seg.Size += Asm->getSectionAddressSize(Sec);
   }
   // Far COMDATs are allocated in the shared far segment of their kind.
+  // Room is kept for them, so that the segment stays under 64 KiB whichever
+  // copies the linker keeps.
   for (Comdat &C : Comdats)
-    if (C.FarKind >= 0)
-      C.Base = getFarPool(FarKind(C.FarKind), 0, Align(1));
+    if (C.FarKind >= 0) {
+      uint64_t Size = Asm->getSectionAddressSize(*C.Sec);
+      C.Base = getFarPool(FarKind(C.FarKind), Size, C.Sec->getAlign());
+      Segs[C.Base].Reserved =
+          alignTo(Segs[C.Base].Reserved, C.Sec->getAlign()) + Size;
+    }
 
   // Linkers order segments by class in the order they first see them, so
   // every module defines the usual segments, even empty, in the usual order

@@ -278,6 +278,26 @@ static bool canEmitLibcall(const ModuleLibcallLoweringInfo &ModuleLowering,
   return Lowering.getLibcallImpl(LC) != RTLIB::Unsupported;
 }
 
+/// Whether the library's memcpy, memmove and memset can take the pointers of
+/// \p MI, which the target may refuse for some address spaces (i8086 far
+/// pointers in the small model). Otherwise the call is expanded.
+static bool libcallTakesPointers(const TargetMachine *TM,
+                                 const MemIntrinsic *MI) {
+  if (!TM)
+    return true;
+  const TargetLowering *TLI =
+      TM->getSubtargetImpl(*MI->getFunction())->getTargetLowering();
+  auto Takes = [&](const Value *P) {
+    return !TLI->shouldExpandMemIntrinsicInAddressSpace(
+        P->getType()->getPointerAddressSpace());
+  };
+  if (!Takes(MI->getRawDest()))
+    return false;
+  if (const auto *MT = dyn_cast<MemTransferInst>(MI))
+    return Takes(MT->getRawSource());
+  return true;
+}
+
 static bool canEmitMemcpy(const ModuleLibcallLoweringInfo &ModuleLowering,
                           const TargetMachine *TM, Function *F) {
   // TODO: Should this consider the address space of the memcpy?
@@ -357,8 +377,10 @@ bool PreISelIntrinsicLowering::expandMemIntrinsicUses(
       auto *Memcpy = cast<MemCpyInst>(Inst);
       Function *ParentFunc = Memcpy->getFunction();
       const TargetTransformInfo &TTI = LookupTTI(*ParentFunc);
-      if (shouldExpandMemIntrinsicWithSize(Memcpy->getLength(), TTI)) {
-        if (UseMemIntrinsicLibFunc &&
+      bool LibcallOK = libcallTakesPointers(TM, Memcpy);
+      if (!LibcallOK ||
+          shouldExpandMemIntrinsicWithSize(Memcpy->getLength(), TTI)) {
+        if (UseMemIntrinsicLibFunc && LibcallOK &&
             canEmitMemcpy(ModuleLibcalls, TM, ParentFunc))
           break;
 
@@ -389,8 +411,10 @@ bool PreISelIntrinsicLowering::expandMemIntrinsicUses(
       auto *Memmove = cast<MemMoveInst>(Inst);
       Function *ParentFunc = Memmove->getFunction();
       const TargetTransformInfo &TTI = LookupTTI(*ParentFunc);
-      if (shouldExpandMemIntrinsicWithSize(Memmove->getLength(), TTI)) {
-        if (UseMemIntrinsicLibFunc &&
+      bool LibcallOK = libcallTakesPointers(TM, Memmove);
+      if (!LibcallOK ||
+          shouldExpandMemIntrinsicWithSize(Memmove->getLength(), TTI)) {
+        if (UseMemIntrinsicLibFunc && LibcallOK &&
             canEmitLibcall(ModuleLibcalls, TM, ParentFunc, RTLIB::MEMMOVE))
           break;
 
@@ -406,8 +430,10 @@ bool PreISelIntrinsicLowering::expandMemIntrinsicUses(
       auto *Memset = cast<MemSetInst>(Inst);
       Function *ParentFunc = Memset->getFunction();
       const TargetTransformInfo &TTI = LookupTTI(*ParentFunc);
-      if (shouldExpandMemIntrinsicWithSize(Memset->getLength(), TTI)) {
-        if (UseMemIntrinsicLibFunc &&
+      bool LibcallOK = libcallTakesPointers(TM, Memset);
+      if (!LibcallOK ||
+          shouldExpandMemIntrinsicWithSize(Memset->getLength(), TTI)) {
+        if (UseMemIntrinsicLibFunc && LibcallOK &&
             canEmitLibcall(ModuleLibcalls, TM, ParentFunc, RTLIB::MEMSET))
           break;
 

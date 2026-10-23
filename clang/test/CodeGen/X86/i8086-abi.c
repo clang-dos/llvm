@@ -5,7 +5,7 @@
 // RUN: %clang_cc1 -triple i8086-unknown-unknown -target-abi tiny -emit-llvm -o - %s | FileCheck %s
 // RUN: not %clang_cc1 -triple i8086-unknown-unknown -target-abi enormous -emit-llvm -o - %s 2>&1 | FileCheck %s --check-prefix=BAD
 
-// CHECK: target datalayout = "e-m:e-p:16:16-p1:16:16-p2:32:16:16:16-p3:32:16:16:32-p4:16:16-p5:32:16:16:16-p256:16:16-p257:16:16-p258:16:16-i32:16-i64:16-i128:16-f32:16-f64:16-f80:16-n8:16-a:0:16-S16-P4"
+// CHECK: target datalayout = "e-m:e-p:16:16-p1:16:16-p2:32:16:16:16-pu3:32:16:16:32-p4:16:16-p5:32:16:16:16-p256:16:16-p257:16:16-p258:16:16-i32:16-i64:16-i128:16-f32:16-f64:16-f80:16-n8:16-a:0:16-S16-P4"
 // BAD: error: unknown target ABI 'enormous'
 
 _Static_assert(sizeof(short) == 2, "");

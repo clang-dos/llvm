@@ -4059,7 +4059,7 @@ TEST(DataLayoutTest, X86_16) {
               testing::HasSubstr("-i32:16-i64:16-i128:16-f32:16-f64:16-f80:16-"
                                  "n8:16-a:0:16-S16"));
 
-  const char *P1 = "p1:16:16", *P2 = "p2:32:16:16:16", *P3 = "p3:32:16:16:32",
+  const char *P1 = "p1:16:16", *P2 = "p2:32:16:16:16", *P3 = "pu3:32:16:16:32",
              *P4 = "p4:16:16", *P5 = "p5:32:16:16:16", *P256 = "p256:16:16",
              *P257 = "p257:16:16", *P258 = "p258:16:16";
   EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("tiny")),

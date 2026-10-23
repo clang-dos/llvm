@@ -411,8 +411,10 @@ static std::string computeX86_16DataLayout(const Triple &TT,
   // addresses of locals and globals to it.
   Ret += "-p:16:16";
 
-  // near data, far data, huge data, near code, far code.
-  Ret += "-p1:16:16-p2:32:16:16:16-p3:32:16:16:32-p4:16:16-p5:32:16:16:16";
+  // near data, far data, huge data, near code, far code. Huge pointers are
+  // unstable: as integers they are linear addresses, not their bits, so
+  // passes must not turn loads and stores of them into integer ones.
+  Ret += "-p1:16:16-p2:32:16:16:16-pu3:32:16:16:32-p4:16:16-p5:32:16:16:16";
   // GS-, FS- and SS-relative offsets.
   Ret += "-p256:16:16-p257:16:16-p258:16:16";
 

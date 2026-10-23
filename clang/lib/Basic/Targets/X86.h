@@ -41,6 +41,14 @@ static constexpr LangASMap I8086FarDataAddrSpaceMap = {
     {LangAS::ptr64, 272},
 };
 
+// The i8086 huge memory model: C pointers are huge (address space 3).
+static constexpr LangASMap I8086HugeAddrSpaceMap = {
+    {LangAS::Default, 3},
+    {LangAS::ptr32_sptr, 270},
+    {LangAS::ptr32_uptr, 271},
+    {LangAS::ptr64, 272},
+};
+
 // X86 target abstract base class; x86-32 and x86-64 are very close, so
 // most of the implementation can be shared.
 class LLVM_LIBRARY_VISIBILITY X86TargetInfo : public TargetInfo {
@@ -729,7 +737,6 @@ public:
 
 // 16-bit real mode (i8086), for DOS. int is 16 bits, long is 32 bits, and the
 // size of pointers depends on the memory model, which is the target ABI name.
-// Only the tiny and small memory models are supported so far.
 class LLVM_LIBRARY_VISIBILITY X86_16TargetInfo : public X86_32TargetInfo {
   llvm::X86::MemoryModel16 Model = llvm::X86::MemoryModel16::Small;
 
@@ -772,17 +779,23 @@ public:
   bool setABI(const std::string &Name) override {
     std::optional<llvm::X86::MemoryModel16> M =
         llvm::X86::parseMemoryModel16(Name);
-    // FIXME: Support the huge memory model.
-    if (!M || *M == llvm::X86::MemoryModel16::Huge)
+    if (!M)
       return false;
     Model = *M;
     // In the far-data models C pointers are far: 32-bit segment:offset
     // pairs. The stack, globals and constants stay in DGROUP and are
     // addressed with near pointers (address space 0), which clang casts.
+    // In the huge model they are huge pointers, which address objects over
+    // 64 KiB, so size_t and ptrdiff_t are 32 bits there.
     bool FarData = llvm::X86::isFarDataModel16(Model);
-    AddrSpaceMap = FarData ? &I8086FarDataAddrSpaceMap : &X86AddrSpaceMap;
+    bool Huge = Model == llvm::X86::MemoryModel16::Huge;
+    AddrSpaceMap = Huge      ? &I8086HugeAddrSpaceMap
+                   : FarData ? &I8086FarDataAddrSpaceMap
+                             : &X86AddrSpaceMap;
     PointerWidth = FarData ? 32 : 16;
     IntPtrType = FarData ? SignedLong : SignedInt;
+    SizeType = Huge ? UnsignedLong : UnsignedInt;
+    PtrDiffType = Huge ? SignedLong : SignedInt;
     resetDataLayout();
     return true;
   }
@@ -825,7 +838,8 @@ public:
   }
 
   // Clang takes this as the width of size_t, ptrdiff_t and its intptr
-  // type. Far pointers are wider than size_t: objects stay within 64 KiB.
+  // type. Far pointers are wider than size_t: objects stay within 64 KiB,
+  // except in the huge model.
   uint64_t getMaxPointerWidth() const override {
     return getTypeWidth(SizeType);
   }

@@ -145,6 +145,15 @@ void Mangler::getNameWithPrefix(raw_ostream &OS, const GlobalValue *GV,
   StringRef Name = GV->getName();
   char Prefix = DL.getGlobalPrefix();
 
+  // i8086 pascal functions are named in upper case with no prefix, as in
+  // 16-bit Windows.
+  if (const auto *F = dyn_cast_or_null<Function>(GV->getAliaseeObject()))
+    if (F->getCallingConv() == CallingConv::X86_16_Pascal &&
+        !Name.starts_with("\01")) {
+      getNameWithPrefixImpl(OS, Name.upper(), PrefixTy, DL, '\0');
+      return;
+    }
+
   // Mangle functions with Microsoft calling conventions specially.  Only do
   // this mangling for x86_64 vectorcall and 32-bit x86.
   const Function *MSFunc = dyn_cast_or_null<Function>(GV->getAliaseeObject());

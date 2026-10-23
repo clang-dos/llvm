@@ -19,6 +19,9 @@
 // CHECK-DAG: #define __huge __attribute__((address_space(3)))
 // CHECK-DAG: #define __near __attribute__((address_space(0)))
 // CHECK-DAG: #define _far __attribute__((address_space(2)))
+// CHECK-DAG: #define __export __attribute__((dllexport))
+// CHECK-DAG: #define _export __attribute__((dllexport))
+// CHECK-DAG: #define _pascal __pascal
 
 // The MSDOS driver adds the sysroot's include directory; the host's headers
 // are never searched.

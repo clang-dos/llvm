@@ -1142,6 +1142,24 @@ void X86AsmPrinter::emitEndOfAsmFile(Module &M) {
     }
   } else if (TT.isOSBinFormatELF()) {
     FM.serializeToFaultMapSection();
+  } else if (TT.isOSBinFormatOMF() && !TT.isOSMSDOS()) {
+    // The names of dllexport (__export) functions and variables, for the
+    // OMF writer's export records. DOS programs have no export table, and
+    // the linker writes a broken .EXE header when it sees export records,
+    // so on DOS __export is accepted and ignored.
+    MCSection *Exports = nullptr;
+    for (const GlobalValue &GV : M.global_values()) {
+      if (!GV.hasDLLExportStorageClass() || GV.isDeclaration())
+        continue;
+      if (!Exports) {
+        Exports = OutContext.getELFSection(".omf.exports",
+                                           ELF::SHT_PROGBITS, 0);
+        OutStreamer->switchSection(Exports);
+      }
+      SmallString<64> Name = getSymbol(&GV)->getName();
+      Name.push_back('\0');
+      OutStreamer->emitBytes(Name);
+    }
   }
 
   // Emit __morestack address if needed for indirect calls.

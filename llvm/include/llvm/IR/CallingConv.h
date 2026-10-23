@@ -297,6 +297,11 @@ namespace CallingConv {
     /// stateless compartment.
     CHERIoT_LibraryCall = 127,
 
+    /// The i8086 pascal convention (__pascal), as in 16-bit Windows: the
+    /// arguments are pushed left to right and the callee removes them.
+    /// Names are upper case, with no underscore prefix.
+    X86_16_Pascal = 128,
+
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023
   };

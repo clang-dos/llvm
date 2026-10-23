@@ -430,6 +430,9 @@ static void printCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::CHERIoT_LibraryCall:
     Out << "cheriot_librarycallcc";
     break;
+  case CallingConv::X86_16_Pascal:
+    Out << "x86_16_pascalcc";
+    break;
   }
 }
 

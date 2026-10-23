@@ -42,6 +42,7 @@ enum RecordType : uint8_t {
 /// Comment classes for COMENT records.
 enum CommentClass : uint8_t {
   CC_Translator = 0x00,
+  CC_OMFExtension = 0xA0, ///< OMF extensions; subtype 2 is EXPDEF (export).
   CC_WeakExtern = 0xA8, ///< WKEXT: weak external with a default resolution.
 };
 

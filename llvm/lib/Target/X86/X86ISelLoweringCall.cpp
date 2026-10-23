@@ -1737,6 +1737,55 @@ void VarArgsLoweringHelper::lowerVarArgsParameters(SDValue &Chain,
     forwardMustTailParameters(Chain);
 }
 
+/// The i8086 pascal convention pushes the arguments left to right, so that
+/// the first is at the highest address: mirror the C layout that CC_X86
+/// assigned, keeping the parts of each argument in order. A struct return
+/// pointer stays first, as in Microsoft C.
+template <typename ArgT>
+static void layOutPascalArguments(SmallVectorImpl<CCValAssign> &ArgLocs,
+                                  const SmallVectorImpl<ArgT> &Args,
+                                  int64_t StackSize) {
+  DenseMap<unsigned, std::pair<int64_t, int64_t>> Extent;
+  // The struct return pointer, all of its parts.
+  std::optional<unsigned> SRet;
+  for (const CCValAssign &VA : ArgLocs)
+    if (Args[VA.getValNo()].Flags.isSRet())
+      SRet = Args[VA.getValNo()].OrigArgIndex;
+  auto IsSRet = [&](const CCValAssign &VA) {
+    return SRet && Args[VA.getValNo()].OrigArgIndex == *SRet;
+  };
+  int64_t Lo = 0;
+  auto Size = [&](const CCValAssign &VA) -> int64_t {
+    const ISD::ArgFlagsTy &Flags = Args[VA.getValNo()].Flags;
+    return alignTo(Flags.isByVal() ? Flags.getByValSize()
+                                   : VA.getLocVT().getStoreSize(),
+                   2);
+  };
+  for (const CCValAssign &VA : ArgLocs) {
+    if (!VA.isMemLoc())
+      continue;
+    int64_t Begin = VA.getLocMemOffset(), End = Begin + Size(VA);
+    if (IsSRet(VA)) {
+      Lo = std::max(Lo, End);
+      continue;
+    }
+    auto [It, New] = Extent.try_emplace(Args[VA.getValNo()].OrigArgIndex,
+                                        Begin, End);
+    if (!New) {
+      It->second.first = std::min(It->second.first, Begin);
+      It->second.second = std::max(It->second.second, End);
+    }
+  }
+  for (CCValAssign &VA : ArgLocs) {
+    if (!VA.isMemLoc() || IsSRet(VA))
+      continue;
+    auto [Begin, End] = Extent.lookup(Args[VA.getValNo()].OrigArgIndex);
+    int64_t Offset = Lo + (StackSize - End) + (VA.getLocMemOffset() - Begin);
+    VA = CCValAssign::getMem(VA.getValNo(), VA.getValVT(), Offset,
+                             VA.getLocVT(), VA.getLocInfo(), VA.needsCustom());
+  }
+}
+
 SDValue X86TargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
@@ -1785,6 +1834,8 @@ SDValue X86TargetLowering::LowerFormalArguments(
   if (CallingConv::X86_VectorCall == CallConv) {
     CCInfo.AnalyzeArgumentsSecondPass(Ins, CC_X86);
   }
+  if (CallConv == CallingConv::X86_16_Pascal && !IsVarArg)
+    layOutPascalArguments(ArgLocs, Ins, CCInfo.getStackSize());
 
   // The next loop assumes that the locations are in the same order of the
   // input arguments.
@@ -2219,6 +2270,15 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   if (CallingConv::X86_VectorCall == CallConv) {
     CCInfo.AnalyzeArgumentsSecondPass(Outs, CC_X86);
   }
+  // The pascal layout differs from what sibling call checks assume.
+  if (CallConv == CallingConv::X86_16_Pascal && !isVarArg) {
+    layOutPascalArguments(ArgLocs, Outs, CCInfo.getStackSize());
+    if (!(CLI.CB && CLI.CB->isMustTailCall()))
+      isTailCall = false;
+  }
+  if (MF.getFunction().getCallingConv() == CallingConv::X86_16_Pascal &&
+      !(CLI.CB && CLI.CB->isMustTailCall()))
+    isTailCall = false;
 
   // We cannot guarantee TCO for mismatched calling conventions.
   if (isTailCall && ShouldGuaranteeTCO) {
@@ -3271,5 +3331,7 @@ bool X86::isCalleePop(CallingConv::ID CallingConv,
   case CallingConv::X86_ThisCall:
   case CallingConv::X86_VectorCall:
     return !is64Bit;
+  case CallingConv::X86_16_Pascal:
+    return !IsVarArg;
   }
 }

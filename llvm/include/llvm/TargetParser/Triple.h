@@ -1339,7 +1339,11 @@ public:
   LLVM_ABI unsigned getDefaultWCharSize() const;
 
   /// Tests if the environment supports dllimport/export annotations.
-  bool hasDLLImportExport() const { return isOSWindows() || isPS(); }
+  /// i8086 has them for 16-bit Windows (__export), whose linkers take OMF
+  /// export records.
+  bool hasDLLImportExport() const {
+    return isOSWindows() || isPS() || getArch() == Triple::i8086;
+  }
 
   /// @}
   /// @name Mutators

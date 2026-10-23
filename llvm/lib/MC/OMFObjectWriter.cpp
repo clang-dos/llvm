@@ -300,6 +300,7 @@ class OMFObjectWriter final : public MCObjectWriter {
                          uint64_t &Offset) const;
   void findComdats();
   void writeComdats();
+  void writeExports();
 
   void writeHeader();
   void writeNamesAndSegments();
@@ -1164,6 +1165,34 @@ void OMFObjectWriter::writeComdats() {
   }
 }
 
+/// An EXPDEF comment for each name in .omf.exports (dllexport symbols, with
+/// NUL after each), so that a linker making a Windows or OS/2 program or DLL
+/// exports them under the same name.
+void OMFObjectWriter::writeExports() {
+  for (const MCSection &S : *Asm) {
+    if (S.getName() != ".omf.exports")
+      continue;
+    SmallString<256> Buf;
+    raw_svector_ostream VOS(Buf);
+    Asm->writeSectionData(VOS, &S);
+    StringRef Names = Buf;
+    while (!Names.empty()) {
+      auto [Name, Rest] = Names.split('\0');
+      Names = Rest;
+      if (Name.empty() || Name.size() > 255)
+        continue;
+      Record Coment(OMF::COMENT);
+      Coment.byte(0x00); // Attributes.
+      Coment.byte(OMF::CC_OMFExtension);
+      Coment.byte(0x02); // EXPDEF.
+      Coment.byte(0x00); // Flags: by name, no ordinal.
+      Coment.name(Name); // Exported name.
+      Coment.name("");   // Internal name: the same.
+      Coment.write(OS);
+    }
+  }
+}
+
 void OMFObjectWriter::writeModuleEnd() {
   Record ModEnd(OMF::MODEND);
   const MCSymbol *Start = nullptr;
@@ -1200,6 +1229,7 @@ uint64_t OMFObjectWriter::writeObject() {
   writeNamesAndSegments();
   writeExternals();
   writePublics();
+  writeExports();
   for (SegIdx K : segmentOrder())
     writeSegmentData(K);
   writeComdats();

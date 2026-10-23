@@ -1955,6 +1955,12 @@ void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro(Twine(Prefix) + "huge",
                         "__attribute__((address_space(3)))");
   }
+  // Functions and variables exported from a 16-bit Windows program or DLL,
+  // and the pascal calling convention.
+  Builder.defineMacro("__export", "__attribute__((dllexport))");
+  Builder.defineMacro("_export", "__attribute__((dllexport))");
+  if (!Opts.Borland)
+    Builder.defineMacro("_pascal", "__pascal");
   switch (CPU) {
   case llvm::X86::CK_i186:
   case llvm::X86::CK_V20:

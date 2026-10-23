@@ -48,12 +48,22 @@ namespace llvm {
   /// This implementation is used for 16-bit DOS (OMF objects). Jump tables
   /// go in the function's code section, where they are read through CS.
   /// Then the linker keeps them only with their function.
+  ///
+  /// Variables in the far and huge data address spaces (2 and 3) are outside
+  /// DGROUP. Each gets a section of its own, .fardata.<name>, .farbss.<name>
+  /// or .farrodata.<name>, which the OMF writer makes a far data segment.
   class X86OMFTargetObjectFile : public X86ELFTargetObjectFile {
   public:
     bool shouldPutJumpTableInFunctionSection(bool UsesLabelDifference,
                                              const Function &F) const override {
       return true;
     }
+
+    MCSection *SelectSectionForGlobal(const GlobalObject *GO, SectionKind Kind,
+                                      const TargetMachine &TM) const override;
+    MCSection *getExplicitSectionGlobal(const GlobalObject *GO,
+                                        SectionKind Kind,
+                                        const TargetMachine &TM) const override;
   };
 
   /// This implementation is used for X86_64 ELF targets, and defers to

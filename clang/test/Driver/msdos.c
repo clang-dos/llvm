@@ -95,3 +95,19 @@ int main(void) { return 0; }
 // RUN:   | FileCheck %s --check-prefix=NOCXX
 // NOCXX-NOT: c++{{/|\\\\}}v1
 // NOCXX-NOT: libc++
+
+// In the far-data models, variables over 32767 bytes are far data by
+// default. -mlarge-data-threshold= changes that, and 0 turns it off.
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=compact -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=FARDATA
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=huge -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=FARDATA
+// FARDATA: "-mlarge-data-threshold=32767"
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=large -mlarge-data-threshold=1000 -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=FARDATA1000
+// FARDATA1000: "-mlarge-data-threshold=1000"
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=small -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NEARDATA
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=medium -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NEARDATA
+// NEARDATA-NOT: -mlarge-data-threshold

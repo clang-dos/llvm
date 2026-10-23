@@ -34,6 +34,17 @@
 // memory model. Non-allocatable sections (debug info, notes) and unwind
 // tables are not written.
 //
+// Far data is outside DGROUP. A section named .fardata, .farrodata or
+// .farbss, or one of those followed by .<name>, is a private segment of its
+// own, of class FAR_DATA (FAR_BSS for .farbss), named after the variable
+// (<name>_DATA, <name>_CONST, <name>_BSS) or FAR_DATA, FAR_CONST and FAR_BSS.
+// One over 64 KiB is split into consecutive segments of 64 KiB, paragraph
+// aligned, which the linker places one after another, so that a huge
+// pointer reaches all of it; references into it name the segment that holds
+// the byte. Far data segments come right after the code segment, so that
+// a startup module that defines empty ones places all far data between the
+// code and DGROUP.
+//
 // Fixups are 16-bit offsets, segment-relative or self-relative, and base16
 // segment fixups for references the target marks as such (`sym@SEG` on X86),
 // which the DOS loader relocates. Fixups are written with no displacement
@@ -114,17 +125,30 @@ struct Segment {
   uint64_t Size = 0;
   Align MaxAlign = Align(1);
   SmallVector<const MCSection *, 4> Sections;
+  // The name, class and combine type of a far data segment; the fixed
+  // segments take theirs from the Segments table.
+  std::string Name;
+  StringRef Class;
+  uint8_t Combine = OMF::SC_Public;
+  // A far data segment holds bytes [PartOffset, PartOffset + Size) of its
+  // one section. HasNext: the section goes on in the next segment.
+  uint64_t PartOffset = 0;
+  bool HasNext = false;
 };
 
+/// The segments of a module: the fixed kinds first, as in SegmentKind, then
+/// the far data segments. A segment is named by its position here.
+using SegIdx = unsigned;
+
 struct OMFFixup {
-  SegmentKind Seg;  // Segment holding the fixup location.
+  SegIdx Seg;       // Segment holding the fixup location.
   int Comdat = -1;  // COMDAT holding the location, or -1 for the segment.
   uint64_t Offset;  // Location offset within that segment or COMDAT.
   uint8_t LocType;  // OMF::LocationType.
   bool SegRelative; // M bit; false means self-relative.
   // Target: a segment of this module, or an external index.
   bool IsExternal;
-  SegmentKind TargetSeg;
+  SegIdx TargetSeg;
   unsigned ExtIndex;
 
   unsigned size() const { return LocType == OMF::LT_Pointer32 ? 4 : 2; }
@@ -179,9 +203,9 @@ class OMFObjectWriter final : public MCObjectWriter {
   std::unique_ptr<MCOMFObjectTargetWriter> TargetObjectWriter;
   raw_pwrite_stream &OS;
 
-  Segment Segs[SK_Count];
+  SmallVector<Segment, SK_Count + 4> Segs;
   // Placement of each written section: its segment and offset in it.
-  DenseMap<const MCSection *, std::pair<SegmentKind, uint64_t>> SectionMap;
+  DenseMap<const MCSection *, std::pair<SegIdx, uint64_t>> SectionMap;
   // External indices for EXTDEF and COMDEF, which share one index space.
   DenseMap<const MCSymbol *, unsigned> ExtIndices;
   SmallVector<const MCSymbol *, 16> Externals;
@@ -189,7 +213,7 @@ class OMFObjectWriter final : public MCObjectWriter {
   struct Comdat {
     const MCSectionELF *Sec;
     const MCSymbol *Sym; // Its name, at offset 0.
-    SegmentKind Base;
+    SegIdx Base;
     bool PickAny; // From a COMDAT group: keep any one copy.
   };
   SmallVector<Comdat, 0> Comdats;
@@ -199,12 +223,44 @@ class OMFObjectWriter final : public MCObjectWriter {
   std::string TextName;
   unsigned DGroupIndex = 0;
 
-  bool inDGROUP(SegmentKind K) const {
-    return K != SK_Text || TargetObjectWriter->isCodeInDGROUP();
+  bool inDGROUP(SegIdx K) const {
+    return K < SK_Count &&
+           (K != SK_Text || TargetObjectWriter->isCodeInDGROUP());
   }
+  /// The kind of a written section; SK_Count for far data.
   std::optional<SegmentKind> classifySection(const MCSectionELF &Sec) const;
+  void addFarSection(const MCSectionELF &Sec);
+  /// Move an offset past the end of a far data segment into the segment
+  /// that holds it.
+  void normalize(SegIdx &K, uint64_t &Offset) const {
+    while (Segs[K].HasNext && Offset >= 0x10000) {
+      ++K;
+      Offset -= 0x10000;
+    }
+  }
+  StringRef segmentName(SegIdx K) const {
+    if (K == SK_Text)
+      return TextName;
+    return K < SK_Count ? StringRef(Segments[K].Name) : StringRef(Segs[K].Name);
+  }
+  StringRef segmentClass(SegIdx K) const {
+    return K < SK_Count ? StringRef(Segments[K].Class) : Segs[K].Class;
+  }
+  uint8_t segmentCombine(SegIdx K) const {
+    return K < SK_Count ? Segments[K].Combine : Segs[K].Combine;
+  }
+  /// The segments in SEGDEF order: the code segment, the far data segments,
+  /// then the others.
+  SmallVector<SegIdx, 16> segmentOrder() const {
+    SmallVector<SegIdx, 16> Order = {SK_Text};
+    for (SegIdx K = SK_Count, E = Segs.size(); K != E; ++K)
+      Order.push_back(K);
+    for (SegIdx K = SK_Text + 1; K != SK_Count; ++K)
+      Order.push_back(K);
+    return Order;
+  }
   unsigned getExternalIndex(const MCSymbol &Sym);
-  bool getSymbolLocation(const MCSymbol &Sym, SegmentKind &Seg,
+  bool getSymbolLocation(const MCSymbol &Sym, SegIdx &Seg,
                          uint64_t &Offset) const;
   bool getComdatLocation(const MCSymbol &Sym, unsigned &Idx,
                          uint64_t &Offset) const;
@@ -215,8 +271,8 @@ class OMFObjectWriter final : public MCObjectWriter {
   void writeNamesAndSegments();
   void writeExternals();
   void writePublics();
-  void writeSegmentData(SegmentKind K);
-  void writeFixups(SegmentKind K, uint64_t Start, uint64_t End,
+  void writeSegmentData(SegIdx K);
+  void writeFixups(SegIdx K, uint64_t Start, uint64_t End,
                    ArrayRef<const OMFFixup *> SegFixups);
   void writeModuleEnd();
 
@@ -226,8 +282,7 @@ public:
       : TargetObjectWriter(std::move(MOTW)), OS(OS) {}
 
   void reset() override {
-    for (Segment &S : Segs)
-      S = Segment();
+    Segs.clear();
     SectionMap.clear();
     ExtIndices.clear();
     Externals.clear();
@@ -263,6 +318,9 @@ OMFObjectWriter::classifySection(const MCSectionELF &Sec) const {
     return std::nullopt;
   if (Name == ".stack" || Name.starts_with(".stack."))
     return SK_Stack;
+  for (StringRef Far : {".fardata", ".farrodata", ".farbss"})
+    if (Name == Far || Name.starts_with((Far + ".").str()))
+      return SK_Count;
   for (SegmentKind K : {SK_InitBegin, SK_InitEnd, SK_FiniBegin, SK_FiniEnd})
     if (Name == Segments[K].Name)
       return K;
@@ -347,10 +405,40 @@ void OMFObjectWriter::findComdats() {
   }
 }
 
+void OMFObjectWriter::addFarSection(const MCSectionELF &Sec) {
+  StringRef Name = Sec.getName();
+  bool Bss = Name.starts_with(".farbss");
+  bool Const = Name.starts_with(".farrodata");
+  StringRef Var = Name.split('.').second.split('.').second;
+  StringRef Suffix = Bss ? "_BSS" : Const ? "_CONST" : "_DATA";
+  std::string SegName =
+      Var.empty() ? ("FAR" + Suffix).str() : (Var.take_front(240) + Suffix).str();
+  uint64_t Size = Asm->getSectionAddressSize(Sec);
+  bool Split = Size > 0x10000;
+  SectionMap[&Sec] = {Segs.size(), 0};
+  uint64_t Offset = 0;
+  do {
+    Segment &Seg = Segs.emplace_back();
+    Seg.Present = true;
+    Seg.Name = SegName;
+    Seg.Class = Bss ? "FAR_BSS" : "FAR_DATA";
+    Seg.Combine = OMF::SC_Private;
+    Seg.Sections.push_back(&Sec);
+    Seg.PartOffset = Offset;
+    Seg.Size = std::min<uint64_t>(Size - Offset, 0x10000);
+    // The parts of a split section are paragraph aligned, so that each
+    // starts where the one before it ends.
+    Seg.MaxAlign = Split ? std::max(Sec.getAlign(), Align(16)) : Sec.getAlign();
+    Offset += 0x10000;
+    Seg.HasNext = Offset < Size;
+  } while (Offset < Size);
+}
+
 void OMFObjectWriter::executePostLayoutBinding() {
   findComdats();
 
   // Place sections in segments.
+  Segs.resize(SK_Count);
   for (const MCSection &S : *Asm) {
     const auto &Sec = static_cast<const MCSectionELF &>(S);
     if (ComdatIndex.count(&Sec))
@@ -358,6 +446,10 @@ void OMFObjectWriter::executePostLayoutBinding() {
     std::optional<SegmentKind> K = classifySection(Sec);
     if (!K)
       continue;
+    if (*K == SK_Count) {
+      addFarSection(Sec);
+      continue;
+    }
     Segment &Seg = Segs[*K];
     Seg.Present = true;
     Seg.Size = alignTo(Seg.Size, Sec.getAlign());
@@ -385,15 +477,16 @@ void OMFObjectWriter::executePostLayoutBinding() {
       Segs[K].MaxAlign = std::max(Segs[K].MaxAlign, Align(2));
     }
 
+  // SEGDEF order: the code segment, the far data segments, then DGROUP.
   unsigned Index = 0;
   bool AnyInGroup = false;
-  for (unsigned K = 0; K != SK_Count; ++K) {
+  for (SegIdx K : segmentOrder()) {
     if (!Segs[K].Present)
       continue;
     Segs[K].Index = ++Index;
-    AnyInGroup |= inDGROUP(SegmentKind(K));
+    AnyInGroup |= inDGROUP(K);
     if (Segs[K].Size > 0x10000)
-      getContext().reportError(SMLoc(), Twine("segment ") + Segments[K].Name +
+      getContext().reportError(SMLoc(), Twine("segment ") + segmentName(K) +
                                             " is larger than 64 KiB");
   }
   // Communal variables are near data and belong to DGROUP too.
@@ -429,7 +522,7 @@ bool OMFObjectWriter::getComdatLocation(const MCSymbol &Sym, unsigned &Idx,
   return true;
 }
 
-bool OMFObjectWriter::getSymbolLocation(const MCSymbol &Sym, SegmentKind &Seg,
+bool OMFObjectWriter::getSymbolLocation(const MCSymbol &Sym, SegIdx &Seg,
                                         uint64_t &Offset) const {
   const MCSymbol *Base = Asm->getBaseSymbol(Sym);
   if (!Base || !Base->isInSection())
@@ -442,6 +535,7 @@ bool OMFObjectWriter::getSymbolLocation(const MCSymbol &Sym, SegmentKind &Seg,
     return false;
   Seg = It->second.first;
   Offset = It->second.second + SymOffset;
+  normalize(Seg, Offset);
   return true;
 }
 
@@ -471,9 +565,8 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   }
 
   bool PCRel = Fixup.isPCRel();
-  if (SegRef && (PCRel || Target.getConstant())) {
-    Ctx.reportError(Loc, "a segment reference cannot be PC-relative or have "
-                         "an addend");
+  if (SegRef && PCRel) {
+    Ctx.reportError(Loc, "a segment reference cannot be PC-relative");
     return;
   }
   // A 4-byte reference is a far pointer, segment:offset.
@@ -504,6 +597,7 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     R.Seg = SecIt->second.first;
     R.Offset =
         SecIt->second.second + Asm->getFragmentOffset(F) + Fixup.getOffset();
+    normalize(R.Seg, R.Offset);
   }
   R.LocType = FarPtr   ? OMF::LT_Pointer32
               : SegRef ? OMF::LT_Base16
@@ -516,7 +610,7 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   if (PCRel)
     Addend += 2;
 
-  SegmentKind TargetSeg;
+  SegIdx TargetSeg;
   uint64_t TargetOffset;
   unsigned TargetComdat;
   if (!Sym->isCommon() && getComdatLocation(*Sym, TargetComdat, TargetOffset)) {
@@ -527,10 +621,25 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     Addend += TargetOffset;
   } else if (!Sym->isCommon() &&
              getSymbolLocation(*Sym, TargetSeg, TargetOffset)) {
+    if (SegRef) {
+      // The addend of a segment reference is in paragraphs. The parts of a
+      // split far section are 64 KiB apart, so each 0x1000 of it moves to
+      // the next part.
+      while (Addend >= 0x1000 && TargetSeg + 1 < Segs.size() &&
+             Segs[TargetSeg].HasNext) {
+        ++TargetSeg;
+        Addend -= 0x1000;
+      }
+    } else {
+      // The addend can reach into a later part of a split far section.
+      uint64_t Total = TargetOffset + Addend;
+      if (Addend > 0)
+        normalize(TargetSeg, Total);
+      Addend = Total;
+    }
     R.IsExternal = false;
     R.TargetSeg = TargetSeg;
     R.ExtIndex = 0;
-    Addend += TargetOffset;
   } else if (Sym->isUndefined() || Sym->isCommon()) {
     R.IsExternal = true;
     R.TargetSeg = SK_Text;
@@ -542,8 +651,9 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     return;
   }
 
-  // The loader adds the frame number to a base16 field, so it starts at 0.
-  FixedValue = SegRef ? 0 : uint64_t(Addend) & 0xffff;
+  // The linker and the loader add the frame number to a base16 field, so it
+  // holds the addend in paragraphs.
+  FixedValue = uint64_t(Addend) & 0xffff;
   Fixups.push_back(R);
 }
 
@@ -590,13 +700,12 @@ void OMFObjectWriter::writeNamesAndSegments() {
   };
   NameIndex("");
   unsigned DGroupName = DGroupIndex ? NameIndex("DGROUP") : 0;
-  unsigned SegName[SK_Count] = {}, ClassName[SK_Count] = {};
-  for (unsigned K = 0; K != SK_Count; ++K) {
+  SmallVector<unsigned, 16> SegName(Segs.size()), ClassName(Segs.size());
+  for (SegIdx K : segmentOrder()) {
     if (!Segs[K].Present)
       continue;
-    SegName[K] = NameIndex(K == SK_Text ? StringRef(TextName)
-                                        : StringRef(Segments[K].Name));
-    ClassName[K] = NameIndex(Segments[K].Class);
+    SegName[K] = NameIndex(segmentName(K));
+    ClassName[K] = NameIndex(segmentClass(K));
   }
   Record LNames(OMF::LNAMES);
   for (StringRef N : Names)
@@ -604,7 +713,7 @@ void OMFObjectWriter::writeNamesAndSegments() {
   LNames.write(OS);
   NumLNames = Names.size();
 
-  for (unsigned K = 0; K != SK_Count; ++K) {
+  for (SegIdx K : segmentOrder()) {
     const Segment &Seg = Segs[K];
     if (!Seg.Present)
       continue;
@@ -614,7 +723,7 @@ void OMFObjectWriter::writeNamesAndSegments() {
                                              : OMF::SA_Page;
     bool Big = Seg.Size == 0x10000;
     Record SegDef(OMF::SEGDEF);
-    SegDef.byte((A << 5) | (Segments[K].Combine << 2) | (Big << 1));
+    SegDef.byte((A << 5) | (segmentCombine(K) << 2) | (Big << 1));
     SegDef.word(Big ? 0 : Seg.Size);
     SegDef.index(SegName[K]);
     SegDef.index(ClassName[K]);
@@ -625,8 +734,8 @@ void OMFObjectWriter::writeNamesAndSegments() {
   if (DGroupIndex) {
     Record GrpDef(OMF::GRPDEF);
     GrpDef.index(DGroupName);
-    for (unsigned K = 0; K != SK_Count; ++K) {
-      if (!Segs[K].Present || !inDGROUP(SegmentKind(K)))
+    for (SegIdx K : segmentOrder()) {
+      if (!Segs[K].Present || !inDGROUP(K))
         continue;
       GrpDef.byte(0xff);
       GrpDef.index(Segs[K].Index);
@@ -720,7 +829,10 @@ void OMFObjectWriter::writeExternals() {
 
 void OMFObjectWriter::writePublics() {
   // Group publics by segment. Absolute symbols use segment 0.
-  SmallVector<std::pair<StringRef, uint64_t>, 16> Publics[SK_Count + 1];
+  // The last entry holds the absolute symbols.
+  const SegIdx Absolute = Segs.size();
+  SmallVector<SmallVector<std::pair<StringRef, uint64_t>, 16>, 16> Publics(
+      Segs.size() + 1);
   for (const MCSymbol &S : Asm->symbols()) {
     const auto &Sym = static_cast<const MCSymbolELF &>(S);
     if (Sym.isTemporary() || Sym.isCommon() || !Sym.isBindingSet() ||
@@ -733,7 +845,7 @@ void OMFObjectWriter::writePublics() {
     uint64_t CdOffset;
     if (getComdatLocation(Sym, CdIdx, CdOffset))
       continue;
-    SegmentKind K;
+    SegIdx K;
     uint64_t Offset;
     if (getSymbolLocation(Sym, K, Offset)) {
       Publics[K].push_back({Sym.getName(), Offset});
@@ -742,7 +854,7 @@ void OMFObjectWriter::writePublics() {
     if (Sym.isVariable()) {
       int64_t Value;
       if (Sym.getVariableValue()->evaluateAsAbsolute(Value, *Asm)) {
-        Publics[SK_Count].push_back({Sym.getName(), uint64_t(Value)});
+        Publics[Absolute].push_back({Sym.getName(), uint64_t(Value)});
         continue;
       }
     }
@@ -751,17 +863,17 @@ void OMFObjectWriter::writePublics() {
                                             "' cannot be exported to OMF");
   }
 
-  for (unsigned K = 0; K <= SK_Count; ++K) {
+  for (SegIdx K = 0; K <= Absolute; ++K) {
     if (Publics[K].empty())
       continue;
     Record PubDef(OMF::PUBDEF);
     auto Start = [&] {
-      if (K == SK_Count) {
+      if (K == Absolute) {
         PubDef.index(0);
         PubDef.index(0);
         PubDef.word(0); // Frame number.
       } else {
-        PubDef.index(inDGROUP(SegmentKind(K)) ? DGroupIndex : 0);
+        PubDef.index(inDGROUP(K) ? DGroupIndex : 0);
         PubDef.index(Segs[K].Index);
       }
     };
@@ -783,7 +895,7 @@ void OMFObjectWriter::writePublics() {
   }
 }
 
-void OMFObjectWriter::writeFixups(SegmentKind K, uint64_t Start, uint64_t End,
+void OMFObjectWriter::writeFixups(SegIdx K, uint64_t Start, uint64_t End,
                                   ArrayRef<const OMFFixup *> SegFixups) {
   Record FixUpp(OMF::FIXUPP);
   for (const OMFFixup *R : SegFixups) {
@@ -810,7 +922,7 @@ void OMFObjectWriter::writeFixups(SegmentKind K, uint64_t Start, uint64_t End,
     FixUpp.write(OS);
 }
 
-void OMFObjectWriter::writeSegmentData(SegmentKind K) {
+void OMFObjectWriter::writeSegmentData(SegIdx K) {
   const Segment &Seg = Segs[K];
   if (!Seg.Present || Seg.Size == 0)
     return;
@@ -819,7 +931,21 @@ void OMFObjectWriter::writeSegmentData(SegmentKind K) {
   SmallVector<uint8_t, 0> Image(Seg.Size, 0);
   bool AnyData = false;
   uint64_t PrevEnd = 0;
+  if (K >= SK_Count) {
+    // A far data segment: its part of its one section.
+    const MCSection *Sec = Seg.Sections.front();
+    if (!Sec->isBssSection()) {
+      SmallString<256> Buf;
+      raw_svector_ostream VOS(Buf);
+      Asm->writeSectionData(VOS, Sec);
+      std::copy(Buf.begin() + Seg.PartOffset,
+                Buf.begin() + Seg.PartOffset + Seg.Size, Image.begin());
+      AnyData = true;
+    }
+  }
   for (const MCSection *Sec : Seg.Sections) {
+    if (K >= SK_Count)
+      break;
     uint64_t Base = SectionMap.lookup(Sec).second;
     // Code padding between sections is NOPs.
     if (K == SK_Text)
@@ -967,7 +1093,7 @@ void OMFObjectWriter::writeModuleEnd() {
         Sym.getBinding() != ELF::STB_LOCAL && !Sym.isUndefined())
       Start = &Sym;
   }
-  SegmentKind K;
+  SegIdx K;
   uint64_t Offset;
   if (Start && getSymbolLocation(*Start, K, Offset)) {
     // Main module with a start address: frame and target given explicitly,
@@ -994,8 +1120,8 @@ uint64_t OMFObjectWriter::writeObject() {
   writeNamesAndSegments();
   writeExternals();
   writePublics();
-  for (unsigned K = 0; K != SK_Count; ++K)
-    writeSegmentData(SegmentKind(K));
+  for (SegIdx K : segmentOrder())
+    writeSegmentData(K);
   writeComdats();
   writeModuleEnd();
   return OS.tell() - StartOffset;

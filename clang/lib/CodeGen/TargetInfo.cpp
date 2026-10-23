@@ -330,6 +330,11 @@ namespace {
 /// i8086 (16-bit DOS). Global variables are in DGROUP, the near data
 /// address space 0, in every memory model. In the far-data models C
 /// pointers are far, and the addresses of globals are cast to them.
+///
+/// In the far-data models a variable larger than the data threshold
+/// (-mlarge-data-threshold=, 32767 bytes by default, as in Open Watcom) is
+/// far data instead, in a segment of its own outside DGROUP: address space
+/// 2, or 3 (huge) in the huge models, where it can be over 64 KiB.
 class I8086TargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   I8086TargetCodeGenInfo(CodeGen::CodeGenTypes &CGT)
@@ -338,7 +343,28 @@ public:
   LangAS getGlobalVarAddressSpace(CodeGenModule &CGM,
                                   const VarDecl *D) const override {
     LangAS AS = D ? D->getType().getAddressSpace() : LangAS::Default;
-    return AS == LangAS::Default ? getLangASFromTargetAS(0) : AS;
+    if (AS != LangAS::Default)
+      return AS;
+    if (D && isFarVariable(CGM, D)) {
+      bool Huge = CGM.getTarget().getABI().starts_with("huge");
+      return getLangASFromTargetAS(Huge ? 3 : 2);
+    }
+    return getLangASFromTargetAS(0);
+  }
+
+private:
+  static bool isFarVariable(CodeGenModule &CGM, const VarDecl *D) {
+    uint64_t Threshold = CGM.getCodeGenOpts().LargeDataThreshold;
+    StringRef Model = CGM.getTarget().getABI();
+    if (!Threshold || !(Model == "compact" || Model == "large" ||
+                        Model.starts_with("huge")))
+      return false;
+    QualType T = D->getType();
+    if (T->isIncompleteType() || T->isDependentType() ||
+        !T->isConstantSizeType())
+      return false;
+    return CGM.getContext().getTypeSizeInChars(T).getQuantity() >
+           int64_t(Threshold);
   }
 };
 } // namespace

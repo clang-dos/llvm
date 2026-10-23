@@ -9,8 +9,6 @@ a:
 	.long	ext@SEG
 # CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: unsupported relocation expression in OMF object
 	.short	b - a
-# CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: a segment reference cannot be PC-relative or have an addend
-	movw	$b@SEG+2, %ax
 # CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: unsupported relocation expression in OMF object
 	movw	$b@GOTOFF, %ax
 	.data

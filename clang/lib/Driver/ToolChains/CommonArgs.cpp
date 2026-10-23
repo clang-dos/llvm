@@ -3051,9 +3051,19 @@ void tools::addMCModel(const Driver &D, const llvm::opt::ArgList &Args,
                        const llvm::Triple &Triple,
                        const llvm::Reloc::Model &RelocationModel,
                        llvm::opt::ArgStringList &CmdArgs) {
-  // For i8086, -mcmodel= is the memory model, passed as -target-abi.
-  if (Triple.getArch() == llvm::Triple::i8086)
+  // For i8086, -mcmodel= is the memory model, passed as -target-abi. In the
+  // far-data models, variables larger than the data threshold are far data,
+  // outside DGROUP: 32767 bytes by default, as in Open Watcom.
+  if (Triple.getArch() == llvm::Triple::i8086) {
+    StringRef Model = Args.getLastArgValue(options::OPT_mcmodel_EQ);
+    if (Model == "compact" || Model == "large" || Model == "huge") {
+      if (Arg *A = Args.getLastArg(options::OPT_mlarge_data_threshold_EQ))
+        A->render(Args, CmdArgs);
+      else
+        CmdArgs.push_back("-mlarge-data-threshold=32767");
+    }
     return;
+  }
   if (Arg *A = Args.getLastArg(options::OPT_mcmodel_EQ)) {
     StringRef CM = A->getValue();
     bool Ok = false;

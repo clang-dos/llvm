@@ -2908,6 +2908,9 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
       setOperationAction(Op, MVT::i16, Custom);
     // Far addresses of globals.
     setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+    setTargetDAGCombine(
+        {ISD::LOAD, ISD::STORE, ISD::ADD, ISD::PTRADD, ISD::VASTART,
+         ISD::VAARG, ISD::VAEND, ISD::VACOPY, ISD::SELECT});
     setOperationAction(ISD::ADDRSPACECAST, MVT::i16, Custom);
     // Shifts of i32 values use the generic expansion.
     setOperationAction({ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS},
@@ -64301,9 +64304,177 @@ static SDValue combineINTRINSIC_VOID(SDNode *N, SelectionDAG &DAG,
   return SDValue();
 }
 
+bool X86TargetLowering::shouldPreservePtrArith(const Function &F,
+                                               EVT PtrVT) const {
+  return Subtarget.isTarget16BitABI() && PtrVT == MVT::i32;
+}
+
+unsigned X86TargetLowering::getMemLibcallAddressSpace() const {
+  if (!Subtarget.isTarget16BitABI())
+    return 0;
+  switch (Subtarget.getMemoryModel16()) {
+  case X86::MemoryModel16::Compact:
+  case X86::MemoryModel16::Large:
+    return X86AS::FAR_DATA;
+  case X86::MemoryModel16::Huge:
+    return X86AS::HUGE_DATA;
+  default:
+    return 0;
+  }
+}
+
+/// i8086 far pointers. A load or store through a 32-bit segment:offset
+/// pointer gets an X86ISD::FARADDR address, whose segment goes in ES when
+/// the access is selected. Offsets added to a far address only change its
+/// offset half. va_start of a far va_list stores a far pointer to the
+/// arguments.
+static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
+  SDLoc DL(N);
+  auto Split = [&](SDValue Ptr) {
+    // A near data pointer cast to far is used as it is: DS is the default
+    // segment.
+    if (auto *C = dyn_cast<AddrSpaceCastSDNode>(Ptr))
+      if (C->getOperand(0).getValueType() == MVT::i16 &&
+          C->getSrcAddressSpace() != X86AS::NEAR_CODE)
+        return C->getOperand(0);
+    if (Ptr.getOpcode() == ISD::BUILD_PAIR &&
+        Ptr.getOperand(1).getOpcode() == ISD::CopyFromReg &&
+        cast<RegisterSDNode>(Ptr.getOperand(1).getOperand(1))->getReg() ==
+            X86::DS)
+      return Ptr.getOperand(0);
+    SDValue Off = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, Ptr,
+                              DAG.getIntPtrConstant(0, DL));
+    SDValue Seg = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, Ptr,
+                              DAG.getIntPtrConstant(1, DL));
+    return DAG.getNode(X86ISD::FARADDR, DL, MVT::i16, Off, Seg);
+  };
+  switch (N->getOpcode()) {
+  case ISD::LOAD: {
+    auto *L = cast<LoadSDNode>(N);
+    if (L->getBasePtr().getValueType() != MVT::i32 || !L->isUnindexed())
+      return SDValue();
+    return DAG.getLoad(ISD::UNINDEXED, L->getExtensionType(),
+                       L->getValueType(0), DL, L->getChain(),
+                       Split(L->getBasePtr()), DAG.getPOISON(MVT::i16),
+                       L->getMemoryVT(), L->getMemOperand());
+  }
+  case ISD::STORE: {
+    auto *S = cast<StoreSDNode>(N);
+    if (S->getBasePtr().getValueType() != MVT::i32 || !S->isUnindexed())
+      return SDValue();
+    if (S->isTruncatingStore())
+      return DAG.getTruncStore(S->getChain(), DL, S->getValue(),
+                               Split(S->getBasePtr()), S->getMemoryVT(),
+                               S->getMemOperand());
+    return DAG.getStore(S->getChain(), DL, S->getValue(),
+                        Split(S->getBasePtr()), S->getMemOperand());
+  }
+  case ISD::ADD: {
+    SDValue A = N->getOperand(0), B = N->getOperand(1);
+    if (B.getOpcode() == X86ISD::FARADDR)
+      std::swap(A, B);
+    if (A.getOpcode() != X86ISD::FARADDR || B.getOpcode() == X86ISD::FARADDR)
+      return SDValue();
+    return DAG.getNode(
+        X86ISD::FARADDR, DL, MVT::i16,
+        DAG.getNode(ISD::ADD, DL, MVT::i16, A.getOperand(0), B),
+        A.getOperand(1));
+  }
+  case ISD::PTRADD: {
+    // Far pointer arithmetic changes the offset only: the 16-bit index
+    // width of the data layout.
+    SDValue Ptr = N->getOperand(0);
+    if (Ptr.getValueType() != MVT::i32)
+      return SDValue();
+    SDValue Off = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, Ptr,
+                              DAG.getIntPtrConstant(0, DL));
+    SDValue Seg = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, Ptr,
+                              DAG.getIntPtrConstant(1, DL));
+    Off = DAG.getNode(ISD::ADD, DL, MVT::i16, Off,
+                      DAG.getZExtOrTrunc(N->getOperand(1), DL, MVT::i16));
+    return DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32, Off, Seg);
+  }
+  case ISD::VAARG: {
+    // A far va_list: load the far argument pointer, load the argument
+    // through it, and store the pointer advanced past the 2-byte aligned
+    // argument slot.
+    SDValue Chain = N->getOperand(0), Ptr = N->getOperand(1);
+    if (Ptr.getValueType() != MVT::i32)
+      return SDValue();
+    EVT VT = N->getValueType(0);
+    const Value *SV = cast<SrcValueSDNode>(N->getOperand(2))->getValue();
+    SDValue AP = DAG.getLoad(MVT::i32, DL, Chain, Ptr, MachinePointerInfo(SV));
+    SDValue Arg = DAG.getLoad(VT, DL, AP.getValue(1), AP,
+                              MachinePointerInfo(X86AS::FAR_DATA), Align(2));
+    uint64_t Size = alignTo(VT.getStoreSize(), 2);
+    SDValue Next = DAG.getMemBasePlusOffset(AP, TypeSize::getFixed(Size), DL);
+    SDValue St =
+        DAG.getStore(Arg.getValue(1), DL, Next, Ptr, MachinePointerInfo(SV));
+    return DAG.getMergeValues({Arg, St}, DL);
+  }
+  case ISD::SELECT: {
+    // A select of far addresses, from a select of loads: select the offsets
+    // and the segments.
+    SDValue A = N->getOperand(1), B = N->getOperand(2);
+    if (A.getOpcode() != X86ISD::FARADDR && B.getOpcode() != X86ISD::FARADDR)
+      return SDValue();
+    // The other address is near, relative to DS.
+    auto MakeFar = [&](SDValue P) {
+      if (P.getOpcode() == X86ISD::FARADDR)
+        return P;
+      return DAG.getNode(
+          X86ISD::FARADDR, DL, MVT::i16, P,
+          DAG.getCopyFromReg(DAG.getEntryNode(), DL, X86::DS, MVT::i16));
+    };
+    A = MakeFar(A);
+    B = MakeFar(B);
+    SDValue C = N->getOperand(0);
+    return DAG.getNode(
+        X86ISD::FARADDR, DL, MVT::i16,
+        DAG.getSelect(DL, MVT::i16, C, A.getOperand(0), B.getOperand(0)),
+        DAG.getSelect(DL, MVT::i16, C, A.getOperand(1), B.getOperand(1)));
+  }
+  case ISD::VAEND:
+    if (N->getOperand(1).getValueType() != MVT::i32)
+      return SDValue();
+    return N->getOperand(0);
+  case ISD::VACOPY: {
+    // va_copy(dst, src) with far va_lists: copy the far pointer.
+    SDValue Dst = N->getOperand(1), Src = N->getOperand(2);
+    if (Dst.getValueType() != MVT::i32 && Src.getValueType() != MVT::i32)
+      return SDValue();
+    const Value *DstSV = cast<SrcValueSDNode>(N->getOperand(3))->getValue();
+    const Value *SrcSV = cast<SrcValueSDNode>(N->getOperand(4))->getValue();
+    SDValue AP = DAG.getLoad(MVT::i32, DL, N->getOperand(0), Src,
+                             MachinePointerInfo(SrcSV));
+    return DAG.getStore(AP.getValue(1), DL, AP, Dst,
+                        MachinePointerInfo(DstSV));
+  }
+  case ISD::VASTART: {
+    SDValue Ptr = N->getOperand(1);
+    if (Ptr.getValueType() != MVT::i32)
+      return SDValue();
+    MachineFunction &MF = DAG.getMachineFunction();
+    int FI = MF.getInfo<X86MachineFunctionInfo>()->getVarArgsFrameIndex();
+    // The arguments are on the stack, and SS is DS.
+    SDValue Args = DAG.getNode(
+        ISD::BUILD_PAIR, DL, MVT::i32, DAG.getFrameIndex(FI, MVT::i16),
+        DAG.getCopyFromReg(DAG.getEntryNode(), DL, X86::DS, MVT::i16));
+    const Value *SV = cast<SrcValueSDNode>(N->getOperand(2))->getValue();
+    return DAG.getStore(N->getOperand(0), DL, Args, Ptr,
+                        MachinePointerInfo(SV));
+  }
+  default:
+    return SDValue();
+  }
+}
+
 SDValue X86TargetLowering::PerformDAGCombine(SDNode *N,
                                              DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
+  if (Subtarget.isTarget16BitABI())
+    if (SDValue V = combineFarAccess16(N, DAG))
+      return V;
   switch (N->getOpcode()) {
   // clang-format off
   default: break;
@@ -65264,6 +65435,22 @@ std::pair<unsigned, const TargetRegisterClass *>
 X86TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                                 StringRef Constraint,
                                                 MVT VT) const {
+  // Before the 80386 a value wider than 16 bits, such as a far pointer,
+  // takes several 16-bit registers.
+  if (Subtarget.isPre386() && Constraint.size() == 1 && VT.isScalarInteger() &&
+      VT.getSizeInBits() > 16) {
+    switch (Constraint[0]) {
+    case 'r':
+    case 'l':
+      return std::make_pair(0U, &X86::GR16RegClass);
+    case 'q':
+    case 'Q':
+      return std::make_pair(0U, &X86::GR16_ABCDRegClass);
+    default:
+      break;
+    }
+  }
+
   // First, see if this is a constraint that directly corresponds to an LLVM
   // register class.
   if (Constraint.size() == 1) {

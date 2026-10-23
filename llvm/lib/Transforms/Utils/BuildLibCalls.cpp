@@ -1683,6 +1683,20 @@ static IntegerType *getSizeTTy(IRBuilderBase &B, const TargetLibraryInfo *TLI) {
   return B.getIntNTy(TLI->getSizeTSize(*M));
 }
 
+unsigned llvm::getLibCallPointerAddrSpace(const Module &M) {
+  // The i8086 memory models with far data, named by the target ABI.
+  if (M.getTargetTriple().isX86_16()) {
+    if (auto *ABI = dyn_cast_or_null<MDString>(M.getModuleFlag("target-abi"))) {
+      StringRef Name = ABI->getString();
+      if (Name == "compact" || Name == "large")
+        return 2;
+      if (Name == "huge")
+        return 3;
+    }
+  }
+  return 0;
+}
+
 static Value *emitLibCall(LibFunc TheLibFunc, Type *ReturnType,
                           ArrayRef<Type *> ParamTypes,
                           ArrayRef<Value *> Operands, IRBuilderBase &B,
@@ -1693,10 +1707,35 @@ static Value *emitLibCall(LibFunc TheLibFunc, Type *ReturnType,
     return nullptr;
 
   StringRef FuncName = TLI->getName(TheLibFunc);
-  FunctionType *FuncType = FunctionType::get(ReturnType, ParamTypes, IsVaArgs);
+  // The C library's pointers need not be in address space 0: the i8086
+  // memory models with far data pass far pointers. An existing declaration
+  // gives the types; otherwise pointers are in the library's address space.
+  SmallVector<Type *, 8> Params(ParamTypes);
+  SmallVector<Value *, 8> Args(Operands);
+  const Function *Existing = M->getFunction(FuncName);
+  FunctionType *FuncType;
+  if (Existing &&
+      Existing->getFunctionType()->getNumParams() == Params.size()) {
+    FuncType = Existing->getFunctionType();
+  } else {
+    unsigned LibAS = getLibCallPointerAddrSpace(*M);
+    auto Fix = [&](Type *T) {
+      return T->isPointerTy() ? PointerType::get(M->getContext(), LibAS) : T;
+    };
+    for (Type *&T : Params)
+      T = Fix(T);
+    FuncType = FunctionType::get(Fix(ReturnType), Params, IsVaArgs);
+  }
+  for (unsigned I = 0, E = std::min<unsigned>(FuncType->getNumParams(),
+                                              Args.size());
+       I != E; ++I)
+    if (Args[I]->getType() != FuncType->getParamType(I) &&
+        Args[I]->getType()->isPointerTy() &&
+        FuncType->getParamType(I)->isPointerTy())
+      Args[I] = B.CreateAddrSpaceCast(Args[I], FuncType->getParamType(I));
   FunctionCallee Callee = getOrInsertLibFunc(M, *TLI, TheLibFunc, FuncType);
   inferNonMandatoryLibFuncAttrs(M, FuncName, *TLI);
-  CallInst *CI = B.CreateCall(Callee, Operands, FuncName);
+  CallInst *CI = B.CreateCall(Callee, Args, FuncName);
   if (const Function *F =
           dyn_cast<Function>(Callee.getCallee()->stripPointerCasts()))
     CI->setCallingConv(F->getCallingConv());

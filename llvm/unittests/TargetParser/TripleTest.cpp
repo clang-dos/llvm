@@ -4050,7 +4050,8 @@ TEST(DataLayoutTest, X86_16) {
     return Specs;
   };
 
-  // The default memory model is small.
+  // The default memory model is small. Address space 0 is near in every
+  // model; far data pointers are in address spaces 2 and 3.
   EXPECT_EQ(OMF.computeDataLayout(""), OMF.computeDataLayout("small"));
   EXPECT_THAT(OMF.computeDataLayout(""), testing::StartsWith("e-m:x-"));
   EXPECT_THAT(ELF.computeDataLayout(""), testing::StartsWith("e-m:e-"));
@@ -4071,14 +4072,14 @@ TEST(DataLayoutTest, X86_16) {
               testing::ElementsAre("p:16:16", P1, P2, P3, P4, P5, P256, P257,
                                    P258, "P5"));
   EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("compact")),
-              testing::ElementsAre("p:32:16:16:16", P1, P2, P3, P4, P5, P256,
-                                   P257, P258, "P4"));
+              testing::ElementsAre("p:16:16", P1, P2, P3, P4, P5, P256, P257,
+                                   P258, "P4"));
   EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("large")),
-              testing::ElementsAre("p:32:16:16:16", P1, P2, P3, P4, P5, P256,
-                                   P257, P258, "P5"));
+              testing::ElementsAre("p:16:16", P1, P2, P3, P4, P5, P256, P257,
+                                   P258, "P5"));
   EXPECT_THAT(PointerLayoutSpecs(OMF.computeDataLayout("huge")),
-              testing::ElementsAre("p:32:16:16:32", P1, P2, P3, P4, P5, P256,
-                                   P257, P258, "P5"));
+              testing::ElementsAre("p:16:16", P1, P2, P3, P4, P5, P256, P257,
+                                   P258, "P5"));
 }
 
 TEST(DataLayoutTest, UEFI) {

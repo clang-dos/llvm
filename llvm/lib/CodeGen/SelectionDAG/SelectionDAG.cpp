@@ -10136,11 +10136,32 @@ static SDValue getMemsetStores(SelectionDAG &DAG, const SDLoc &dl,
 static void checkAddrSpaceIsValidForLibcall(const TargetLowering *TLI,
                                             const DataLayout &DL, unsigned AS) {
   // Lowering memcpy / memset / memmove intrinsics to calls is only valid if all
-  // pointer operands can be losslessly bitcasted to pointers of address space 0
+  // pointer operands can be losslessly bitcasted to pointers of address space
+  // 0, unless the target's library takes another address space (see
+  // getMemLibcallAddressSpace), to which the pointers are cast.
+  if (TLI->getMemLibcallAddressSpace() != 0)
+    return;
   if (AS != 0 && !TLI->getTargetMachine().isNoopAddrSpaceCast(DL, AS, 0)) {
     report_fatal_error("cannot lower memory intrinsic in address space " +
                        Twine(AS));
   }
+}
+
+/// The pointer argument Ptr of a memory intrinsic libcall, cast to the
+/// address space that the library takes.
+static SDValue getMemLibcallPointer(SelectionDAG &DAG, const SDLoc &dl,
+                                    SDValue Ptr,
+                                    const MachinePointerInfo &PtrInfo) {
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+  unsigned LibAS = TLI.getMemLibcallAddressSpace();
+  const DataLayout &DL = DAG.getDataLayout();
+  EVT LibVT = TLI.getPointerTy(DL, LibAS);
+  if (LibAS == 0 || Ptr.getValueType() == LibVT)
+    return Ptr;
+  unsigned SrcAS = PtrInfo.getAddrSpace();
+  if (EVT(TLI.getPointerTy(DL, SrcAS)) != Ptr.getValueType())
+    SrcAS = 0;
+  return DAG.getAddrSpaceCast(dl, LibVT, Ptr, SrcAS, LibAS);
 }
 
 /// The length of a memory intrinsic (e.g. number of bytes to copy) is unsigned
@@ -10332,9 +10353,10 @@ SDValue SelectionDAG::getMemcpy(
 
   // Emit a library call.
   TargetLowering::ArgListTy Args;
-  Type *PtrTy = PointerType::getUnqual(*getContext());
-  Args.emplace_back(Dst, PtrTy);
-  Args.emplace_back(Src, PtrTy);
+  Type *PtrTy =
+      PointerType::get(*getContext(), TLI->getMemLibcallAddressSpace());
+  Args.emplace_back(getMemLibcallPointer(*this, dl, Dst, DstPtrInfo), PtrTy);
+  Args.emplace_back(getMemLibcallPointer(*this, dl, Src, SrcPtrInfo), PtrTy);
   Args.emplace_back(Size, getDataLayout().getIntPtrType(*getContext()));
   // FIXME: pass in SDLoc
   TargetLowering::CallLoweringInfo CLI(*this);
@@ -10456,9 +10478,10 @@ SDValue SelectionDAG::getMemmove(SDValue Chain, const SDLoc &dl, SDValue Dst,
 
   // Emit a library call.
   TargetLowering::ArgListTy Args;
-  Type *PtrTy = PointerType::getUnqual(*getContext());
-  Args.emplace_back(Dst, PtrTy);
-  Args.emplace_back(Src, PtrTy);
+  Type *PtrTy =
+      PointerType::get(*getContext(), TLI->getMemLibcallAddressSpace());
+  Args.emplace_back(getMemLibcallPointer(*this, dl, Dst, DstPtrInfo), PtrTy);
+  Args.emplace_back(getMemLibcallPointer(*this, dl, Src, SrcPtrInfo), PtrTy);
   Args.emplace_back(Size, getDataLayout().getIntPtrType(*getContext()));
   // FIXME:  pass in SDLoc
   TargetLowering::CallLoweringInfo CLI(*this);
@@ -10588,9 +10611,11 @@ SDValue SelectionDAG::getMemset(SDValue Chain, const SDLoc &dl, SDValue Dst,
   bool UseBZero = BzeroImpl != RTLIB::Unsupported && isNullConstant(Src);
 
   // If zeroing out and bzero is present, use it.
+  Type *LibPtrTy = PointerType::get(Ctx, TLI->getMemLibcallAddressSpace());
+  SDValue LibDst = getMemLibcallPointer(*this, dl, Dst, DstPtrInfo);
   if (UseBZero) {
     TargetLowering::ArgListTy Args;
-    Args.emplace_back(Dst, PointerType::getUnqual(Ctx));
+    Args.emplace_back(LibDst, LibPtrTy);
     Args.emplace_back(Size, DL.getIntPtrType(Ctx));
     CLI.setLibCallee(
         Libcalls->getLibcallImplCallingConv(BzeroImpl), Type::getVoidTy(Ctx),
@@ -10600,7 +10625,7 @@ SDValue SelectionDAG::getMemset(SDValue Chain, const SDLoc &dl, SDValue Dst,
 
     MVT IntVT = MVT::getIntegerVT(LibInfo->getIntSize());
     TargetLowering::ArgListTy Args;
-    Args.emplace_back(Dst, PointerType::getUnqual(Ctx));
+    Args.emplace_back(LibDst, LibPtrTy);
     Args.emplace_back(getAnyExtOrTrunc(Src, dl, IntVT),
                       Type::getIntNTy(Ctx, LibInfo->getIntSize()),
                       LibInfo->getExtAttrForI32Param());

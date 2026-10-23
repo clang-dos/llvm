@@ -605,6 +605,9 @@ def GR32_ArgRef: RegisterClass<"X86", [i32], 32, (add ECX, EDX)> {
 //   descriptor.
 def SEGMENT_REG : RegisterClass<"X86", [i16], 16, (add CS, DS, SS, ES, FS, GS)>;
 
+// ES alone: the segment of an i8086 far pointer being dereferenced.
+def SEGR_ES : RegisterClass<"X86", [i16], 16, (add ES)>;
+
 // Debug registers.
 def DEBUG_REG : RegisterClass<"X86", [i32], 32, (sequence "DR%u", 0, 15)>;
 

@@ -314,6 +314,11 @@ def X86imp_call  : SDNode<"X86ISD::IMP_CALL",     SDT_X86Call,
 // Same as call except it adds the NoTrack prefix.
 // A far call (CALLF) on i8086: to a symbol, or through a far pointer in
 // memory.
+// i8086 far address: (offset, segment). Only used as the address of a
+// memory operand, where the segment goes in ES.
+def X86faraddr : SDNode<"X86ISD::FARADDR",
+                        SDTypeProfile<1, 2, [SDTCisVT<0, i16>, SDTCisVT<1, i16>,
+                                             SDTCisVT<2, i16>]>>;
 def X86farcall : SDNode<"X86ISD::FARCALL", SDT_X86Call,
                         [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                          SDNPVariadic]>;

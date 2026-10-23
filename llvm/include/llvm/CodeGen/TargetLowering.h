@@ -439,6 +439,11 @@ public:
     return getPointerTy(DL, DL.getProgramAddressSpace());
   }
 
+  /// Return the address space of the pointer arguments of the memcpy,
+  /// memmove and memset library functions. Pointers in other address spaces
+  /// are cast to it when a memory intrinsic becomes a library call.
+  virtual unsigned getMemLibcallAddressSpace() const { return 0; }
+
   /// Return the type for operands of fence.
   /// TODO: Let fence operands be of i32 type and remove this.
   virtual MVT getFenceOperandTy(const DataLayout &DL) const {

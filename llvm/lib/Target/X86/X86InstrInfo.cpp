@@ -4339,6 +4339,33 @@ void X86InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
            X86::SEGMENT_REGRegClass.contains(DestReg))
     Opc = X86::MOV16sr;
 
+  // A segment register to another goes through the stack.
+  if (X86::SEGMENT_REGRegClass.contains(SrcReg, DestReg)) {
+    unsigned PushOpc = 0, PopOpc = 0;
+    switch (SrcReg) {
+    case X86::CS: PushOpc = X86::PUSHCS16; break;
+    case X86::DS: PushOpc = X86::PUSHDS16; break;
+    case X86::ES: PushOpc = X86::PUSHES16; break;
+    case X86::SS: PushOpc = X86::PUSHSS16; break;
+    case X86::FS: PushOpc = X86::PUSHFS16; break;
+    case X86::GS: PushOpc = X86::PUSHGS16; break;
+    }
+    switch (DestReg) {
+    case X86::DS: PopOpc = X86::POPDS16; break;
+    case X86::ES: PopOpc = X86::POPES16; break;
+    case X86::SS: PopOpc = X86::POPSS16; break;
+    case X86::FS: PopOpc = X86::POPFS16; break;
+    case X86::GS: PopOpc = X86::POPGS16; break;
+    }
+    if (PushOpc && PopOpc) {
+      BuildMI(MBB, MI, DL, get(PushOpc))
+          .addReg(SrcReg, RegState::Implicit | getKillRegState(KillSrc));
+      BuildMI(MBB, MI, DL, get(PopOpc))
+          .addReg(DestReg, RegState::ImplicitDefine);
+      return;
+    }
+  }
+
   if (!Opc)
     Opc = CopyToFromAsymmetricReg(DestReg, SrcReg, Subtarget);
 
@@ -4408,6 +4435,8 @@ static unsigned getLoadStoreRegOpcode(Register Reg,
     if (X86::VK16RegClass.hasSubClassEq(RC))
       return Load ? (HasEGPR ? X86::KMOVWkm_EVEX : X86::KMOVWkm)
                   : (HasEGPR ? X86::KMOVWmk_EVEX : X86::KMOVWmk);
+    if (X86::SEGMENT_REGRegClass.hasSubClassEq(RC))
+      return Load ? X86::MOV16sm : X86::MOV16ms;
     assert(X86::GR16RegClass.hasSubClassEq(RC) && "Unknown 2-byte regclass");
     return Load ? X86::MOV16rm : X86::MOV16mr;
   case 4:

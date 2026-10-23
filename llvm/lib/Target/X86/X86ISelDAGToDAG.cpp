@@ -3302,6 +3302,19 @@ bool X86DAGToDAGISel::selectAddr(SDNode *Parent, SDValue N, SDValue &Base,
   SDLoc DL(N);
   MVT VT = N.getSimpleValueType();
 
+  // An i8086 far address: the segment goes in ES, and the offset is matched
+  // as a near address.
+  if (N.getOpcode() == X86ISD::FARADDR) {
+    if (AM.Segment.getNode())
+      return false;
+    AM.Segment = SDValue(
+        CurDAG->getMachineNode(
+            TargetOpcode::COPY_TO_REGCLASS, DL, MVT::i16, N.getOperand(1),
+            CurDAG->getTargetConstant(X86::SEGR_ESRegClassID, DL, MVT::i32)),
+        0);
+    N = N.getOperand(0);
+  }
+
   if (matchAddress(N, AM))
     return false;
 

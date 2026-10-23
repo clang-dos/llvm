@@ -28,8 +28,8 @@ body: |
     ; CHECK-NEXT: RET 0
     %2 = MOV32ri 512
     %0 = COPY %2
-    INLINEASM &"", 1 /* sideeffect attdialect */, 3473417 /* reguse:GR32_ABCD */, %0:gr32_abcd, 1 /* clobber */, implicit-def early-clobber $df
+    INLINEASM &"", 1 /* sideeffect attdialect */, 3538953 /* reguse:GR32_ABCD */, %0:gr32_abcd, 1 /* clobber */, implicit-def early-clobber $df
     %1 = COPY %2
-    INLINEASM &"", 1 /* sideeffect attdialect */, 3473417 /* reguse:GR32_ABCD */, %1:gr32_abcd, 1 /* clobber */, implicit-def early-clobber $df
+    INLINEASM &"", 1 /* sideeffect attdialect */, 3538953 /* reguse:GR32_ABCD */, %1:gr32_abcd, 1 /* clobber */, implicit-def early-clobber $df
     RET 0
 ...

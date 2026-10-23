@@ -617,7 +617,10 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(X86::CS);
   Reserved.set(X86::SS);
   Reserved.set(X86::DS);
-  Reserved.set(X86::ES);
+  // The 16-bit ABI allocates ES for far pointers. It is not preserved by
+  // calls.
+  if (!MF.getSubtarget<X86Subtarget>().isTarget16BitABI())
+    Reserved.set(X86::ES);
   Reserved.set(X86::FS);
   Reserved.set(X86::GS);
 

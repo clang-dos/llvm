@@ -147,6 +147,12 @@ namespace llvm {
     /// legal as the hook is used before type legalization.
     bool isSafeMemOpType(MVT VT) const override;
 
+    /// In the i8086 far-data models the C library takes far pointers.
+    unsigned getMemLibcallAddressSpace() const override;
+
+    /// i8086 far pointer arithmetic only changes the offset.
+    bool shouldPreservePtrArith(const Function &F, EVT PtrVT) const override;
+
     bool isMemoryAccessFast(EVT VT, Align Alignment) const;
 
     /// Returns true if the target allows unaligned memory accesses of the

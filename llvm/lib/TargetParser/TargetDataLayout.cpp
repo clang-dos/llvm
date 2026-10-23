@@ -405,13 +405,11 @@ static std::string computeX86_16DataLayout(const Triple &TT,
   // underscore on C symbols.
   Ret += TT.isOSBinFormatOMF() ? "-m:x" : "-m:e";
 
-  // Default data pointer.
-  if (Model == X86::MemoryModel16::Huge)
-    Ret += "-p:32:16:16:32";
-  else if (X86::isFarDataModel16(Model))
-    Ret += "-p:32:16:16:16";
-  else
-    Ret += "-p:16:16";
+  // Address space 0 holds near data pointers in every model: the stack,
+  // globals and constants are in DGROUP. In the far-data models clang
+  // gives C pointers the far or huge address space and casts the
+  // addresses of locals and globals to it.
+  Ret += "-p:16:16";
 
   // near data, far data, huge data, near code, far code.
   Ret += "-p1:16:16-p2:32:16:16:16-p3:32:16:16:32-p4:16:16-p5:32:16:16:16";

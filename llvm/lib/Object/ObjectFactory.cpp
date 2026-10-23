@@ -40,6 +40,7 @@ Expected<std::unique_ptr<Binary>> object::createBinary(MemoryBufferRef Buffer,
   case file_magic::elf_shared_object:
   case file_magic::elf_core:
   case file_magic::goff_object:
+  case file_magic::omf_object:
   case file_magic::macho_object:
   case file_magic::macho_executable:
   case file_magic::macho_fixed_virtual_memory_shared_lib:
@@ -167,6 +168,8 @@ ObjectFile::createObjectFile(MemoryBufferRef Object, file_magic Type,
     return createDXContainerObjectFile(Object);
   case file_magic::goff_object:
     return createGOFFObjectFile(Object);
+  case file_magic::omf_object:
+    return createOMFObjectFile(Object);
   }
   llvm_unreachable("Unexpected Object File Type");
 }
@@ -208,6 +211,7 @@ SymbolicFile::createSymbolicFile(MemoryBufferRef Object, file_magic Type,
   case file_magic::elf_shared_object:
   case file_magic::elf_core:
   case file_magic::goff_object:
+  case file_magic::omf_object:
   case file_magic::macho_executable:
   case file_magic::macho_fixed_virtual_memory_shared_lib:
   case file_magic::macho_core:

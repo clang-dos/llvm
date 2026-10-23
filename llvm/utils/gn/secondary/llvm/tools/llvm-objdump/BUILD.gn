@@ -69,6 +69,7 @@ driver_executable("llvm-objdump") {
     "MachODump.cpp",
     "OffloadDump.cpp",
     "SourcePrinter.cpp",
+    "OMFDump.cpp",
     "WasmDump.cpp",
     "XCOFFDump.cpp",
     "llvm-objdump.cpp",

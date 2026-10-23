@@ -20,6 +20,7 @@
 #include "ELFDump.h"
 #include "MachODump.h"
 #include "ObjdumpOptID.h"
+#include "OMFDump.h"
 #include "OffloadDump.h"
 #include "SourcePrinter.h"
 #include "WasmDump.h"
@@ -57,6 +58,7 @@
 #include "llvm/Object/FaultMapParser.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/MachOUniversal.h"
+#include "llvm/Object/OMFObjectFile.h"
 #include "llvm/Object/OffloadBinary.h"
 #include "llvm/Object/Wasm.h"
 #include "llvm/Option/Arg.h"
@@ -357,6 +359,8 @@ static Expected<std::unique_ptr<Dumper>> createDumper(const ObjectFile &Obj) {
     return createXCOFFDumper(*O);
   if (const auto *O = dyn_cast<DXContainerObjectFile>(&Obj))
     return createDXContainerDumper(*O);
+  if (const auto *O = dyn_cast<OMFObjectFile>(&Obj))
+    return createOMFDumper(*O);
 
   return createStringError(errc::invalid_argument,
                            "unsupported object file format");
@@ -524,6 +528,8 @@ static Error getRelocationValueString(const RelocationRef &Rel,
   if (auto *XCOFF = dyn_cast<XCOFFObjectFile>(Obj))
     return getXCOFFRelocationValueString(*XCOFF, Rel, SymbolDescription,
                                          Result);
+  if (auto *OMF = dyn_cast<OMFObjectFile>(Obj))
+    return getOMFRelocationValueString(*OMF, Rel, Result);
   llvm_unreachable("unknown object file format");
 }
 

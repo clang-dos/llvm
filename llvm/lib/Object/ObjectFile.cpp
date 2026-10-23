@@ -123,6 +123,12 @@ Triple ObjectFile::makeTriple() const {
   } else if (isGOFF()) {
     TheTriple.setOS(Triple::ZOS);
     TheTriple.setObjectFormat(Triple::GOFF);
+  } else if (isOMF()) {
+    TheTriple.setOS(Triple::MSDOS);
+    TheTriple.setObjectFormat(Triple::OMF);
+  } else if (isOMF()) {
+    TheTriple.setOS(Triple::MSDOS);
+    TheTriple.setObjectFormat(Triple::OMF);
   } else if (TheTriple.isAMDGPU()) {
     TheTriple.setVendor(Triple::AMD);
   } else if (TheTriple.isNVPTX()) {

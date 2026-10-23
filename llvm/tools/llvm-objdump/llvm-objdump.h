@@ -37,6 +37,7 @@ class MachOObjectFile;
 class WasmObjectFile;
 class XCOFFObjectFile;
 class DXContainer;
+class OMFObjectFile;
 } // namespace object
 
 namespace objdump {
@@ -119,6 +120,7 @@ std::unique_ptr<Dumper> createWasmDumper(const object::WasmObjectFile &Obj);
 std::unique_ptr<Dumper> createXCOFFDumper(const object::XCOFFObjectFile &Obj);
 std::unique_ptr<Dumper>
 createDXContainerDumper(const object::DXContainerObjectFile &Obj);
+std::unique_ptr<Dumper> createOMFDumper(const object::OMFObjectFile &Obj);
 
 // Various helper functions.
 

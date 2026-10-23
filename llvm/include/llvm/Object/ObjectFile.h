@@ -400,6 +400,9 @@ public:
   static Expected<std::unique_ptr<ObjectFile>>
   createGOFFObjectFile(MemoryBufferRef Object);
 
+  static Expected<std::unique_ptr<ObjectFile>>
+  createOMFObjectFile(MemoryBufferRef Object);
+
   static Expected<std::unique_ptr<WasmObjectFile>>
   createWasmObjectFile(MemoryBufferRef Object);
 

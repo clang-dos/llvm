@@ -13,6 +13,7 @@ add_llvm_component_library(LLVMObject
   ELFObjectFile.cpp
   Error.cpp
   GOFFObjectFile.cpp
+  OMFObjectFile.cpp
   FaultMapParser.cpp
   IRObjectFile.cpp
   IRSymtab.cpp

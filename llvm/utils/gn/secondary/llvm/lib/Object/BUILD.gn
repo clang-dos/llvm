@@ -30,6 +30,7 @@ static_library("Object") {
     "Error.cpp",
     "FaultMapParser.cpp",
     "GOFFObjectFile.cpp",
+    "OMFObjectFile.cpp",
     "IRObjectFile.cpp",
     "IRSymtab.cpp",
     "MachOObjectFile.cpp",

@@ -1,0 +1,27 @@
+## Malformed OMF objects are diagnosed, not trusted.
+# RUN: %python %S/Inputs/omf-malformed.py %t
+
+## A well-formed module with an empty segment, and one whose checksum is zero
+## (not computed).
+# RUN: llvm-objdump -h %t.ok.obj | FileCheck %s --check-prefix=OK
+# OK: 0 _TEXT 00000004
+# RUN: llvm-nm %t.nochecksum.obj 2>&1 | FileCheck %s --check-prefix=NOSUM
+# NOSUM: no symbols
+
+# RUN: not llvm-nm %t.noend.obj 2>&1 | FileCheck %s --check-prefix=NOEND
+# NOEND: malformed OMF object: no MODEND record
+
+# RUN: not llvm-nm %t.checksum.obj 2>&1 | FileCheck %s --check-prefix=SUM
+# SUM: malformed OMF object: bad checksum in record at offset 0
+
+# RUN: not llvm-nm %t.pastend.obj 2>&1 | FileCheck %s --check-prefix=PAST
+# PAST: malformed OMF object: record at offset 10 extends past the end of the file
+
+# RUN: not llvm-nm %t.data.obj 2>&1 | FileCheck %s --check-prefix=DATA
+# DATA: malformed OMF object: data past the end of segment _TEXT in record at offset
+
+# RUN: not llvm-nm %t.fixup.obj 2>&1 | FileCheck %s --check-prefix=FIXUP
+# FIXUP: malformed OMF object: fixup to an undefined external index in record at offset
+
+# RUN: not llvm-nm %t.segment.obj 2>&1 | FileCheck %s --check-prefix=SEG
+# SEG: malformed OMF object: bad data segment index in record at offset 10

@@ -82,6 +82,13 @@ file_magic llvm::identify_magic(StringRef Magic) {
       return file_magic::spirv_object;
     break;
 
+  case 0x80: { // OMF THEADR record: type, length, then the module name.
+    unsigned Len = (unsigned char)Magic[1] | (unsigned char)Magic[2] << 8;
+    if (Len >= 2 && (unsigned char)Magic[3] == Len - 2)
+      return file_magic::omf_object;
+    break;
+  }
+
   case 0x10:
     if (startswith(Magic, "\x10\xFF\x10\xAD"))
       return file_magic::offload_binary;

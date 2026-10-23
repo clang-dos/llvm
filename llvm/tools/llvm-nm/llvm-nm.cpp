@@ -32,6 +32,7 @@
 #include "llvm/Object/IRObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/MachOUniversal.h"
+#include "llvm/Object/OMFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/SymbolicFile.h"
 #include "llvm/Object/TapiFile.h"
@@ -1019,6 +1020,28 @@ static char getSymbolNMTypeChar(GOFFObjectFile &, basic_symbol_iterator I) {
   }
 }
 
+static char getSymbolNMTypeChar(OMFObjectFile &Obj, basic_symbol_iterator I) {
+  Expected<section_iterator> SecIOrErr = SymbolRef(*I).getSection();
+  if (!SecIOrErr) {
+    consumeError(SecIOrErr.takeError());
+    return '?';
+  }
+  section_iterator SecI = *SecIOrErr;
+  if (SecI == Obj.section_end())
+    return '?';
+  if (SecI->isText())
+    return 't';
+  if (SecI->isBSS())
+    return 'b';
+  // CONST is the read-only data segment of the Microsoft memory models.
+  Expected<StringRef> Name = SecI->getName();
+  if (Name && *Name == "CONST")
+    return 'r';
+  if (!Name)
+    consumeError(Name.takeError());
+  return 'd';
+}
+
 static char getSymbolNMTypeChar(MachOObjectFile &Obj, basic_symbol_iterator I) {
   DataRefImpl Symb = I->getRawDataRefImpl();
   uint8_t NType = Obj.is64Bit() ? Obj.getSymbol64TableEntry(Symb).n_type
@@ -1181,6 +1204,8 @@ static char getNMSectionTagAndName(SymbolicFile &Obj, basic_symbol_iterator I,
       return Ret;
   } else if (GOFFObjectFile *GOFF = dyn_cast<GOFFObjectFile>(&Obj)) {
     Ret = getSymbolNMTypeChar(*GOFF, I);
+  } else if (OMFObjectFile *OMF = dyn_cast<OMFObjectFile>(&Obj)) {
+    Ret = getSymbolNMTypeChar(*OMF, I);
   } else
     llvm_unreachable("unknown binary format");
 

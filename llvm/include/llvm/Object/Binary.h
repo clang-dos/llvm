@@ -71,6 +71,7 @@ protected:
     ID_MachO64B, // MachO 64-bit, big endian
 
     ID_GOFF,
+    ID_OMF,
     ID_Wasm,
     ID_DXContainer,
 
@@ -150,6 +151,8 @@ public:
 
   bool isGOFF() const { return TypeID == ID_GOFF; }
 
+  bool isOMF() const { return TypeID == ID_OMF; }
+
   bool isMinidump() const { return TypeID == ID_Minidump; }
 
   bool isTapiFile() const { return TypeID == ID_TapiFile; }
@@ -173,6 +176,8 @@ public:
       return Triple::ELF;
     if (isGOFF())
       return Triple::GOFF;
+    if (isOMF())
+      return Triple::OMF;
     return Triple::UnknownObjectFormat;
   }
 

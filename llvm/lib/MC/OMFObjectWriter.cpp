@@ -14,12 +14,21 @@
 //
 //   _TEXT  class CODE   executable sections
 //   CONST  class DATA   read-only data
+//   XIB, XI, XIE        constructors: .init_array, .preinit_array, .ctors
+//   YIB, YI, YIE        destructors: .fini_array, .dtors
 //   _DATA  class DATA   writable data
 //   _BSS   class BSS    zero-initialized data (no LEDATA is written)
 //   STACK  class STACK  sections named .stack, combine type stack
 //
 // Every module defines _TEXT, CONST, _DATA and _BSS, even when empty, so
 // that linkers keep this order whatever module they see first.
+//
+// The constructor and destructor tables are arrays of near function pointers
+// in XI and YI (class DATA), between the empty XIB/XIE and YIB/YIE segments,
+// which the startup code defines (by naming sections XIB and so on) to label
+// the start and end of each table. A module that uses any of the six defines
+// them all, to keep them in order. Priorities are not kept: entries are in
+// link order.
 //
 // DGROUP holds CONST, _DATA, _BSS and STACK, and _TEXT as well for the tiny
 // memory model. Non-allocatable sections (debug info, notes) and unwind
@@ -57,7 +66,20 @@ MCOMFObjectTargetWriter::~MCOMFObjectTargetWriter() = default;
 
 namespace {
 
-enum SegmentKind { SK_Text, SK_Const, SK_Data, SK_Bss, SK_Stack, SK_Count };
+enum SegmentKind {
+  SK_Text,
+  SK_Const,
+  SK_InitBegin,
+  SK_Init,
+  SK_InitEnd,
+  SK_FiniBegin,
+  SK_Fini,
+  SK_FiniEnd,
+  SK_Data,
+  SK_Bss,
+  SK_Stack,
+  SK_Count
+};
 
 struct SegmentInfo {
   const char *Name;
@@ -67,6 +89,9 @@ struct SegmentInfo {
 
 const SegmentInfo Segments[SK_Count] = {
     {"_TEXT", "CODE", OMF::SC_Public}, {"CONST", "DATA", OMF::SC_Public},
+    {"XIB", "DATA", OMF::SC_Public},   {"XI", "DATA", OMF::SC_Public},
+    {"XIE", "DATA", OMF::SC_Public},   {"YIB", "DATA", OMF::SC_Public},
+    {"YI", "DATA", OMF::SC_Public},    {"YIE", "DATA", OMF::SC_Public},
     {"_DATA", "DATA", OMF::SC_Public}, {"_BSS", "BSS", OMF::SC_Public},
     {"STACK", "STACK", OMF::SC_Stack},
 };
@@ -205,6 +230,16 @@ OMFObjectWriter::classifySection(const MCSectionELF &Sec) const {
     return std::nullopt;
   if (Name == ".stack" || Name.starts_with(".stack."))
     return SK_Stack;
+  for (SegmentKind K : {SK_InitBegin, SK_InitEnd, SK_FiniBegin, SK_FiniEnd})
+    if (Name == Segments[K].Name)
+      return K;
+  auto IsTable = [&](StringRef Prefix) {
+    return Name == Prefix || Name.starts_with((Prefix + ".").str());
+  };
+  if (IsTable(".init_array") || IsTable(".preinit_array") || IsTable(".ctors"))
+    return SK_Init;
+  if (IsTable(".fini_array") || IsTable(".dtors"))
+    return SK_Fini;
   if (Flags & ELF::SHF_EXECINSTR)
     return SK_Text;
   if (Sec.getType() == ELF::SHT_NOBITS)
@@ -234,9 +269,19 @@ void OMFObjectWriter::executePostLayoutBinding() {
   // every module defines the usual segments, even empty, in the usual order
   // (as DOS compilers do). Then code, data and BSS stay in this order
   // whichever module comes first. STACK is only defined where it is used.
-  for (unsigned K = 0; K != SK_Count; ++K)
-    if (K != SK_Stack)
+  for (SegmentKind K : {SK_Text, SK_Const, SK_Data, SK_Bss})
+    Segs[K].Present = true;
+  // The constructor and destructor segments go together.
+  bool AnyTable = false;
+  for (unsigned K = SK_InitBegin; K <= SK_FiniEnd; ++K)
+    AnyTable |= Segs[K].Present;
+  // They are all word aligned, so that the linker leaves no padding
+  // between the begin label, the table and the end label.
+  if (AnyTable)
+    for (unsigned K = SK_InitBegin; K <= SK_FiniEnd; ++K) {
       Segs[K].Present = true;
+      Segs[K].MaxAlign = std::max(Segs[K].MaxAlign, Align(2));
+    }
 
   unsigned Index = 0;
   bool AnyInGroup = false;
@@ -437,6 +482,22 @@ void OMFObjectWriter::writeNamesAndSegments() {
 }
 
 void OMFObjectWriter::writeExternals() {
+  // OMF has no undefined weak symbols. A WKEXT comment makes a weak
+  // reference resolve to a default external when nothing defines it. The
+  // default here is __omf_weak_null. The startup code, which is linked
+  // first, defines it at offset 0 of _TEXT, so an undefined weak symbol has
+  // offset 0 as in ELF and can still be the target of a near call.
+  SmallVector<std::pair<unsigned, unsigned>, 4> Weak;
+  for (unsigned I = 0, E = Externals.size(); I != E; ++I) {
+    const auto *Sym = static_cast<const MCSymbolELF *>(Externals[I]);
+    if (Sym->isCommon() || Sym->getBinding() != ELF::STB_WEAK)
+      continue;
+    MCSymbol *Null = getContext().getOrCreateSymbol("__omf_weak_null");
+    if (Null == Sym || !Null->isUndefined())
+      continue;
+    Weak.push_back({I + 1, getExternalIndex(*Null)});
+  }
+
   // Externals are numbered in the order of the COMDEF and EXTDEF records.
   // Communal variables were numbered first, so their COMDEF records come
   // first too.
@@ -481,6 +542,25 @@ void OMFObjectWriter::writeExternals() {
   }
   Flush(ComDef);
   Flush(ExtDef);
+
+  if (Weak.empty())
+    return;
+  Record WkExt(OMF::COMENT);
+  auto StartWkExt = [&] {
+    WkExt.byte(0x80); // Attributes: no purge.
+    WkExt.byte(OMF::CC_WeakExtern);
+  };
+  StartWkExt();
+  for (auto [WeakIdx, DefaultIdx] : Weak) {
+    if (WkExt.size() + 4 > OMF::MaxRecordData) {
+      WkExt.write(OS);
+      WkExt.clear();
+      StartWkExt();
+    }
+    WkExt.index(WeakIdx);
+    WkExt.index(DefaultIdx);
+  }
+  WkExt.write(OS);
 }
 
 void OMFObjectWriter::writePublics() {

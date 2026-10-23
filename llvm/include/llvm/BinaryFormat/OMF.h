@@ -41,6 +41,7 @@ enum RecordType : uint8_t {
 /// Comment classes for COMENT records.
 enum CommentClass : uint8_t {
   CC_Translator = 0x00,
+  CC_WeakExtern = 0xA8, ///< WKEXT: weak external with a default resolution.
 };
 
 /// SEGDEF alignment field (the "A" in ACBP).

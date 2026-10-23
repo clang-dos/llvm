@@ -46,12 +46,15 @@ bool MCOMFStreamer::emitSymbolAttribute(MCSymbol *S, MCSymbolAttr Attribute) {
   switch (Attribute) {
   case MCSA_Global:
   case MCSA_Extern:
-  // OMF has weak externals (WKEXT), but they are not emitted yet. A weak
-  // symbol is treated as a strong one.
+    getAssembler().registerSymbol(*Symbol);
+    Symbol->setBinding(ELF::STB_GLOBAL);
+    return true;
+  // An undefined weak symbol becomes a WKEXT weak external. OMF has no weak
+  // definitions, so a defined weak symbol is a plain public.
   case MCSA_Weak:
   case MCSA_WeakReference:
     getAssembler().registerSymbol(*Symbol);
-    Symbol->setBinding(ELF::STB_GLOBAL);
+    Symbol->setBinding(ELF::STB_WEAK);
     return true;
   case MCSA_Local:
     getAssembler().registerSymbol(*Symbol);

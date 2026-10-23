@@ -2081,6 +2081,18 @@ TypeInfo ASTContext::getTypeInfo(const Type *T) const {
 /// FIXME: Pointers into different addr spaces could have different sizes and
 /// alignment requirements: getPointerInfo should take an AddrSpace, this
 /// should take a QualType, &c.
+/// The address space that decides the layout of a pointer to Pointee.
+/// Functions without an address space qualifier live in the target's
+/// function address space, which can differ from the default one (for
+/// example far functions on i8086).
+static LangAS getPointeeAddressSpaceForLayout(QualType Pointee,
+                                              const TargetInfo &Target) {
+  LangAS AS = Pointee.getAddressSpace();
+  if (AS == LangAS::Default && Pointee->isFunctionType())
+    return Target.getFunctionAddressSpace();
+  return AS;
+}
+
 TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
   uint64_t Width = 0;
   unsigned Align = 8;
@@ -2465,12 +2477,14 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
   case Type::RValueReference:
     // alignof and sizeof should never enter this code path here, so we go
     // the pointer route.
-    AS = cast<ReferenceType>(T)->getPointeeType().getAddressSpace();
+    AS = getPointeeAddressSpaceForLayout(
+        cast<ReferenceType>(T)->getPointeeType(), *Target);
     Width = Target->getPointerWidth(AS);
     Align = Target->getPointerAlign(AS);
     break;
   case Type::Pointer:
-    AS = cast<PointerType>(T)->getPointeeType().getAddressSpace();
+    AS = getPointeeAddressSpaceForLayout(
+        cast<PointerType>(T)->getPointeeType(), *Target);
     Width = Target->getPointerWidth(AS);
     Align = Target->getPointerAlign(AS);
     break;

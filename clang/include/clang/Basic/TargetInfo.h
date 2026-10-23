@@ -503,6 +503,10 @@ public:
                                         : getPointerAlignV(AddrSpace);
   }
 
+  /// The address space of functions, used for the layout of function
+  /// pointers. It matches the program address space of the data layout.
+  virtual LangAS getFunctionAddressSpace() const { return LangAS::Default; }
+
   /// Return the maximum width of pointers on this target.
   virtual uint64_t getMaxPointerWidth() const {
     return PointerWidth;

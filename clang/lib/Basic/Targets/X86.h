@@ -764,9 +764,8 @@ public:
   bool setABI(const std::string &Name) override {
     std::optional<llvm::X86::MemoryModel16> M =
         llvm::X86::parseMemoryModel16(Name);
-    // FIXME: Support the memory models with far code or data pointers.
-    if (!M || (*M != llvm::X86::MemoryModel16::Tiny &&
-               *M != llvm::X86::MemoryModel16::Small))
+    // FIXME: Support the memory models with far data pointers.
+    if (!M || llvm::X86::isFarDataModel16(*M))
       return false;
     Model = *M;
     resetDataLayout();
@@ -790,6 +789,26 @@ public:
 
   bool hasBitIntType() const override { return true; }
   size_t getMaxBitIntWidth() const override { return 64; }
+
+  // Functions are near (address space 4) or far (address space 5), as in
+  // the data layout's program address space.
+  LangAS getFunctionAddressSpace() const override {
+    return getLangASFromTargetAS(llvm::X86::isFarCodeModel16(Model) ? 5 : 4);
+  }
+
+  // Far and huge pointers (address spaces 2, 3 and 5) are segment:offset
+  // pairs. Every pointer is 2-byte aligned.
+  uint64_t getPointerWidthV(LangAS AS) const override {
+    switch (getTargetAddressSpace(AS)) {
+    case 2:
+    case 3:
+    case 5:
+      return 32;
+    default:
+      return PointerWidth;
+    }
+  }
+  uint64_t getPointerAlignV(LangAS) const override { return 16; }
 };
 
 // x86-64 generic target

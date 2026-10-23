@@ -916,6 +916,15 @@ set(avr_SOURCES
   ${GENERIC_SOURCES}
 )
 
+# 16-bit real-mode x86 (i8086), for DOS. Its registers are 16 bits wide, so
+# 32-bit shifts are calls too.
+set(i8086_SOURCES
+  ashlsi3.c
+  ashrsi3.c
+  lshrsi3.c
+  ${GENERIC_SOURCES}
+)
+
 # hexagon arch
 set(hexagon_SOURCES
   hexagon/common_entry_exit_abi1.S

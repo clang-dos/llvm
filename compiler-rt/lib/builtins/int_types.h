@@ -63,6 +63,37 @@ typedef union {
   } s;
 } udwords;
 
+// 32-bit integers as two 16-bit halves, for the 32-bit shift helpers of
+// targets with 16-bit registers.
+typedef int16_t hi_int;
+typedef uint16_t hu_int;
+
+typedef union {
+  si_int all;
+  struct {
+#if _YUGA_LITTLE_ENDIAN
+    hu_int low;
+    hi_int high;
+#else
+    hi_int high;
+    hu_int low;
+#endif // _YUGA_LITTLE_ENDIAN
+  } s;
+} swords;
+
+typedef union {
+  su_int all;
+  struct {
+#if _YUGA_LITTLE_ENDIAN
+    hu_int low;
+    hu_int high;
+#else
+    hu_int high;
+    hu_int low;
+#endif // _YUGA_LITTLE_ENDIAN
+  } s;
+} uswords;
+
 #if defined(__LP64__) || defined(__wasm__) || defined(__mips64) ||             \
     defined(__SIZEOF_INT128__) || defined(_WIN64)
 #define CRT_HAS_128BIT

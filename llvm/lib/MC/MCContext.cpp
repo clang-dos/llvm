@@ -113,8 +113,10 @@ MCContext::MCContext(const Triple &TheTriple, const MCAsmInfo &mai,
     Env = IsSPIRV;
     break;
   case Triple::OMF:
-    reportFatalUsageError("the OMF object file format is not supported yet; "
-                          "use an ELF triple such as i8086-pc-msdos-elf");
+    // OMF objects are built from ELF-style sections and symbols, which the
+    // OMF writer maps to segments.
+    Env = IsELF;
+    break;
   case Triple::UnknownObjectFormat:
     report_fatal_error("Cannot initialize MC for unknown object file format.");
     break;

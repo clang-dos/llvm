@@ -25,6 +25,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCLFIRewriter.h"
+#include "llvm/MC/MCOMFObjectWriter.h"
 #include "llvm/MC/MCObjectStreamer.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -1213,6 +1214,21 @@ public:
       : X86AsmBackend(CLOpts, T, STI), OSABI(OSABI) {}
 };
 
+/// Backend for 16-bit DOS OMF objects.
+class OMFX86AsmBackend : public X86AsmBackend {
+  bool CodeInDGROUP;
+
+public:
+  OMFX86AsmBackend(const X86MCOptions &CLOpts, const Target &T,
+                   const MCSubtargetInfo &STI, bool CodeInDGROUP)
+      : X86AsmBackend(CLOpts, T, STI), CodeInDGROUP(CodeInDGROUP) {}
+
+  std::unique_ptr<MCObjectTargetWriter>
+  createObjectTargetWriter() const override {
+    return std::make_unique<MCOMFObjectTargetWriter>(CodeInDGROUP);
+  }
+};
+
 class ELFX86_32AsmBackend : public ELFX86AsmBackend {
 public:
   using ELFX86AsmBackend::ELFX86AsmBackend;
@@ -1651,6 +1667,10 @@ MCAsmBackend *llvm::createX86_32AsmBackend(const Target &T,
 
   if (TheTriple.isOSWindows() && TheTriple.isOSBinFormatCOFF())
     return new WindowsX86AsmBackend(CLOpts, T, false, STI);
+
+  // The tiny memory model keeps code in DGROUP too.
+  if (TheTriple.isOSBinFormatOMF())
+    return new OMFX86AsmBackend(CLOpts, T, STI, Options.getABIName() == "tiny");
 
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
 

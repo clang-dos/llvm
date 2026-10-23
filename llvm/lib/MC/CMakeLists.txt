@@ -45,6 +45,7 @@ add_llvm_component_library(LLVMMC
   MCMachOStreamer.cpp
   MCMachObjectTargetWriter.cpp
   MCNullStreamer.cpp
+  MCOMFStreamer.cpp
   MCObjectFileInfo.cpp
   MCObjectStreamer.cpp
   MCObjectWriter.cpp
@@ -72,6 +73,7 @@ add_llvm_component_library(LLVMMC
   MCXCOFFObjectTargetWriter.cpp
   MCXCOFFStreamer.cpp
   MachObjectWriter.cpp
+  OMFObjectWriter.cpp
   SPIRVObjectWriter.cpp
   StringTableBuilder.cpp
   TargetRegistry.cpp

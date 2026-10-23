@@ -254,7 +254,8 @@ bool TargetMachine::shouldAssumeDSOLocal(const GlobalValue *GV) const {
     return true;
   }
 
-  if (TT.isOSBinFormatGOFF())
+  // DOS OMF programs are statically linked, with no shared objects.
+  if (TT.isOSBinFormatGOFF() || TT.isOSBinFormatOMF())
     return true;
 
   if (TT.isOSBinFormatMachO()) {

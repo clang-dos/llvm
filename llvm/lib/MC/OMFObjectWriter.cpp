@@ -57,6 +57,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/BinaryFormat/OMF.h"
 #include "llvm/MC/MCAssembler.h"
@@ -125,6 +126,8 @@ struct OMFFixup {
   bool IsExternal;
   SegmentKind TargetSeg;
   unsigned ExtIndex;
+
+  unsigned size() const { return LocType == OMF::LT_Pointer32 ? 4 : 2; }
 };
 
 /// One OMF record, assembled in memory and then written with its length and
@@ -192,6 +195,8 @@ class OMFObjectWriter final : public MCObjectWriter {
   SmallVector<Comdat, 0> Comdats;
   DenseMap<const MCSection *, unsigned> ComdatIndex;
   unsigned NumLNames = 0;
+  // The code segment's name: _TEXT, or <module>_TEXT with far code.
+  std::string TextName;
   unsigned DGroupIndex = 0;
 
   bool inDGROUP(SegmentKind K) const {
@@ -471,12 +476,22 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
                          "an addend");
     return;
   }
+  // A 4-byte reference is a far pointer, segment:offset.
+  bool FarPtr = false;
   switch (Fixup.getKind()) {
   case FK_Data_2:
     break;
+  case FK_Data_4:
+    if (PCRel || SegRef) {
+      Ctx.reportError(Loc, "a far pointer cannot be PC-relative or a segment "
+                           "reference");
+      return;
+    }
+    FarPtr = true;
+    break;
   default:
     Ctx.reportError(Loc, "unsupported relocation size in OMF object; only "
-                         "16-bit offsets are supported");
+                         "16-bit offsets and far pointers are supported");
     return;
   }
 
@@ -490,7 +505,9 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     R.Offset =
         SecIt->second.second + Asm->getFragmentOffset(F) + Fixup.getOffset();
   }
-  R.LocType = SegRef ? OMF::LT_Base16 : OMF::LT_Offset16;
+  R.LocType = FarPtr   ? OMF::LT_Pointer32
+              : SegRef ? OMF::LT_Base16
+                       : OMF::LT_Offset16;
   R.SegRelative = !PCRel;
 
   int64_t Addend = Target.getConstant();
@@ -536,6 +553,17 @@ void OMFObjectWriter::writeHeader() {
     Name = sys::path::filename(getFileNames().front().first).str();
   if (Name.size() > 255)
     Name.resize(255);
+
+  // With far calls, each module has a code segment of its own, named after
+  // the source file as other DOS compilers do (hello.c: hello_TEXT).
+  TextName = Segments[SK_Text].Name;
+  if (TargetObjectWriter->hasFarCode()) {
+    std::string Stem = sys::path::stem(Name).str();
+    for (char &C : Stem)
+      if (!isAlnum(C) && C != '_' && C != '$')
+        C = '_';
+    TextName = Stem.substr(0, 200) + "_TEXT";
+  }
   Record THeadr(OMF::THEADR);
   THeadr.name(Name);
   THeadr.write(OS);
@@ -566,7 +594,8 @@ void OMFObjectWriter::writeNamesAndSegments() {
   for (unsigned K = 0; K != SK_Count; ++K) {
     if (!Segs[K].Present)
       continue;
-    SegName[K] = NameIndex(Segments[K].Name);
+    SegName[K] = NameIndex(K == SK_Text ? StringRef(TextName)
+                                        : StringRef(Segments[K].Name));
     ClassName[K] = NameIndex(Segments[K].Class);
   }
   Record LNames(OMF::LNAMES);
@@ -813,7 +842,8 @@ void OMFObjectWriter::writeSegmentData(SegmentKind K) {
     if (R.Seg != K || R.Comdat >= 0)
       continue;
     SegFixups.push_back(&R);
-    InFixup[R.Offset] = InFixup[R.Offset + 1] = true;
+    for (unsigned I = 0; I != R.size(); ++I)
+      InFixup[R.Offset + I] = true;
   }
 
   // Runs of at least this many zero bytes with no fixup are not written;
@@ -848,7 +878,7 @@ void OMFObjectWriter::writeSegmentData(SegmentKind K) {
     }
     // Do not split a fixup field across two records.
     for (const OMFFixup *R : SegFixups)
-      if (R->Offset < End && R->Offset + 2 > End)
+      if (R->Offset < End && R->Offset + R->size() > End)
         End = R->Offset;
 
     Record LEData(OMF::LEDATA);
@@ -908,7 +938,7 @@ void OMFObjectWriter::writeComdats() {
       uint64_t End = std::min(Size, I + MaxChunk);
       // Do not split a fixup field across two records.
       for (const OMFFixup *R : CdFixups)
-        if (R->Offset < End && R->Offset + 2 > End)
+        if (R->Offset < End && R->Offset + R->size() > End)
           End = R->Offset;
       Record Cd(OMF::COMDAT);
       Cd.byte(I == 0 ? 0x00 : 0x01); // Continuation flag.

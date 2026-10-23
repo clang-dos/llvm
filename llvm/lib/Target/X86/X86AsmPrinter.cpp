@@ -118,6 +118,19 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   return false;
 }
 
+const MCExpr *X86AsmPrinter::lowerConstant(const Constant *CV,
+                                           const Constant *BaseCV,
+                                           uint64_t Offset) {
+  // i8086: a cast between near and far pointers to a symbol is the symbol
+  // itself. The width of the data directive decides what is stored: a
+  // 2-byte offset, or a 4-byte segment:offset far pointer.
+  if (TM.getTargetTriple().isX86_16())
+    if (const auto *CE = dyn_cast<ConstantExpr>(CV))
+      if (CE->getOpcode() == Instruction::AddrSpaceCast)
+        return lowerConstant(CE->getOperand(0), BaseCV, Offset);
+  return AsmPrinter::lowerConstant(CV, BaseCV, Offset);
+}
+
 void X86AsmPrinter::emitFunctionBodyStart() {
   if (EmitFPOData) {
     auto *XTS =

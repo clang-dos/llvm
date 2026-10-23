@@ -36,6 +36,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 
 using namespace llvm;
 
@@ -1225,15 +1226,17 @@ public:
 /// Backend for 16-bit DOS OMF objects.
 class OMFX86AsmBackend : public X86AsmBackend {
   bool CodeInDGROUP;
+  bool FarCode;
 
 public:
   OMFX86AsmBackend(const X86MCOptions &CLOpts, const Target &T,
-                   const MCSubtargetInfo &STI, bool CodeInDGROUP)
-      : X86AsmBackend(CLOpts, T, STI), CodeInDGROUP(CodeInDGROUP) {}
+                   const MCSubtargetInfo &STI, bool CodeInDGROUP, bool FarCode)
+      : X86AsmBackend(CLOpts, T, STI), CodeInDGROUP(CodeInDGROUP),
+        FarCode(FarCode) {}
 
   std::unique_ptr<MCObjectTargetWriter>
   createObjectTargetWriter() const override {
-    return std::make_unique<X86OMFObjectTargetWriter>(CodeInDGROUP);
+    return std::make_unique<X86OMFObjectTargetWriter>(CodeInDGROUP, FarCode);
   }
 };
 
@@ -1676,9 +1679,15 @@ MCAsmBackend *llvm::createX86_32AsmBackend(const Target &T,
   if (TheTriple.isOSWindows() && TheTriple.isOSBinFormatCOFF())
     return new WindowsX86AsmBackend(CLOpts, T, false, STI);
 
-  // The tiny memory model keeps code in DGROUP too.
-  if (TheTriple.isOSBinFormatOMF())
-    return new OMFX86AsmBackend(CLOpts, T, STI, Options.getABIName() == "tiny");
+  // The tiny memory model keeps code in DGROUP too. The models with far
+  // calls give each module its own code segment.
+  if (TheTriple.isOSBinFormatOMF()) {
+    std::optional<X86::MemoryModel16> Model =
+        X86::parseMemoryModel16(Options.getABIName());
+    bool FarCode = Model && X86::isFarCodeModel16(*Model);
+    return new OMFX86AsmBackend(CLOpts, T, STI, Options.getABIName() == "tiny",
+                                FarCode);
+  }
 
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
 

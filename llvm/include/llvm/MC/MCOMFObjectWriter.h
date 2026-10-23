@@ -25,16 +25,19 @@ class raw_pwrite_stream;
 
 class LLVM_ABI MCOMFObjectTargetWriter : public MCObjectTargetWriter {
   bool CodeInDGROUP;
+  bool FarCode;
 
 public:
   /// \p CodeInDGROUP puts _TEXT in DGROUP as well, as the tiny memory model
-  /// needs (CS = DS = SS).
-  explicit MCOMFObjectTargetWriter(bool CodeInDGROUP)
-      : CodeInDGROUP(CodeInDGROUP) {}
+  /// needs (CS = DS = SS). \p FarCode gives each module a code segment of
+  /// its own, <module>_TEXT, as the memory models with far calls do.
+  explicit MCOMFObjectTargetWriter(bool CodeInDGROUP, bool FarCode = false)
+      : CodeInDGROUP(CodeInDGROUP), FarCode(FarCode) {}
   ~MCOMFObjectTargetWriter() override;
 
   Triple::ObjectFormatType getFormat() const override { return Triple::OMF; }
   bool isCodeInDGROUP() const { return CodeInDGROUP; }
+  bool hasFarCode() const { return FarCode; }
 
   /// Whether \p Target asks for the segment (paragraph) of a symbol rather
   /// than its offset, as `sym@SEG` does on X86. Such a fixup is a base16

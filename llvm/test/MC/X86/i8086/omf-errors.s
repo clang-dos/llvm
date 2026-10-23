@@ -3,8 +3,10 @@
 	.text
 a:
 	nop
-# CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: unsupported relocation size in OMF object; only 16-bit offsets are supported
-	.long	ext
+# CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: unsupported relocation size in OMF object; only 16-bit offsets and far pointers are supported
+	.quad	ext
+# CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: a far pointer cannot be PC-relative or a segment reference
+	.long	ext@SEG
 # CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: unsupported relocation expression in OMF object
 	.short	b - a
 # CHECK: :[[#@LINE+1]]:{{[0-9]+}}: error: a segment reference cannot be PC-relative or have an addend

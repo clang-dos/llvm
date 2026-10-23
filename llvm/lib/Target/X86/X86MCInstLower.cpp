@@ -318,6 +318,9 @@ MCOperand X86MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
   case X86II::MO_ABS8:
     Specifier = X86::S_ABS8;
     break;
+  case X86II::MO_SEG:
+    Specifier = X86::S_SEG;
+    break;
   case X86II::MO_PIC_BASE_OFFSET:
   case X86II::MO_DARWIN_NONLAZY_PIC_BASE:
     Expr = MCSymbolRefExpr::create(Sym, Ctx);
@@ -2625,6 +2628,17 @@ void X86AsmPrinter::emitInstruction(const MachineInstr *MI) {
   case X86::SEH_BeginEpilogue: {
     assert(MF->hasWinCFI() && "SEH_ instruction in function without WinCFI?");
     EmitSEHInstruction(MI);
+    return;
+  }
+  case X86::FARCALL16sym: {
+    // lcall $sym@SEG, $sym
+    MachineOperand Seg = MI->getOperand(0);
+    Seg.setTargetFlags(X86II::MO_SEG);
+    EmitAndCountInstruction(
+        MCInstBuilder(X86::FARCALL16i)
+            .addOperand(
+                MCInstLowering.LowerMachineOperand(MI, MI->getOperand(0)))
+            .addOperand(MCInstLowering.LowerMachineOperand(MI, Seg)));
     return;
   }
   case X86::TRAP_8086: {

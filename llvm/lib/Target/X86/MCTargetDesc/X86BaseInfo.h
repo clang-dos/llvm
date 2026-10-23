@@ -487,6 +487,9 @@ enum TOF {
   /// reference is actually to the ".refptr.FOO" symbol.  This is used for
   /// stub symbols on windows.
   MO_COFFSTUB,
+  /// MO_SEG - On a symbol operand "FOO", this indicates that the immediate is
+  /// the DOS segment (paragraph) of FOO: FOO@SEG.
+  MO_SEG,
 };
 
 enum : uint64_t {

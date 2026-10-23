@@ -553,6 +553,12 @@ void initializeX86WinEHUnwindV3Pass(PassRegistry &);
 
 namespace X86AS {
 enum : unsigned {
+  // i8086: near and far data, huge data, near and far code.
+  NEAR_DATA = 1,
+  FAR_DATA = 2,
+  HUGE_DATA = 3,
+  NEAR_CODE = 4,
+  FAR_CODE = 5,
   GS = 256,
   FS = 257,
   SS = 258,

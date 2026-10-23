@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/TargetParser/Triple.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 #include <bitset>
 #include <climits>
 #include <cstdint>
@@ -321,6 +322,18 @@ public:
   /// (16-bit int and near pointers). Unlike the CODE16 environment, which
   /// keeps the 32-bit ABI and only changes the encoding.
   bool isTarget16BitABI() const { return TargetTriple.isX86_16(); }
+
+  /// The i8086 memory model (tiny, small, medium, compact, large, huge).
+  X86::MemoryModel16 getMemoryModel16() const;
+
+  /// Whether functions default to far (CALL FAR / RETF) in this model.
+  bool hasFarCode16() const {
+    return isTarget16BitABI() && X86::isFarCodeModel16(getMemoryModel16());
+  }
+
+  /// Whether F is an i8086 far function: it is called with CALL FAR and
+  /// returns with RETF, so its stack arguments start 2 bytes further up.
+  bool isFarFunction16(const Function &F) const;
 
   /// Whether instructions are limited to a CPU older than the 80386.
   bool isPre386() const { return !Has386; }

@@ -10880,8 +10880,13 @@ determineConstraints(ConstraintDecisionInfo &Info,
 
   // AsmNodeOperands - The operands for the ISD::INLINEASM node.
   Info.AsmNodeOperands.push_back(SDValue()); // reserve space for input chain
-  Info.AsmNodeOperands.push_back(DAG.getTargetExternalSymbol(
-      IA->getAsmString().data(), TLI.getProgramPointerTy(DAG.getDataLayout())));
+  // The asm string is never materialized. Its type only has to be legal:
+  // program pointers can be wider than a register (i8086 far code).
+  MVT AsmStrVT = TLI.getProgramPointerTy(DAG.getDataLayout());
+  if (!TLI.isTypeLegal(AsmStrVT))
+    AsmStrVT = TLI.getPointerTy(DAG.getDataLayout());
+  Info.AsmNodeOperands.push_back(
+      DAG.getTargetExternalSymbol(IA->getAsmString().data(), AsmStrVT));
 
   // If we have a !srcloc metadata node associated with it, we want to attach
   // this to the ultimately generated inline asm machineinstr.  To do this, we

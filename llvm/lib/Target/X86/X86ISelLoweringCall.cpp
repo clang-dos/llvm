@@ -1365,6 +1365,11 @@ X86TargetLowering::LowerMemArgument(SDValue Chain, CallingConv::ID CallConv,
   bool isImmutable = !AlwaysUseMutable && !Flags.isByVal();
   EVT ValVT;
   MVT PtrVT = getPointerTy(DAG.getDataLayout());
+  // A far return address takes 4 bytes instead of 2.
+  int64_t LocMemOffset =
+      VA.getLocMemOffset() +
+      (Subtarget.isFarFunction16(DAG.getMachineFunction().getFunction()) ? 2
+                                                                         : 0);
 
   // If value is passed by pointer we have address passed instead of the value
   // itself. No need to extend if the mask value and location share the same
@@ -1388,7 +1393,7 @@ X86TargetLowering::LowerMemArgument(SDValue Chain, CallingConv::ID CallConv,
 
     // FIXME: For now, all byval parameter objects are marked as aliasing. This
     // can be improved with deeper analysis.
-    int FI = MFI.CreateFixedObject(Bytes, VA.getLocMemOffset(), isImmutable,
+    int FI = MFI.CreateFixedObject(Bytes, LocMemOffset, isImmutable,
                                    /*isAliased=*/true);
     return DAG.getFrameIndex(FI, PtrVT);
   }
@@ -1413,7 +1418,7 @@ X86TargetLowering::LowerMemArgument(SDValue Chain, CallingConv::ID CallConv,
       // create a stack object for the entire argument value type and return a
       // load from our portion of it. This assumes that if the first part of an
       // argument is in memory, the rest will also be in memory.
-      int FI = MFI.CreateFixedObject(ArgVT.getStoreSize(), VA.getLocMemOffset(),
+      int FI = MFI.CreateFixedObject(ArgVT.getStoreSize(), LocMemOffset,
                                      /*IsImmutable=*/false);
       PartAddr = DAG.getFrameIndex(FI, PtrVT);
       return DAG.getLoad(
@@ -1425,7 +1430,7 @@ X86TargetLowering::LowerMemArgument(SDValue Chain, CallingConv::ID CallConv,
     // already a fixed stack object including this offset. If so, assume it
     // was created by the PartOffset == 0 branch above and create a load from
     // the appropriate offset into it.
-    int64_t PartBegin = VA.getLocMemOffset();
+    int64_t PartBegin = LocMemOffset;
     int64_t PartEnd = PartBegin + ValVT.getSizeInBits() / 8;
     int FI = MFI.getObjectIndexBegin();
     for (; MFI.isFixedObjectIndex(FI); ++FI) {
@@ -1445,7 +1450,7 @@ X86TargetLowering::LowerMemArgument(SDValue Chain, CallingConv::ID CallConv,
   }
 
   int FI = MFI.CreateFixedObject(ValVT.getSizeInBits() / 8,
-                                 VA.getLocMemOffset(), isImmutable);
+                                 LocMemOffset, isImmutable);
 
   // Set SExt or ZExt flag.
   if (VA.getLocInfo() == CCValAssign::ZExt) {
@@ -1571,7 +1576,9 @@ void VarArgsLoweringHelper::createVarArgAreaAndStoreRegisters(
   if (is64Bit() || (CallConv != CallingConv::X86_FastCall &&
                     CallConv != CallingConv::X86_ThisCall)) {
     FuncInfo->setVarArgsFrameIndex(
-        FrameInfo.CreateFixedObject(1, StackSize, true));
+        FrameInfo.CreateFixedObject(
+            1, StackSize + (Subtarget.isFarFunction16(TheFunction) ? 2 : 0),
+            true));
   }
 
   // 64-bit calling conventions support varargs and register parameters, so we
@@ -2150,6 +2157,40 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     isTailCall = false;
   }
 
+  // i8086 far calls (CALL FAR / RETF). Calls to far-code functions and
+  // runtime library calls in far-code models are direct far calls. An
+  // indirect call through a 32-bit function pointer is a far call through
+  // memory, so the pointer is stored to a stack slot first.
+  bool IsFarCall = false;
+  if (Subtarget.isTarget16BitABI()) {
+    if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
+      IsFarCall = G->getGlobal()->getAddressSpace() == X86AS::FAR_CODE;
+    else if (isa<ExternalSymbolSDNode>(Callee))
+      IsFarCall = Subtarget.hasFarCode16();
+    else
+      IsFarCall = Callee.getValueType() == MVT::i32;
+
+    if (IsFarCall) {
+      if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+        Callee = DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16,
+                                            G->getOffset());
+      } else if (auto *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+        Callee = DAG.getTargetExternalSymbol(S->getSymbol(), MVT::i16);
+      } else {
+        int FI = MF.getFrameInfo().CreateStackObject(4, Align(2), false);
+        SDValue Slot = DAG.getFrameIndex(FI, MVT::i16);
+        Chain = DAG.getStore(
+            Chain, dl, Callee, Slot,
+            MachinePointerInfo::getFixedStack(MF, FI));
+        Callee = Slot;
+      }
+    } else if (Callee.getValueType() == MVT::i32 &&
+               (isa<GlobalAddressSDNode>(Callee) ||
+                isa<ExternalSymbolSDNode>(Callee))) {
+      report_fatal_error("near call to a far function pointer");
+    }
+  }
+
   MachineFunction::CallSiteInfo CSInfo;
   if (CallConv == CallingConv::X86_INTR)
     report_fatal_error("X86 interrupts may not be called directly");
@@ -2608,6 +2649,8 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     // through a register, since the call instruction's 32-bit
     // pc-relative offset may not be large enough to hold the whole
     // address.
+  } else if (IsFarCall) {
+    // Already lowered above.
   } else if (Callee->getOpcode() == ISD::GlobalAddress ||
              Callee->getOpcode() == ISD::ExternalSymbol) {
     // Lower direct calls to global addresses and external symbols. Setting
@@ -2752,7 +2795,9 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // Returns a chain & a glue for retval copy to use.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
-  if (IsImpCall) {
+  if (IsFarCall) {
+    Chain = DAG.getNode(X86ISD::FARCALL, dl, NodeTys, Ops);
+  } else if (IsImpCall) {
     Chain = DAG.getNode(X86ISD::IMP_CALL, dl, NodeTys, Ops);
   } else if (IsNoTrackIndirectCall) {
     Chain = DAG.getNode(X86ISD::NT_CALL, dl, NodeTys, Ops);

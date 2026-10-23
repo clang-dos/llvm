@@ -174,6 +174,10 @@ public:
 
   void emitInstruction(const MachineInstr *MI) override;
 
+  const MCExpr *lowerConstant(const Constant *CV,
+                              const Constant *BaseCV = nullptr,
+                              uint64_t Offset = 0) override;
+
   void emitInlineAsmEnd(const MCSubtargetInfo &StartInfo,
                         const MCSubtargetInfo *EndInfo,
                         const MachineInstr *MI) override;

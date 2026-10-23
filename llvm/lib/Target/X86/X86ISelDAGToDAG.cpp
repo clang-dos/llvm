@@ -3275,6 +3275,7 @@ bool X86DAGToDAGISel::selectAddr(SDNode *Parent, SDValue N, SDValue &Base,
       Parent->getOpcode() != ISD::INTRINSIC_W_CHAIN && // unaligned loads, fixme
       Parent->getOpcode() != ISD::INTRINSIC_VOID && // nontemporal stores
       Parent->getOpcode() != X86ISD::TLSCALL && // Fixme
+      Parent->getOpcode() != X86ISD::FARCALL && // through a far pointer
       Parent->getOpcode() != X86ISD::ENQCMD && // Fixme
       Parent->getOpcode() != X86ISD::ENQCMDS && // Fixme
       Parent->getOpcode() != X86ISD::EH_SJLJ_SETJMP && // setjmp

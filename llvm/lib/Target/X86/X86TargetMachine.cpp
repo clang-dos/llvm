@@ -209,10 +209,12 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
   // On i8086 the target ABI name is the memory model.
   if (TT.isX86_16()) {
     StringRef ABIName = Options.MCOptions.getABIName();
-    if (!X86::parseMemoryModel16(ABIName))
+    std::optional<X86::MemoryModel16> Model = X86::parseMemoryModel16(ABIName);
+    if (!Model)
       reportFatalUsageError("unknown i8086 memory model '" + ABIName +
                             "'; expected tiny, small, medium, compact, "
                             "large or huge");
+    MemModel16 = *Model;
   }
 
   setMachineOutliner(true);

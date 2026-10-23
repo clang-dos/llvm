@@ -4330,6 +4330,15 @@ void X86InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Opc = Subtarget.hasBWI() ? (HasEGPR ? X86::KMOVQkk_EVEX : X86::KMOVQkk)
                              : (HasEGPR ? X86::KMOVWkk_EVEX : X86::KMOVWkk);
 
+  // Segment registers, copied through a 16-bit register (i8086 far
+  // pointers).
+  else if (X86::SEGMENT_REGRegClass.contains(SrcReg) &&
+           X86::GR16RegClass.contains(DestReg))
+    Opc = X86::MOV16rs;
+  else if (X86::GR16RegClass.contains(SrcReg) &&
+           X86::SEGMENT_REGRegClass.contains(DestReg))
+    Opc = X86::MOV16sr;
+
   if (!Opc)
     Opc = CopyToFromAsymmetricReg(DestReg, SrcReg, Subtarget);
 

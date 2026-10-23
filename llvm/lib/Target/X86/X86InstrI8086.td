@@ -92,3 +92,16 @@ def : Pat<(store (i16 relocImm16_su:$src), addr:$dst),
 let isBranch = 1, isTerminator = 1, Uses = [EFLAGS], SchedRW = [WriteJump],
     isCodeGenOnly = 1, hasSideEffects = 0 in
 def JCC_8086 : PseudoI<(outs), (ins brtarget16:$dst, ccode:$cond), []>;
+
+// Far calls, for the memory models with far code. FARCALL16sym becomes
+// FARCALL16i with the symbol's offset and segment (sym@SEG).
+let isCall = 1, Uses = [SP, SSP], isCodeGenOnly = 1 in
+def FARCALL16sym : PseudoI<(outs), (ins i16imm:$dst), []>,
+                   Sched<[WriteJump]>;
+let Predicates = [In16BitABIMode] in {
+let AddedComplexity = 20 in {
+def : Pat<(X86farcall (i16 tglobaladdr:$dst)), (FARCALL16sym tglobaladdr:$dst)>;
+def : Pat<(X86farcall (i16 texternalsym:$dst)), (FARCALL16sym texternalsym:$dst)>;
+}
+def : Pat<(X86farcall addr:$dst), (FARCALL16m addr:$dst)>;
+}

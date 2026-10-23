@@ -326,6 +326,14 @@ X86Subtarget &X86Subtarget::initializeSubtargetDependencies(StringRef CPU,
   return *this;
 }
 
+X86::MemoryModel16 X86Subtarget::getMemoryModel16() const {
+  return static_cast<const X86TargetMachine &>(TM).getMemoryModel16();
+}
+
+bool X86Subtarget::isFarFunction16(const Function &F) const {
+  return isTarget16BitABI() && F.getAddressSpace() == X86AS::FAR_CODE;
+}
+
 X86Subtarget::X86Subtarget(const Triple &TT, StringRef CPU, StringRef TuneCPU,
                            StringRef FS, const X86TargetMachine &TM,
                            MaybeAlign StackAlignOverride,

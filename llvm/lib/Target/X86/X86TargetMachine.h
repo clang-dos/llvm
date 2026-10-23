@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 #include <memory>
 #include <optional>
 
@@ -31,6 +32,8 @@ class X86TargetMachine final : public CodeGenTargetMachineImpl {
   mutable StringMap<std::unique_ptr<X86Subtarget>> SubtargetMap;
   // True if this is used in JIT.
   bool IsJIT;
+  // The i8086 memory model, from the target ABI name.
+  X86::MemoryModel16 MemModel16 = X86::MemoryModel16::Small;
 
   /// Reset internal state.
   void reset() override;
@@ -44,6 +47,9 @@ public:
   ~X86TargetMachine() override;
 
   const X86Options &getCLOpts() const { return CLOpts; }
+
+  /// The i8086 memory model. Only meaningful for the i8086 triple.
+  X86::MemoryModel16 getMemoryModel16() const { return MemModel16; }
 
   const X86Subtarget *getSubtargetImpl(const Function &F) const override;
   // DO NOT IMPLEMENT: There is no such thing as a valid default subtarget,

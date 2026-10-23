@@ -434,7 +434,16 @@ bool X86ExpandPseudoImpl::expandMI(MachineBasicBlock &MBB,
     // Adjust stack to erase error code
     int64_t StackAdj = MBBI->getOperand(0).getImm();
     MachineInstrBuilder MIB;
-    if (StackAdj == 0) {
+    bool FarRet = STI->isFarFunction16(MBB.getParent()->getFunction());
+    if (FarRet) {
+      // i8086 far function: RETF. LRET16 takes no variable operands, so the
+      // returned registers are added as implicit uses below.
+      assert(isUInt<16>(StackAdj) && "far return pops too much");
+      if (StackAdj == 0)
+        MIB = BuildMI(MBB, MBBI, DL, TII->get(X86::LRET16));
+      else
+        MIB = BuildMI(MBB, MBBI, DL, TII->get(X86::LRETI16)).addImm(StackAdj);
+    } else if (StackAdj == 0) {
       MIB = BuildMI(MBB, MBBI, DL,
                     TII->get(STI->is64Bit()            ? X86::RET64
                              : STI->isTarget16BitABI() ? X86::RET16
@@ -455,8 +464,12 @@ bool X86ExpandPseudoImpl::expandMI(MachineBasicBlock &MBB,
       BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH32r)).addReg(X86::ECX);
       MIB = BuildMI(MBB, MBBI, DL, TII->get(X86::RET32));
     }
-    for (unsigned I = 1, E = MBBI->getNumOperands(); I != E; ++I)
-      MIB.add(MBBI->getOperand(I));
+    for (unsigned I = 1, E = MBBI->getNumOperands(); I != E; ++I) {
+      MachineOperand MO = MBBI->getOperand(I);
+      if (FarRet && MO.isReg())
+        MO.setImplicit();
+      MIB.add(MO);
+    }
     MBB.erase(MBBI);
     return true;
   }

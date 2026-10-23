@@ -312,6 +312,12 @@ def X86imp_call  : SDNode<"X86ISD::IMP_CALL",     SDT_X86Call,
                          SDNPVariadic]>;
 
 // Same as call except it adds the NoTrack prefix.
+// A far call (CALLF) on i8086: to a symbol, or through a far pointer in
+// memory.
+def X86farcall : SDNode<"X86ISD::FARCALL", SDT_X86Call,
+                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                         SDNPVariadic]>;
+
 def X86NoTrackCall : SDNode<"X86ISD::NT_CALL", SDT_X86Call,
                             [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                              SDNPVariadic]>;

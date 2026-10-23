@@ -2906,6 +2906,9 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
          {ISD::ConstantPool, ISD::JumpTable, ISD::GlobalAddress,
           ISD::GlobalTLSAddress, ISD::ExternalSymbol, ISD::BlockAddress})
       setOperationAction(Op, MVT::i16, Custom);
+    // Far addresses of globals.
+    setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+    setOperationAction(ISD::ADDRSPACECAST, MVT::i16, Custom);
     // Shifts of i32 values use the generic expansion.
     setOperationAction({ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS},
                        MVT::i16, Expand);
@@ -19902,8 +19905,27 @@ SDValue X86TargetLowering::LowerGlobalOrExternal(SDValue Op, SelectionDAG &DAG,
   return Result;
 }
 
+/// i8086: the 32-bit far address (segment:offset) of a global. The low half
+/// is the offset within its segment and the high half the segment (a SEG
+/// fixup, filled in by the linker and the DOS loader).
+static SDValue lowerFarGlobalAddress16(GlobalAddressSDNode *G,
+                                       SelectionDAG &DAG) {
+  SDLoc dl(G);
+  SDValue Off = DAG.getNode(
+      X86ISD::Wrapper, dl, MVT::i16,
+      DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16,
+                                 G->getOffset()));
+  SDValue Seg = DAG.getNode(
+      X86ISD::Wrapper, dl, MVT::i16,
+      DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16, 0,
+                                 X86II::MO_SEG));
+  return DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i32, Off, Seg);
+}
+
 SDValue
 X86TargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const {
+  if (Subtarget.isTarget16BitABI() && Op.getValueType() == MVT::i32)
+    return lowerFarGlobalAddress16(cast<GlobalAddressSDNode>(Op), DAG);
   return LowerGlobalOrExternal(Op, DAG, /*ForCall=*/false, nullptr);
 }
 
@@ -34647,6 +34669,24 @@ static SDValue LowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) {
   assert(SrcAS != N->getDestAddressSpace() &&
          "addrspacecast must be between different address spaces");
 
+  // i8086 near (16-bit offset) and far (32-bit segment:offset) pointers.
+  // A far pointer becomes near by dropping its segment. A near pointer
+  // becomes far with the segment it is relative to: CS for code, DS (which
+  // is also SS) for data.
+  if (DAG.getSubtarget<X86Subtarget>().isTarget16BitABI()) {
+    EVT SrcVT = Src.getValueType();
+    if (DstVT == MVT::i16)
+      return SrcVT == MVT::i16 ? Src
+                               : DAG.getNode(ISD::TRUNCATE, dl, DstVT, Src);
+    assert(DstVT == MVT::i32 && "unexpected i8086 pointer type");
+    if (SrcVT == MVT::i32)
+      return Src;
+    unsigned SegReg = SrcAS == X86AS::NEAR_CODE ? X86::CS : X86::DS;
+    SDValue Seg =
+        DAG.getCopyFromReg(DAG.getEntryNode(), dl, SegReg, MVT::i16);
+    return DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i32, Src, Seg);
+  }
+
   if (SrcAS == X86AS::PTR32_UPTR && DstVT == MVT::i64) {
     Op = DAG.getNode(ISD::ZERO_EXTEND, dl, DstVT, Src);
   } else if (DstVT == MVT::i64) {
@@ -34914,8 +34954,9 @@ static SDValue LowerPARTIAL_REDUCE_MLA(SDValue Op,
 SDValue X86TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   // Before the 80386, a node with an i32 or wider operand is custom lowered
   // during type legalization. Leave it to the generic expansion, which splits
-  // it into 16-bit halves.
-  if (Subtarget.isPre386()) {
+  // it into 16-bit halves. Address space casts between near and far
+  // pointers are lowered here.
+  if (Subtarget.isPre386() && Op.getOpcode() != ISD::ADDRSPACECAST) {
     // Generic nodes have no EFLAGS operands, so an i32 here is an integer.
     auto IsIllegalInt = [&](EVT VT) {
       return VT.isScalarInteger() && !isTypeLegal(VT);
@@ -35123,6 +35164,17 @@ SDValue X86TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
 void X86TargetLowering::ReplaceNodeResults(SDNode *N,
                                            SmallVectorImpl<SDValue>&Results,
                                            SelectionDAG &DAG) const {
+  // An i8086 far address of a global (a far function pointer).
+  if (N->getOpcode() == ISD::GlobalAddress && Subtarget.isTarget16BitABI()) {
+    SDValue Pair = lowerFarGlobalAddress16(cast<GlobalAddressSDNode>(N), DAG);
+    Results.push_back(Pair);
+    return;
+  }
+  if (N->getOpcode() == ISD::ADDRSPACECAST && Subtarget.isTarget16BitABI()) {
+    Results.push_back(LowerADDRSPACECAST(SDValue(N, 0), DAG));
+    return;
+  }
+
   // Before the 80386, i32 and wider integers are split into 16-bit halves by
   // the generic type legalizer. The custom expansions below assume 32-bit
   // registers.

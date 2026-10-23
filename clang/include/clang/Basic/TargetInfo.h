@@ -507,6 +507,15 @@ public:
   /// pointers. It matches the program address space of the data layout.
   virtual LangAS getFunctionAddressSpace() const { return LangAS::Default; }
 
+  /// The address space of the pointer type of Itanium C++ ABI vtable
+  /// components, when it is not that of globals: a component must hold a
+  /// function pointer and a data pointer, which can differ in width (i8086
+  /// far code or far data). Narrower values are stored zero-extended and
+  /// read from the start of the component.
+  virtual std::optional<unsigned> getVTableComponentAddressSpace() const {
+    return std::nullopt;
+  }
+
   /// Return the maximum width of pointers on this target.
   virtual uint64_t getMaxPointerWidth() const {
     return PointerWidth;

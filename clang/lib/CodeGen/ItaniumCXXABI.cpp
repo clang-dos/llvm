@@ -613,11 +613,38 @@ CodeGen::CGCXXABI *CodeGen::CreateItaniumCXXABI(CodeGenModule &CGM) {
   llvm_unreachable("bad ABI kind");
 }
 
+/// The type of the first field of a member function pointer: a ptrdiff_t,
+/// or an integer as wide as a function pointer if that is wider.
+static llvm::IntegerType *getMemFnPtrTy(CodeGenModule &CGM) {
+  unsigned FnBits = CGM.getDataLayout().getPointerSizeInBits(
+      CGM.getDataLayout().getProgramAddressSpace());
+  if (FnBits > CGM.PtrDiffTy->getBitWidth())
+    return llvm::IntegerType::get(CGM.getLLVMContext(), FnBits);
+  return CGM.PtrDiffTy;
+}
+
+/// The pointer type of functions loaded from vtables and member function
+/// pointers.
+static llvm::PointerType *getVirtualFnPtrTy(CodeGenModule &CGM) {
+  if (CGM.getTarget().getVTableComponentAddressSpace())
+    return CGM.getFunctionPtrTy();
+  return CGM.DefaultPtrTy;
+}
+
+/// The pointer type of type_info arguments to the runtime library. Where
+/// vtable components hold default pointers (i8086), so does the library's
+/// interface, which can be wider than a pointer to a global.
+static llvm::PointerType *getTypeInfoArgPtrTy(CodeGenModule &CGM) {
+  if (CGM.getTarget().getVTableComponentAddressSpace())
+    return CGM.DefaultPtrTy;
+  return CGM.GlobalsInt8PtrTy;
+}
+
 llvm::Type *
 ItaniumCXXABI::ConvertMemberPointerType(const MemberPointerType *MPT) {
   if (MPT->isMemberDataPointer())
     return CGM.PtrDiffTy;
-  return llvm::StructType::get(CGM.PtrDiffTy, CGM.PtrDiffTy);
+  return llvm::StructType::get(getMemFnPtrTy(CGM), CGM.PtrDiffTy);
 }
 
 /// In the Itanium and ARM ABIs, method pointers have the form:
@@ -672,6 +699,7 @@ CGCallee ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
 
   // Load the function pointer.
   llvm::Value *FnAsInt = Builder.CreateExtractValue(MemFnPtr, 0, "memptr.ptr");
+  llvm::Constant *fnint_1 = llvm::ConstantInt::get(FnAsInt->getType(), 1);
 
   // If the LSB in the function pointer is 1, the function pointer points to
   // a virtual function.
@@ -679,7 +707,7 @@ CGCallee ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
   if (UseARMMethodPtrABI)
     IsVirtual = Builder.CreateAnd(RawAdj, ptrdiff_1);
   else
-    IsVirtual = Builder.CreateAnd(FnAsInt, ptrdiff_1);
+    IsVirtual = Builder.CreateAnd(FnAsInt, fnint_1);
   IsVirtual = Builder.CreateIsNotNull(IsVirtual, "memptr.isvirtual");
   Builder.CreateCondBr(IsVirtual, FnVirtual, FnNonVirtual);
 
@@ -701,7 +729,8 @@ CGCallee ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
   // we only pay attention to the low 32 bits of the offset.
   llvm::Value *VTableOffset = FnAsInt;
   if (!UseARMMethodPtrABI)
-    VTableOffset = Builder.CreateSub(VTableOffset, ptrdiff_1);
+    VTableOffset = Builder.CreateSub(VTableOffset, fnint_1);
+  VTableOffset = Builder.CreateTrunc(VTableOffset, CGM.PtrDiffTy);
   if (Use32BitVTableOffsetABI) {
     VTableOffset = Builder.CreateTrunc(VTableOffset, CGF.Int32Ty);
     VTableOffset = Builder.CreateZExt(VTableOffset, CGM.PtrDiffTy);
@@ -788,7 +817,8 @@ CGCallee ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
       } else {
         llvm::Value *VFPAddr =
             CGF.Builder.CreateGEP(CGF.Int8Ty, VTable, VTableOffset);
-        VirtualFn = CGF.Builder.CreateAlignedLoad(CGF.DefaultPtrTy, VFPAddr,
+        VirtualFn = CGF.Builder.CreateAlignedLoad(getVirtualFnPtrTy(CGM),
+                                                  VFPAddr,
                                                   CGF.getPointerAlign(),
                                                   "memptr.virtualfn");
       }
@@ -829,8 +859,8 @@ CGCallee ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
   // In the non-virtual path, the function pointer is actually a
   // function pointer.
   CGF.EmitBlock(FnNonVirtual);
-  llvm::Value *NonVirtualFn =
-      Builder.CreateIntToPtr(FnAsInt, CGF.DefaultPtrTy, "memptr.nonvirtualfn");
+  llvm::Value *NonVirtualFn = Builder.CreateIntToPtr(
+      FnAsInt, getVirtualFnPtrTy(CGM), "memptr.nonvirtualfn");
 
   // Check the function pointer if CFI on member function pointers is enabled.
   if (ShouldEmitCFICheck) {
@@ -870,7 +900,7 @@ CGCallee ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
 
   // We're done.
   CGF.EmitBlock(FnEnd);
-  llvm::PHINode *CalleePtr = Builder.CreatePHI(CGF.DefaultPtrTy, 2);
+  llvm::PHINode *CalleePtr = Builder.CreatePHI(getVirtualFnPtrTy(CGM), 2);
   CalleePtr->addIncoming(VirtualFn, FnVirtual);
   CalleePtr->addIncoming(NonVirtualFn, FnNonVirtual);
 
@@ -1143,8 +1173,8 @@ ItaniumCXXABI::EmitNullMemberPointer(const MemberPointerType *MPT) {
   if (MPT->isMemberDataPointer())
     return llvm::ConstantInt::get(CGM.PtrDiffTy, -1ULL, /*isSigned=*/true);
 
-  llvm::Constant *Zero = llvm::ConstantInt::get(CGM.PtrDiffTy, 0);
-  llvm::Constant *Values[2] = { Zero, Zero };
+  llvm::Constant *Values[2] = {llvm::ConstantInt::get(getMemFnPtrTy(CGM), 0),
+                               llvm::ConstantInt::get(CGM.PtrDiffTy, 0)};
   return llvm::ConstantStruct::getAnon(Values);
 }
 
@@ -1180,6 +1210,11 @@ llvm::Constant *ItaniumCXXABI::BuildMemberPointer(const CXXMethodDecl *MD,
       const ASTContext &Context = getContext();
       CharUnits PointerWidth = Context.toCharUnitsFromBits(
           Context.getTargetInfo().getPointerWidth(LangAS::Default));
+      if (Context.getTargetInfo().getVTableComponentAddressSpace())
+        PointerWidth = CharUnits::fromQuantity(
+            CGM.getDataLayout()
+                .getTypeAllocSize(CGM.getVTableComponentType())
+                .getFixedValue());
       VTableOffset = Index * PointerWidth.getQuantity();
     }
 
@@ -1221,7 +1256,7 @@ llvm::Constant *ItaniumCXXABI::BuildMemberPointer(const CXXMethodDecl *MD,
       //   For a virtual function, [the pointer field] is 1 plus the
       //   virtual table offset (in bytes) of the function,
       //   represented as a ptrdiff_t.
-      MemPtr[0] = llvm::ConstantInt::get(CGM.PtrDiffTy, VTableOffset + 1);
+      MemPtr[0] = llvm::ConstantInt::get(getMemFnPtrTy(CGM), VTableOffset + 1);
       MemPtr[1] = llvm::ConstantInt::get(CGM.PtrDiffTy,
                                          ThisAdjustment.getQuantity());
     }
@@ -1239,7 +1274,7 @@ llvm::Constant *ItaniumCXXABI::BuildMemberPointer(const CXXMethodDecl *MD,
     }
     llvm::Constant *addr = CGM.getMemberFunctionPointer(MD, Ty);
 
-    MemPtr[0] = llvm::ConstantExpr::getPtrToInt(addr, CGM.PtrDiffTy);
+    MemPtr[0] = llvm::ConstantExpr::getPtrToInt(addr, getMemFnPtrTy(CGM));
     MemPtr[1] = llvm::ConstantInt::get(CGM.PtrDiffTy,
                                        (UseARMMethodPtrABI ? 2 : 1) *
                                        ThisAdjustment.getQuantity());
@@ -1472,11 +1507,19 @@ static llvm::FunctionCallee getAllocateExceptionFn(CodeGenModule &CGM) {
   return CGM.CreateRuntimeFunction(FTy, "__cxa_allocate_exception");
 }
 
+/// The pointer type of __cxa_throw's destructor argument.
+static llvm::PointerType *getThrowDtorPtrTy(CodeGenModule &CGM) {
+  if (CGM.getTarget().getVTableComponentAddressSpace())
+    return CGM.getFunctionPtrTy();
+  return CGM.Int8PtrTy;
+}
+
 static llvm::FunctionCallee getThrowFn(CodeGenModule &CGM) {
   // void __cxa_throw(void *thrown_exception, std::type_info *tinfo,
   //                  void (*dest) (void *));
 
-  llvm::Type *Args[3] = { CGM.Int8PtrTy, CGM.GlobalsInt8PtrTy, CGM.Int8PtrTy };
+  llvm::Type *Args[3] = {CGM.Int8PtrTy, getTypeInfoArgPtrTy(CGM),
+                         getThrowDtorPtrTy(CGM)};
   llvm::FunctionType *FTy =
     llvm::FunctionType::get(CGM.VoidTy, Args, /*isVarArg=*/false);
 
@@ -1517,7 +1560,12 @@ void ItaniumCXXABI::emitThrow(CodeGenFunction &CGF, const CXXThrowExpr *E) {
     Dtor = CGM.getAddrOfCXXStructor(GlobalDecl(DtorD, Dtor_Complete));
     Dtor = CGM.getFunctionPointer(Dtor, DtorTy);
   }
-  if (!Dtor) Dtor = llvm::Constant::getNullValue(CGM.Int8PtrTy);
+  if (!Dtor)
+    Dtor = llvm::Constant::getNullValue(getThrowDtorPtrTy(CGM));
+  else
+    Dtor = llvm::ConstantExpr::getPointerCast(Dtor, getThrowDtorPtrTy(CGM));
+  TypeInfo =
+      llvm::ConstantExpr::getPointerCast(TypeInfo, getTypeInfoArgPtrTy(CGM));
 
   llvm::Value *args[] = { ExceptionPtr, TypeInfo, Dtor };
   CGF.EmitNoreturnRuntimeCallOrInvoke(getThrowFn(CGM), args);
@@ -1530,7 +1578,7 @@ static llvm::FunctionCallee getItaniumDynamicCastFn(CodeGenFunction &CGF) {
   //                      std::ptrdiff_t src2dst_offset);
 
   llvm::Type *Int8PtrTy = CGF.Int8PtrTy;
-  llvm::Type *GlobInt8PtrTy = CGF.GlobalsInt8PtrTy;
+  llvm::Type *GlobInt8PtrTy = getTypeInfoArgPtrTy(CGF.CGM);
   llvm::Type *PtrDiffTy =
     CGF.ConvertType(CGF.getContext().getPointerDiffType());
 
@@ -1588,8 +1636,10 @@ llvm::Value *ItaniumCXXABI::EmitTypeid(CodeGenFunction &CGF,
         {Value, llvm::ConstantInt::getSigned(CGM.Int32Ty, -4)});
   } else {
     // Load the type info.
-    Value =
-        CGF.Builder.CreateConstInBoundsGEP1_64(StdTypeInfoPtrTy, Value, -1ULL);
+    llvm::Type *SlotTy = StdTypeInfoPtrTy;
+    if (CGM.getTarget().getVTableComponentAddressSpace())
+      SlotTy = CGM.getVTableComponentType();
+    Value = CGF.Builder.CreateConstInBoundsGEP1_64(SlotTy, Value, -1ULL);
   }
   return CGF.Builder.CreateAlignedLoad(StdTypeInfoPtrTy, Value,
                                        CGF.getPointerAlign());
@@ -1634,6 +1684,8 @@ llvm::Value *ItaniumCXXABI::emitDynamicCastCall(
     (void)Vtable;
   }
 
+  SrcRTTI = CGF.Builder.CreatePointerCast(SrcRTTI, getTypeInfoArgPtrTy(CGM));
+  DestRTTI = CGF.Builder.CreatePointerCast(DestRTTI, getTypeInfoArgPtrTy(CGM));
   llvm::Value *args[] = {Value, SrcRTTI, DestRTTI, OffsetHint};
   Value = CGF.EmitNounwindRuntimeCall(getItaniumDynamicCastFn(CGF), args);
 
@@ -1809,9 +1861,12 @@ llvm::Value *ItaniumCXXABI::emitDynamicCastToVoid(CodeGenFunction &CGF,
     llvm::Value *VTable =
         CGF.GetVTablePtr(ThisAddr, CGF.DefaultPtrTy, ClassDecl);
 
-    // Get the offset-to-top from the vtable.
-    OffsetToTop =
-        CGF.Builder.CreateConstInBoundsGEP1_64(PtrDiffLTy, VTable, -2ULL);
+    // Get the offset-to-top from the vtable. A component can be wider than
+    // ptrdiff_t, which is then at its start.
+    llvm::Type *SlotTy = PtrDiffLTy;
+    if (CGM.getTarget().getVTableComponentAddressSpace())
+      SlotTy = CGM.getVTableComponentType();
+    OffsetToTop = CGF.Builder.CreateConstInBoundsGEP1_64(SlotTy, VTable, -2ULL);
     OffsetToTop = CGF.Builder.CreateAlignedLoad(
         PtrDiffLTy, OffsetToTop, CGF.getPointerAlign(), "offset.to.top");
   }
@@ -2274,10 +2329,15 @@ CGCallee ItaniumCXXABI::getVirtualFunctionPointer(CodeGenFunction &CGF,
           CGM.getIntrinsic(llvm::Intrinsic::load_relative, {CGM.Int32Ty}),
           {VTable, llvm::ConstantInt::get(CGM.Int32Ty, ByteOffset)});
     } else {
+      // A component can be wider than a function pointer, which is then
+      // at its start.
+      bool OwnComponentTy =
+          CGM.getTarget().getVTableComponentAddressSpace().has_value();
       VTableSlotPtr = CGF.Builder.CreateConstInBoundsGEP1_64(
-          PtrTy, VTable, VTableIndex, "vfn");
-      VFuncLoad = CGF.Builder.CreateAlignedLoad(PtrTy, VTableSlotPtr,
-                                                CGF.getPointerAlign());
+          OwnComponentTy ? ComponentTy : PtrTy, VTable, VTableIndex, "vfn");
+      VFuncLoad = CGF.Builder.CreateAlignedLoad(
+          OwnComponentTy ? CGM.ProgramPtrTy : PtrTy, VTableSlotPtr,
+          CGF.getPointerAlign());
     }
 
     // Add !invariant.load md to virtual function load to indicate that
@@ -2914,6 +2974,12 @@ static void emitGlobalDtorWithCXAAtExit(CodeGenFunction &CGF,
   // We're assuming that the destructor function is something we can
   // reasonably call with the default CC.
   llvm::Type *dtorTy = CGF.DefaultPtrTy;
+  // On a target whose function pointers are not in the default address
+  // space (i8086), the destructor is passed as a function pointer.
+  bool OwnFnPtrTy = CGF.CGM.getTarget().getFunctionAddressSpace() !=
+                    LangAS::Default;
+  if (OwnFnPtrTy)
+    dtorTy = CGF.CGM.getFunctionPtrTy();
 
   // Preserve address space of addr.
   auto AddrAS = addr ? addr->getType()->getPointerAddressSpace() : 0;
@@ -2945,7 +3011,10 @@ static void emitGlobalDtorWithCXAAtExit(CodeGenFunction &CGF,
   dtorCallee =
       CGF.CGM.getFunctionPointer(cast<llvm::Constant>(dtorCallee), fnType);
 
-  if (dtorCallee->getType()->getPointerAddressSpace() != AddrAS)
+  if (OwnFnPtrTy) {
+    if (dtorCallee->getType() != dtorTy)
+      dtorCallee = CGF.performAddrSpaceCast(dtorCallee, dtorTy);
+  } else if (dtorCallee->getType()->getPointerAddressSpace() != AddrAS)
     dtorCallee = CGF.performAddrSpaceCast(dtorCallee, AddrPtrTy);
 
   if (!addr)
@@ -3509,6 +3578,19 @@ class ItaniumRTTIBuilder {
   /// Fields - The fields of the RTTI descriptor currently being built.
   SmallVector<llvm::Constant *, 16> Fields;
 
+  /// A pointer field of an RTTI descriptor, in the address space of C++ data
+  /// pointers, for a target whose vtable components have their own type
+  /// (i8086 far data).
+  llvm::Constant *asField(llvm::Constant *C, llvm::PointerType *Ty) {
+    if (!CGM.getTarget().getVTableComponentAddressSpace() ||
+        C->getType() == Ty)
+      return C;
+    return llvm::ConstantExpr::getAddrSpaceCast(C, Ty);
+  }
+  llvm::Constant *asDataPointer(llvm::Constant *C) {
+    return asField(C, CGM.DefaultPtrTy);
+  }
+
   /// GetAddrOfTypeName - Returns the mangled type name of the given type.
   llvm::GlobalVariable *
   GetAddrOfTypeName(QualType Ty, llvm::GlobalVariable::LinkageTypes Linkage);
@@ -3813,9 +3895,12 @@ void ItaniumRTTIBuilder::BuildVTablePointer(const Type *Ty,
     llvm::Constant *Eight = llvm::ConstantInt::get(CGM.Int32Ty, 8);
     VTable = llvm::ConstantExpr::getInBoundsPtrAdd(VTable, Eight);
   } else {
+    llvm::Type *ComponentTy = CGM.GlobalsInt8PtrTy;
+    if (CGM.getTarget().getVTableComponentAddressSpace())
+      ComponentTy = CGM.getVTableComponentType();
     llvm::Constant *Two = llvm::ConstantInt::get(PtrDiffTy, 2);
     VTable = llvm::ConstantExpr::getGetElementPtr(
-        CGM.getDataLayout(), CGM.GlobalsInt8PtrTy, VTable, Two,
+        CGM.getDataLayout(), ComponentTy, VTable, Two,
         llvm::GEPNoWrapFlags::inBounds());
   }
 
@@ -3826,7 +3911,7 @@ void ItaniumRTTIBuilder::BuildVTablePointer(const Type *Ty,
         Schema.isAddressDiscriminated() ? StorageAddress : nullptr,
         GlobalDecl(), QualType(Ty, 0));
 
-  Fields.push_back(VTable);
+  Fields.push_back(asField(VTable, CGM.VTablePtrTy));
 }
 
 /// Return the linkage that the type info and type info name constants
@@ -4000,7 +4085,7 @@ llvm::Constant *ItaniumRTTIBuilder::BuildTypeInfo(
   } else {
     TypeNameField = TypeName;
   }
-  Fields.push_back(TypeNameField);
+  Fields.push_back(asDataPointer(TypeNameField));
 
   switch (Ty->getTypeClass()) {
 #define TYPE(Class, Base)
@@ -4168,7 +4253,7 @@ void ItaniumRTTIBuilder::BuildObjCObjectTypeInfo(const ObjCObjectType *OT) {
   // Everything else is single inheritance.
   llvm::Constant *BaseTypeInfo =
       ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(SuperTy);
-  Fields.push_back(BaseTypeInfo);
+  Fields.push_back(asDataPointer(BaseTypeInfo));
 }
 
 /// BuildSIClassTypeInfo - Build an abi::__si_class_type_info, used for single
@@ -4179,7 +4264,7 @@ void ItaniumRTTIBuilder::BuildSIClassTypeInfo(const CXXRecordDecl *RD) {
   // type_info structure for the base type,
   llvm::Constant *BaseTypeInfo =
     ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(RD->bases_begin()->getType());
-  Fields.push_back(BaseTypeInfo);
+  Fields.push_back(asDataPointer(BaseTypeInfo));
 }
 
 /// BuildVMIClassTypeInfo - Build an abi::__vmi_class_type_info, used for
@@ -4237,7 +4322,8 @@ void ItaniumRTTIBuilder::BuildVMIClassTypeInfo(const CXXRecordDecl *RD) {
 
   for (const auto &Base : RD->bases()) {
     // The __base_type member points to the RTTI for the base type.
-    Fields.push_back(ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(Base.getType()));
+    Fields.push_back(
+        asDataPointer(ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(Base.getType())));
 
     auto *BaseDecl = Base.getType()->castAsCXXRecordDecl();
     int64_t OffsetFlags = 0;
@@ -4285,7 +4371,7 @@ void ItaniumRTTIBuilder::BuildPointerTypeInfo(QualType PointeeTy) {
   //  unqualified type being pointed to.
   llvm::Constant *PointeeTypeInfo =
       ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(PointeeTy);
-  Fields.push_back(PointeeTypeInfo);
+  Fields.push_back(asDataPointer(PointeeTypeInfo));
 }
 
 /// BuildPointerToMemberTypeInfo - Build an abi::__pointer_to_member_type_info
@@ -4312,14 +4398,14 @@ ItaniumRTTIBuilder::BuildPointerToMemberTypeInfo(const MemberPointerType *Ty) {
   //   unqualified type being pointed to.
   llvm::Constant *PointeeTypeInfo =
       ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(PointeeTy);
-  Fields.push_back(PointeeTypeInfo);
+  Fields.push_back(asDataPointer(PointeeTypeInfo));
 
   // Itanium C++ ABI 2.9.5p9:
   //   __context is a pointer to an abi::__class_type_info corresponding to the
   //   class type containing the member pointed to
   //   (e.g., the "A" in "int A::*").
   CanQualType T = CGM.getContext().getCanonicalTagType(RD);
-  Fields.push_back(ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(T));
+  Fields.push_back(asDataPointer(ItaniumRTTIBuilder(CXXABI).BuildTypeInfo(T)));
 }
 
 llvm::Constant *ItaniumCXXABI::getAddrOfRTTIDescriptor(QualType Ty) {

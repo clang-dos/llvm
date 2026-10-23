@@ -670,10 +670,13 @@ CharUnits VCallAndVBaseOffsetBuilder::getCurrentOffsetOffset() const {
 
   // Under the relative ABI, the offset widths are 32-bit ints instead of
   // pointer widths.
+  const TargetInfo &Target = Context.getTargetInfo();
+  std::optional<unsigned> ComponentAS = Target.getVTableComponentAddressSpace();
   CharUnits OffsetWidth = Context.toCharUnitsFromBits(
-      Context.getLangOpts().RelativeCXXABIVTables
-          ? 32
-          : Context.getTargetInfo().getPointerWidth(LangAS::Default));
+      Context.getLangOpts().RelativeCXXABIVTables ? 32
+      : ComponentAS
+          ? Target.getPointerWidth(getLangASFromTargetAS(*ComponentAS))
+          : Target.getPointerWidth(LangAS::Default));
   CharUnits OffsetOffset = OffsetWidth * OffsetIndex;
 
   return OffsetOffset;

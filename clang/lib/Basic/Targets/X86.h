@@ -824,6 +824,16 @@ public:
     return getLangASFromTargetAS(llvm::X86::isFarCodeModel16(Model) ? 5 : 4);
   }
 
+  // Vtable components hold far function pointers (address space 5) when
+  // code is far, and far data pointers (address space 2) when only data is.
+  std::optional<unsigned> getVTableComponentAddressSpace() const override {
+    if (llvm::X86::isFarCodeModel16(Model))
+      return 5;
+    if (llvm::X86::isFarDataModel16(Model))
+      return 2;
+    return std::nullopt;
+  }
+
   // Far and huge pointers (address spaces 2, 3 and 5) are segment:offset
   // pairs. Every pointer is 2-byte aligned.
   uint64_t getPointerWidthV(LangAS AS) const override {

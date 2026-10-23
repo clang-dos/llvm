@@ -599,6 +599,11 @@ CodeGenModule::CodeGenModule(ASTContext &C,
       llvm::PointerType::get(LLVMContext, DL.getDefaultGlobalsAddressSpace());
   ProgramPtrTy =
       llvm::PointerType::get(LLVMContext, DL.getProgramAddressSpace());
+  // The vtable pointer is a global's address, unless vtable components have
+  // their own type: then it is a default (C++ data) pointer.
+  VTablePtrTy = C.getTargetInfo().getVTableComponentAddressSpace()
+                    ? DefaultPtrTy
+                    : GlobalsInt8PtrTy;
   ConstGlobalsPtrTy = llvm::PointerType::get(
       LLVMContext, C.getTargetAddressSpace(GetGlobalConstantAddressSpace()));
 

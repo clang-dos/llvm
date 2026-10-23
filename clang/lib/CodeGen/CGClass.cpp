@@ -2618,11 +2618,12 @@ void CodeGenFunction::InitializeVTablePointer(const VPtr &Vptr) {
 
   // Finally, store the address point. Use the same LLVM types as the field to
   // support optimization.
-  unsigned GlobalsAS = CGM.getDataLayout().getDefaultGlobalsAddressSpace();
-  llvm::Type *PtrTy = llvm::PointerType::get(CGM.getLLVMContext(), GlobalsAS);
+  llvm::Type *PtrTy = CGM.VTablePtrTy;
   // vtable field is derived from `this` pointer, therefore they should be in
   // the same addr space. Note that this might not be LLVM address space 0.
   VTableField = VTableField.withElementType(PtrTy);
+  if (VTableAddressPoint->getType() != PtrTy)
+    VTableAddressPoint = Builder.CreateAddrSpaceCast(VTableAddressPoint, PtrTy);
 
   if (auto AuthenticationInfo = CGM.getVTablePointerAuthInfo(
           this, Vptr.Base.getBase(), VTableField.emitRawPointer(*this)))
@@ -2721,9 +2722,16 @@ void CodeGenFunction::InitializeVTablePointers(const CXXRecordDecl *RD) {
 llvm::Value *CodeGenFunction::GetVTablePtr(Address This, llvm::Type *VTableTy,
                                            const CXXRecordDecl *RD,
                                            VTableAuthMode AuthMode) {
-  Address VTablePtrSrc = This.withElementType(VTableTy);
+  // The vtable pointer field has its own type, which can be wider than
+  // VTableTy (i8086 far data); the vtables themselves are in VTableTy's
+  // address space.
+  llvm::Type *FieldTy = VTableTy;
+  if (VTableTy->isPointerTy() &&
+      CGM.getTarget().getVTableComponentAddressSpace())
+    FieldTy = CGM.VTablePtrTy;
+  Address VTablePtrSrc = This.withElementType(FieldTy);
   llvm::Instruction *VTable = Builder.CreateLoad(VTablePtrSrc, "vtable");
-  TBAAAccessInfo TBAAInfo = CGM.getTBAAVTablePtrAccessInfo(VTableTy);
+  TBAAAccessInfo TBAAInfo = CGM.getTBAAVTablePtrAccessInfo(FieldTy);
   CGM.DecorateInstructionWithTBAA(VTable, TBAAInfo);
 
   if (auto AuthenticationInfo =
@@ -2752,6 +2760,8 @@ llvm::Value *CodeGenFunction::GetVTablePtr(Address This, llvm::Type *VTableTy,
       CGM.getCodeGenOpts().StrictVTablePointers)
     CGM.DecorateInstructionWithInvariantGroup(VTable, RD);
 
+  if (FieldTy != VTableTy)
+    return Builder.CreateAddrSpaceCast(VTable, VTableTy);
   return VTable;
 }
 

@@ -736,7 +736,19 @@ void CodeGenVTables::addRelativeComponent(ConstantArrayBuilder &builder,
 llvm::Type *CodeGenModule::getVTableComponentType() const {
   if (getLangOpts().RelativeCXXABIVTables)
     return Int32Ty;
+  if (std::optional<unsigned> AS =
+          getTarget().getVTableComponentAddressSpace())
+    return llvm::PointerType::get(GlobalsInt8PtrTy->getContext(), *AS);
   return GlobalsInt8PtrTy;
+}
+
+/// A pointer as a vtable component: cast to the component type.
+static llvm::Constant *castToVTableComponent(CodeGenModule &CGM,
+                                             llvm::Constant *C) {
+  llvm::Type *Ty = CGM.getVTableComponentType();
+  if (C->getType() == Ty || !C->getType()->isPointerTy())
+    return C;
+  return llvm::ConstantExpr::getAddrSpaceCast(C, Ty);
 }
 
 llvm::Type *CodeGenVTables::getVTableComponentType() const {
@@ -746,9 +758,14 @@ llvm::Type *CodeGenVTables::getVTableComponentType() const {
 static void AddPointerLayoutOffset(const CodeGenModule &CGM,
                                    ConstantArrayBuilder &builder,
                                    CharUnits offset) {
+  // The offset is a ptrdiff_t, sign-extended to the width of the component.
+  llvm::Type *ComponentTy = CGM.getVTableComponentType();
+  llvm::Type *IntTy = CGM.getDataLayout().getIntPtrType(ComponentTy);
+  if (IntTy->getIntegerBitWidth() < CGM.PtrDiffTy->getIntegerBitWidth())
+    IntTy = CGM.PtrDiffTy;
   builder.add(llvm::ConstantExpr::getIntToPtr(
-      llvm::ConstantInt::getSigned(CGM.PtrDiffTy, offset.getQuantity()),
-      CGM.GlobalsInt8PtrTy));
+      llvm::ConstantInt::getSigned(IntTy, offset.getQuantity()),
+      ComponentTy));
 }
 
 static void AddRelativeLayoutOffset(const CodeGenModule &CGM,
@@ -786,7 +803,7 @@ void CodeGenVTables::addVTableComponent(ConstantArrayBuilder &builder,
                                   vtableHasLocalLinkage,
                                   /*isCompleteDtor=*/false);
     else
-      return builder.add(rtti);
+      return builder.add(castToVTableComponent(CGM, rtti));
 
   case VTableComponent::CK_FunctionPointer:
   case VTableComponent::CK_CompleteDtorPointer:
@@ -814,7 +831,7 @@ void CodeGenVTables::addVTableComponent(ConstantArrayBuilder &builder,
         if (IsThunk)
           nextVTableThunkIndex++;
         return builder.add(
-            llvm::ConstantExpr::getNullValue(CGM.GlobalsInt8PtrTy));
+            llvm::ConstantExpr::getNullValue(CGM.getVTableComponentType()));
       }
       // Method is acceptable, continue processing as usual.
     }
@@ -890,12 +907,7 @@ void CodeGenVTables::addVTableComponent(ConstantArrayBuilder &builder,
       //       address space, rather than the global one, even though they are
       //       globals;  fixing said issue might be intrusive, and will be done
       //       later.
-      unsigned FnAS = fnPtr->getType()->getPointerAddressSpace();
-      unsigned GVAS = CGM.GlobalsInt8PtrTy->getPointerAddressSpace();
-
-      if (FnAS != GVAS)
-        fnPtr =
-            llvm::ConstantExpr::getAddrSpaceCast(fnPtr, CGM.GlobalsInt8PtrTy);
+      fnPtr = castToVTableComponent(CGM, fnPtr);
       if (const auto &Schema =
           CGM.getCodeGenOpts().PointerAuth.CXXVirtualFunctionPointers)
         return builder.addSignedPointer(fnPtr, Schema, GD, QualType());
@@ -907,7 +919,8 @@ void CodeGenVTables::addVTableComponent(ConstantArrayBuilder &builder,
     if (RelativeCXXABIVTables)
       return builder.add(llvm::ConstantExpr::getNullValue(CGM.Int32Ty));
     else
-      return builder.addNullPointer(CGM.GlobalsInt8PtrTy);
+      return builder.addNullPointer(
+          cast<llvm::PointerType>(CGM.getVTableComponentType()));
   }
 
   llvm_unreachable("Unexpected vtable component kind");

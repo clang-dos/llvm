@@ -193,8 +193,12 @@ public:
     MPI.Width = Target.getTypeWidth(PtrDiff);
     MPI.Align = Target.getTypeAlign(PtrDiff);
     MPI.HasPadding = false;
+    // A member function pointer is a function pointer (or vtable offset)
+    // and a this-adjustment. The first field is a ptrdiff_t, or wider when
+    // function pointers are (i8086 far code).
     if (MPT->isMemberFunctionPointer())
-      MPI.Width *= 2;
+      MPI.Width += std::max<uint64_t>(
+          MPI.Width, Target.getPointerWidth(Target.getFunctionAddressSpace()));
     return MPI;
   }
 

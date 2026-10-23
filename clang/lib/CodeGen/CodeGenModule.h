@@ -1749,6 +1749,13 @@ public:
 
   llvm::Type *getVTableComponentType() const;
 
+  /// A pointer to a function: in the target's function address space.
+  llvm::PointerType *getFunctionPtrTy() {
+    return llvm::PointerType::get(
+        getLLVMContext(),
+        getContext().getTargetAddressSpace(getTarget().getFunctionAddressSpace()));
+  }
+
   /// Generate a cross-DSO type identifier for MD.
   llvm::ConstantInt *CreateCrossDsoCfiTypeId(llvm::Metadata *MD);
 

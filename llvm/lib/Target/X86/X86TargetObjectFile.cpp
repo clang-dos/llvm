@@ -10,6 +10,7 @@
 #include "MCTargetDesc/X86MCAsmInfo.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/IR/Comdat.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -93,6 +94,12 @@ static MCSection *getFarDataSection(MCContext &Ctx, const GlobalObject *GO,
   unsigned Flags = ELF::SHF_ALLOC;
   if (!Kind.isReadOnly())
     Flags |= ELF::SHF_WRITE;
+  // A variable in a comdat (an inline vtable or type_info) is in a section
+  // group, which the OMF writer makes a COMDAT.
+  if (const Comdat *C = GV->getComdat())
+    return Ctx.getELFSection(Prefix + TM.getSymbol(GO)->getName(), Type,
+                             Flags | ELF::SHF_GROUP, 0, C->getName(),
+                             /*IsComdat=*/true);
   return Ctx.getELFSection(Prefix + TM.getSymbol(GO)->getName(), Type, Flags);
 }
 

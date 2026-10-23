@@ -605,8 +605,12 @@ CodeGenModule::CodeGenModule(ASTContext &C,
   const llvm::DataLayout &DL = M.getDataLayout();
   AllocaInt8PtrTy =
       llvm::PointerType::get(LLVMContext, DL.getAllocaAddrSpace());
-  GlobalsInt8PtrTy =
-      llvm::PointerType::get(LLVMContext, DL.getDefaultGlobalsAddressSpace());
+  // The C++ ABI's globals (vtables, type_info) can have an address space of
+  // their own (i8086 far data).
+  GlobalsInt8PtrTy = llvm::PointerType::get(
+      LLVMContext,
+      C.getTargetInfo().getCXXRuntimeGlobalsAddressSpace().value_or(
+          DL.getDefaultGlobalsAddressSpace()));
   ProgramPtrTy =
       llvm::PointerType::get(LLVMContext, DL.getProgramAddressSpace());
   // The vtable pointer is a global's address, unless vtable components have
@@ -6315,7 +6319,9 @@ llvm::GlobalVariable *CodeGenModule::CreateOrReplaceCXXRuntimeVariable(
 
   // Create a new variable.
   GV = new llvm::GlobalVariable(getModule(), Ty, /*isConstant=*/true,
-                                Linkage, nullptr, Name);
+                                Linkage, nullptr, Name, /*InsertBefore=*/nullptr,
+                                llvm::GlobalValue::NotThreadLocal,
+                                GlobalsInt8PtrTy->getAddressSpace());
 
   if (OldGV) {
     // Replace occurrences of the old variable if needed.

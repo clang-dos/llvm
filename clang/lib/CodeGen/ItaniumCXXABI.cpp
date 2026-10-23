@@ -3689,7 +3689,9 @@ ItaniumRTTIBuilder::GetAddrOfExternalRTTIDescriptor(QualType Ty) {
 
     GV = new llvm::GlobalVariable(
         CGM.getModule(), CGM.GlobalsInt8PtrTy,
-        /*isConstant=*/true, llvm::GlobalValue::ExternalLinkage, nullptr, Name);
+        /*isConstant=*/true, llvm::GlobalValue::ExternalLinkage, nullptr, Name,
+        /*InsertBefore=*/nullptr, llvm::GlobalValue::NotThreadLocal,
+        CGM.GlobalsInt8PtrTy->getAddressSpace());
     const CXXRecordDecl *RD = Ty->getAsCXXRecordDecl();
     CGM.setGVProperties(GV, RD);
     // Import the typeinfo symbol when all non-inline virtual methods are
@@ -3880,7 +3882,13 @@ void ItaniumRTTIBuilder::BuildVTablePointer(const Type *Ty,
     VTable = CGM.getModule().getNamedAlias(VTableName);
   if (!VTable) {
     llvm::Type *Ty = llvm::ArrayType::get(CGM.GlobalsInt8PtrTy, 0);
-    VTable = CGM.getModule().getOrInsertGlobal(VTableName, Ty);
+    VTable = CGM.getModule().getOrInsertGlobal(VTableName, Ty, [&] {
+      return new llvm::GlobalVariable(
+          CGM.getModule(), Ty, /*isConstant=*/false,
+          llvm::GlobalValue::ExternalLinkage, nullptr, VTableName,
+          /*InsertBefore=*/nullptr, llvm::GlobalValue::NotThreadLocal,
+          CGM.GlobalsInt8PtrTy->getAddressSpace());
+    });
   }
 
   CGM.setDSOLocal(cast<llvm::GlobalValue>(VTable->stripPointerCasts()));
@@ -4060,7 +4068,10 @@ llvm::Constant *ItaniumRTTIBuilder::BuildTypeInfo(
   // int8 is an arbitrary type to be replaced later with replaceInitializer.
   llvm::GlobalVariable *GV =
       new llvm::GlobalVariable(M, CGM.Int8Ty, /*isConstant=*/true, Linkage,
-                               /*Initializer=*/nullptr, Name);
+                               /*Initializer=*/nullptr, Name,
+                               /*InsertBefore=*/nullptr,
+                               llvm::GlobalValue::NotThreadLocal,
+                               CGM.GlobalsInt8PtrTy->getAddressSpace());
 
   // Add the vtable pointer.
   BuildVTablePointer(cast<Type>(Ty), GV);

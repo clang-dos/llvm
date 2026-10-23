@@ -34,16 +34,19 @@
 // memory model. Non-allocatable sections (debug info, notes) and unwind
 // tables are not written.
 //
-// Far data is outside DGROUP. A section named .fardata, .farrodata or
-// .farbss, or one of those followed by .<name>, is a private segment of its
-// own, of class FAR_DATA (FAR_BSS for .farbss), named after the variable
-// (<name>_DATA, <name>_CONST, <name>_BSS) or FAR_DATA, FAR_CONST and FAR_BSS.
-// One over 64 KiB is split into consecutive segments of 64 KiB, paragraph
-// aligned, which the linker places one after another, so that a huge
-// pointer reaches all of it; references into it name the segment that holds
-// the byte. Far data segments come right after the code segment, so that
-// a startup module that defines empty ones places all far data between the
-// code and DGROUP.
+// Far data is outside DGROUP, in private segments of class FAR_DATA
+// (FAR_BSS for .farbss). A section named .fardata.<name>, .farrodata.<name>
+// or .farbss.<name> of at least 4 KiB is a segment of its own, named after
+// the variable (<name>_DATA, <name>_CONST, <name>_BSS). Smaller ones, and
+// .fardata, .farrodata and .farbss, share the module's segments FAR_DATA,
+// FAR_CONST and FAR_BSS, with a new one each time 64 KiB fills up. One over
+// 64 KiB is split into consecutive segments of 64 KiB, paragraph aligned,
+// which the linker places one after another, so that a huge pointer
+// reaches all of it; references into it name the segment that holds the
+// byte. A far section in a section group (an inline vtable) is a COMDAT
+// allocated in the module's shared segment of its kind. Far data segments
+// come right after the code segment, so that a startup module that defines
+// empty ones places all far data between the code and DGROUP.
 //
 // Fixups are 16-bit offsets, segment-relative or self-relative, and base16
 // segment fixups for references the target marks as such (`sym@SEG` on X86),
@@ -215,6 +218,7 @@ class OMFObjectWriter final : public MCObjectWriter {
     const MCSymbol *Sym; // Its name, at offset 0.
     SegIdx Base;
     bool PickAny; // From a COMDAT group: keep any one copy.
+    int FarKind;  // For far data, its FarKind; the base is set later.
   };
   SmallVector<Comdat, 0> Comdats;
   DenseMap<const MCSection *, unsigned> ComdatIndex;
@@ -230,6 +234,18 @@ class OMFObjectWriter final : public MCObjectWriter {
   /// The kind of a written section; SK_Count for far data.
   std::optional<SegmentKind> classifySection(const MCSectionELF &Sec) const;
   void addFarSection(const MCSectionELF &Sec);
+  /// The kinds of far data, each with its shared segment.
+  enum FarKind { FK_Data, FK_Const, FK_Bss, FK_Count };
+  static FarKind getFarKind(StringRef Name) {
+    return Name.starts_with(".farbss")      ? FK_Bss
+           : Name.starts_with(".farrodata") ? FK_Const
+                                            : FK_Data;
+  }
+  /// The module's shared far segment of a kind, with room for Size more
+  /// bytes aligned to A.
+  SegIdx getFarPool(FarKind Kind, uint64_t Size, Align A);
+  // The current shared far segment of each kind, or 0 for none yet.
+  SegIdx FarPools[FK_Count] = {};
   /// Move an offset past the end of a far data segment into the segment
   /// that holds it.
   void normalize(SegIdx &K, uint64_t &Offset) const {
@@ -289,6 +305,7 @@ public:
     Fixups.clear();
     Comdats.clear();
     ComdatIndex.clear();
+    std::fill(std::begin(FarPools), std::end(FarPools), 0);
     NumLNames = 0;
     DGroupIndex = 0;
     MCObjectWriter::reset();
@@ -368,10 +385,12 @@ void OMFObjectWriter::findComdats() {
     const auto &Sec = static_cast<const MCSectionELF &>(S);
     std::optional<SegmentKind> K = classifySection(Sec);
     if (!K || (*K != SK_Text && *K != SK_Const && *K != SK_Data &&
-               *K != SK_Bss))
+               *K != SK_Bss && *K != SK_Count))
       continue;
-    // Only a section of its own: in a group, or named like .text.foo.
-    if (!Sec.getGroup() && Sec.getName().find('.', 1) == StringRef::npos)
+    // Only a section of its own: in a group, or named like .text.foo. Far
+    // data only in a group: other far variables can be over 64 KiB.
+    if (!Sec.getGroup() &&
+        (*K == SK_Count || Sec.getName().find('.', 1) == StringRef::npos))
       continue;
     if (Excluded.count(&Sec) || Asm->getSectionAddressSize(Sec) == 0)
       continue;
@@ -401,19 +420,48 @@ void OMFObjectWriter::findComdats() {
     if (Sym->getName().size() > 255)
       continue;
     ComdatIndex[&Sec] = Comdats.size();
-    Comdats.push_back({&Sec, Sym, *K, Sec.getGroup() != nullptr});
+    Comdats.push_back({&Sec, Sym, *K, Sec.getGroup() != nullptr,
+                       *K == SK_Count ? getFarKind(Sec.getName()) : -1});
   }
+}
+
+static StringRef farSuffix(unsigned Kind) {
+  static const char *const Suffixes[] = {"_DATA", "_CONST", "_BSS"};
+  return Suffixes[Kind];
+}
+
+SegIdx OMFObjectWriter::getFarPool(FarKind Kind, uint64_t Size, Align A) {
+  SegIdx &K = FarPools[Kind];
+  if (K && alignTo(Segs[K].Size, A) + Size <= 0x10000)
+    return K;
+  K = Segs.size();
+  Segment &Seg = Segs.emplace_back();
+  Seg.Present = true;
+  Seg.Name = ("FAR" + farSuffix(Kind)).str();
+  Seg.Class = Kind == FK_Bss ? "FAR_BSS" : "FAR_DATA";
+  Seg.Combine = OMF::SC_Private;
+  return K;
 }
 
 void OMFObjectWriter::addFarSection(const MCSectionELF &Sec) {
   StringRef Name = Sec.getName();
-  bool Bss = Name.starts_with(".farbss");
-  bool Const = Name.starts_with(".farrodata");
+  FarKind Kind = getFarKind(Name);
   StringRef Var = Name.split('.').second.split('.').second;
-  StringRef Suffix = Bss ? "_BSS" : Const ? "_CONST" : "_DATA";
-  std::string SegName =
-      Var.empty() ? ("FAR" + Suffix).str() : (Var.take_front(240) + Suffix).str();
   uint64_t Size = Asm->getSectionAddressSize(Sec);
+  // Small far variables share a segment.
+  constexpr uint64_t MinOwnSegment = 0x1000;
+  if (Var.empty() || Size < MinOwnSegment) {
+    SegIdx K = getFarPool(Kind, Size, Sec.getAlign());
+    Segment &Seg = Segs[K];
+    Seg.Size = alignTo(Seg.Size, Sec.getAlign());
+    Seg.MaxAlign = std::max(Seg.MaxAlign, Sec.getAlign());
+    SectionMap[&Sec] = {K, Seg.Size};
+    Seg.Sections.push_back(&Sec);
+    Seg.Size += Size;
+    return;
+  }
+  bool Bss = Kind == FK_Bss;
+  std::string SegName = (Var.take_front(240) + farSuffix(Kind)).str();
   bool Split = Size > 0x10000;
   SectionMap[&Sec] = {Segs.size(), 0};
   uint64_t Offset = 0;
@@ -439,6 +487,7 @@ void OMFObjectWriter::executePostLayoutBinding() {
 
   // Place sections in segments.
   Segs.resize(SK_Count);
+  std::fill(std::begin(FarPools), std::end(FarPools), 0);
   for (const MCSection &S : *Asm) {
     const auto &Sec = static_cast<const MCSectionELF &>(S);
     if (ComdatIndex.count(&Sec))
@@ -458,6 +507,10 @@ void OMFObjectWriter::executePostLayoutBinding() {
     Seg.Sections.push_back(&Sec);
     Seg.Size += Asm->getSectionAddressSize(Sec);
   }
+  // Far COMDATs are allocated in the shared far segment of their kind.
+  for (Comdat &C : Comdats)
+    if (C.FarKind >= 0)
+      C.Base = getFarPool(FarKind(C.FarKind), 0, Align(1));
 
   // Linkers order segments by class in the order they first see them, so
   // every module defines the usual segments, even empty, in the usual order
@@ -931,8 +984,9 @@ void OMFObjectWriter::writeSegmentData(SegIdx K) {
   SmallVector<uint8_t, 0> Image(Seg.Size, 0);
   bool AnyData = false;
   uint64_t PrevEnd = 0;
-  if (K >= SK_Count) {
-    // A far data segment: its part of its one section.
+  // A part of a far section split into 64 KiB segments.
+  bool Part = K >= SK_Count && (Seg.PartOffset || Seg.HasNext);
+  if (Part) {
     const MCSection *Sec = Seg.Sections.front();
     if (!Sec->isBssSection()) {
       SmallString<256> Buf;
@@ -944,7 +998,7 @@ void OMFObjectWriter::writeSegmentData(SegIdx K) {
     }
   }
   for (const MCSection *Sec : Seg.Sections) {
-    if (K >= SK_Count)
+    if (Part)
       break;
     uint64_t Base = SectionMap.lookup(Sec).second;
     // Code padding between sections is NOPs.

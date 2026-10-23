@@ -516,6 +516,13 @@ public:
     return std::nullopt;
   }
 
+  /// The address space of the C++ ABI's own globals (vtables, VTTs, type_info
+  /// objects and type names), when it is not that of other globals: in the
+  /// i8086 far-data models they are far data, outside DGROUP.
+  virtual std::optional<unsigned> getCXXRuntimeGlobalsAddressSpace() const {
+    return std::nullopt;
+  }
+
   /// Return the maximum width of pointers on this target.
   virtual uint64_t getMaxPointerWidth() const {
     return PointerWidth;

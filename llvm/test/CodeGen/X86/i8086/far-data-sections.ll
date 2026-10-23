@@ -29,3 +29,9 @@ define i8 @get() {
 ; CHECK: _pz:
 ; CHECK-NEXT: .long _zero+4
 @pz = global ptr addrspace(2) getelementptr (i8, ptr addrspace(2) @zero, i16 4)
+
+; A far variable in a comdat (an inline vtable) is in a section group.
+; CHECK: .section .farrodata._vt,"aG",@progbits,vt,comdat
+; CHECK: _vt:
+$vt = comdat any
+@vt = linkonce_odr addrspace(2) constant [2 x i16] [i16 1, i16 2], comdat

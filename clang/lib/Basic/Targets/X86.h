@@ -836,6 +836,14 @@ public:
     return std::nullopt;
   }
 
+  // In the far-data models vtables and type_info objects are far data (huge
+  // in the huge models), in a segment outside DGROUP.
+  std::optional<unsigned> getCXXRuntimeGlobalsAddressSpace() const override {
+    if (!llvm::X86::isFarDataModel16(Model))
+      return std::nullopt;
+    return Model == llvm::X86::MemoryModel16::Huge ? 3 : 2;
+  }
+
   // Far and huge pointers (address spaces 2, 3 and 5) are segment:offset
   // pairs. Every pointer is 2-byte aligned.
   uint64_t getPointerWidthV(LangAS AS) const override {

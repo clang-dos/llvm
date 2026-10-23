@@ -208,7 +208,7 @@ static __exponent_result __parse_exponent(const char* __input, size_t __n, size_
     // __result.error contains the errno value, 0 or ERANGE these are not interesting.
     // If the number of characters parsed is 0 it means there was no number.
     if (__e.parsed_len != 0)
-      return {__offset + __e.parsed_len, __e.value, true};
+      return {static_cast<size_t>(__offset + __e.parsed_len), __e.value, true};
     else
       --__offset; // the assumption of a valid exponent was not true, undo eating the exponent character.
   }

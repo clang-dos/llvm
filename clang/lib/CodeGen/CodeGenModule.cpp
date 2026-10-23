@@ -126,6 +126,9 @@ createTargetCodeGenInfo(CodeGenModule &CGM) {
   default:
     return createDefaultTargetCodeGenInfo(CGM);
 
+  case llvm::Triple::i8086:
+    return createI8086TargetCodeGenInfo(CGM);
+
   case llvm::Triple::m68k:
     return createM68kTargetCodeGenInfo(CGM);
   case llvm::Triple::mips:
@@ -1545,7 +1548,8 @@ void CodeGenModule::Release() {
   // non-empty value.
   if (StringRef ABIStr = Target.getABI();
       !ABIStr.empty() && (T.isARM() || T.isThumb() || T.isRISCV() ||
-                          T.isPPC() || T.isLoongArch() || T.isWasm())) {
+                          T.isPPC() || T.isLoongArch() || T.isWasm() ||
+                          T.isX86_16())) {
     getModule().addModuleFlag(llvm::Module::Error, "target-abi",
                               llvm::MDString::get(VMContext, ABIStr));
   }

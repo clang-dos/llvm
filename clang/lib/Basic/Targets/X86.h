@@ -33,6 +33,14 @@ static constexpr LangASMap X86AddrSpaceMap = {
     {LangAS::ptr64, 272},
 };
 
+// i8086 far-data memory models: C pointers are far (address space 2).
+static constexpr LangASMap I8086FarDataAddrSpaceMap = {
+    {LangAS::Default, 2},
+    {LangAS::ptr32_sptr, 270},
+    {LangAS::ptr32_uptr, 271},
+    {LangAS::ptr64, 272},
+};
+
 // X86 target abstract base class; x86-32 and x86-64 are very close, so
 // most of the implementation can be shared.
 class LLVM_LIBRARY_VISIBILITY X86TargetInfo : public TargetInfo {
@@ -764,10 +772,18 @@ public:
   bool setABI(const std::string &Name) override {
     std::optional<llvm::X86::MemoryModel16> M =
         llvm::X86::parseMemoryModel16(Name);
-    // FIXME: Support the memory models with far data pointers.
-    if (!M || llvm::X86::isFarDataModel16(*M))
+    // FIXME: Support the large and huge memory models.
+    if (!M || *M == llvm::X86::MemoryModel16::Large ||
+        *M == llvm::X86::MemoryModel16::Huge)
       return false;
     Model = *M;
+    // In the far-data models C pointers are far: 32-bit segment:offset
+    // pairs. The stack, globals and constants stay in DGROUP and are
+    // addressed with near pointers (address space 0), which clang casts.
+    bool FarData = llvm::X86::isFarDataModel16(Model);
+    AddrSpaceMap = FarData ? &I8086FarDataAddrSpaceMap : &X86AddrSpaceMap;
+    PointerWidth = FarData ? 32 : 16;
+    IntPtrType = FarData ? SignedLong : SignedInt;
     resetDataLayout();
     return true;
   }
@@ -805,8 +821,20 @@ public:
     case 5:
       return 32;
     default:
-      return PointerWidth;
+      return 16;
     }
+  }
+
+  // Clang takes this as the width of size_t, ptrdiff_t and its intptr
+  // type. Far pointers are wider than size_t: objects stay within 64 KiB.
+  uint64_t getMaxPointerWidth() const override {
+    return getTypeWidth(SizeType);
+  }
+
+  // Constants are in DGROUP.
+  std::optional<LangAS> getConstantAddressSpace() const override {
+    return llvm::X86::isFarDataModel16(Model) ? getLangASFromTargetAS(0)
+                                               : LangAS::Default;
   }
   uint64_t getPointerAlignV(LangAS) const override { return 16; }
 };

@@ -325,3 +325,25 @@ std::unique_ptr<TargetCodeGenInfo>
 CodeGen::createDefaultTargetCodeGenInfo(CodeGenModule &CGM) {
   return std::make_unique<DefaultTargetCodeGenInfo>(CGM.getTypes());
 }
+
+namespace {
+/// i8086 (16-bit DOS). Global variables are in DGROUP, the near data
+/// address space 0, in every memory model. In the far-data models C
+/// pointers are far, and the addresses of globals are cast to them.
+class I8086TargetCodeGenInfo : public TargetCodeGenInfo {
+public:
+  I8086TargetCodeGenInfo(CodeGen::CodeGenTypes &CGT)
+      : TargetCodeGenInfo(std::make_unique<DefaultABIInfo>(CGT)) {}
+
+  LangAS getGlobalVarAddressSpace(CodeGenModule &CGM,
+                                  const VarDecl *D) const override {
+    LangAS AS = D ? D->getType().getAddressSpace() : LangAS::Default;
+    return AS == LangAS::Default ? getLangASFromTargetAS(0) : AS;
+  }
+};
+} // namespace
+
+std::unique_ptr<TargetCodeGenInfo>
+CodeGen::createI8086TargetCodeGenInfo(CodeGenModule &CGM) {
+  return std::make_unique<I8086TargetCodeGenInfo>(CGM.getTypes());
+}

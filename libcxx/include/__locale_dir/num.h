@@ -692,7 +692,15 @@ protected:
 
   virtual iter_type
   do_get(iter_type __b, iter_type __e, ios_base& __iob, ios_base::iostate& __err, long double& __v) const {
+#  if defined(__I86__) && __LDBL_MANT_DIG__ == __DBL_MANT_DIG__
+    // long double is double: use the same code.
+    double __d;
+    __b = this->__do_get_floating_point(__b, __e, __iob, __err, __d);
+    __v = __d;
+    return __b;
+#  else
     return this->__do_get_floating_point(__b, __e, __iob, __err, __v);
+#  endif
   }
 
   virtual iter_type do_get(iter_type __b, iter_type __e, ios_base& __iob, ios_base::iostate& __err, void*& __v) const;
@@ -930,6 +938,10 @@ protected:
   _LIBCPP_HIDE_FROM_ABI inline _OutputIterator
   __do_put_integral(iter_type __s, ios_base& __iob, char_type __fl, _Integral __v) const;
 
+  template <class _Unsigned>
+  _LIBCPP_HIDE_FROM_ABI inline _OutputIterator __do_put_integral_digits(
+      iter_type __s, ios_base& __iob, char_type __fl, _Unsigned __uval, bool __negative, bool __is_signed_type) const;
+
   template <class _Float>
   _LIBCPP_HIDE_FROM_ABI inline _OutputIterator
   __do_put_floating_point(iter_type __s, ios_base& __iob, char_type __fl, _Float __v, char const* __len) const;
@@ -949,15 +961,35 @@ num_put<_CharT, _OutputIterator>::do_put(iter_type __s, ios_base& __iob, char_ty
   return std::copy(__nm.begin(), __nm.end(), __s);
 }
 
+// On i8086 every integer type is printed as unsigned long long, so that the
+// code is there once, not once for each type: it is a lot of code for a
+// 64 KiB code segment.
 template <class _CharT, class _OutputIterator>
 template <class _Integral>
 _LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::__do_put_integral(
     iter_type __s, ios_base& __iob, char_type __fl, _Integral __v) const {
+  // Print '-' and make the argument unsigned. Octal and hex are always
+  // printed as an unsigned value.
+  auto __basefield = (__iob.flags() & ios_base::basefield);
+  auto __uval      = std::__to_unsigned_like(__v);
+  bool __negative  = __basefield != ios_base::oct && __basefield != ios_base::hex && __v < 0;
+  if (__negative)
+    __uval = std::__complement(__uval);
+#  if defined(__I86__)
+  return this->__do_put_integral_digits(
+      __s, __iob, __fl, static_cast<unsigned long long>(__uval), __negative, is_signed<_Integral>::value);
+#  else
+  return this->__do_put_integral_digits(__s, __iob, __fl, __uval, __negative, is_signed<_Integral>::value);
+#  endif
+}
+
+template <class _CharT, class _OutputIterator>
+template <class _Unsigned>
+_LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::__do_put_integral_digits(
+    iter_type __s, ios_base& __iob, char_type __fl, _Unsigned __uval, bool __negative, bool __is_signed_type) const {
   // Stage 1 - Get number in narrow char
 
-  // Worst case is octal, with showbase enabled. Note that octal is always
-  // printed as an unsigned value.
-  using _Unsigned = typename make_unsigned<_Integral>::type;
+  // Worst case is octal, with showbase enabled.
   _LIBCPP_CONSTEXPR const unsigned __buffer_size =
       (numeric_limits<_Unsigned>::digits / 3)          // 1 char per 3 bits
       + ((numeric_limits<_Unsigned>::digits % 3) != 0) // round up
@@ -970,27 +1002,16 @@ _LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::_
 
   auto __basefield = (__flags & ios_base::basefield);
 
-  // Extract base
-  int __base = 10;
-  if (__basefield == ios_base::oct)
-    __base = 8;
-  else if (__basefield == ios_base::hex)
-    __base = 16;
-
-  // Print '-' and make the argument unsigned
-  auto __uval = std::__to_unsigned_like(__v);
-  if (__basefield != ios_base::oct && __basefield != ios_base::hex && __v < 0) {
+  if (__negative)
     *__buffer_ptr++ = '-';
-    __uval          = std::__complement(__uval);
-  }
 
   // Maybe add '+' prefix
-  if (std::is_signed<_Integral>::value && (__flags & ios_base::showpos) && __basefield != ios_base::oct &&
-      __basefield != ios_base::hex && __v >= 0)
+  if (__is_signed_type && (__flags & ios_base::showpos) && __basefield != ios_base::oct && __basefield != ios_base::hex &&
+      !__negative)
     *__buffer_ptr++ = '+';
 
   // Add base prefix
-  if (__v != 0 && __flags & ios_base::showbase) {
+  if (__uval != 0 && __flags & ios_base::showbase) {
     if (__basefield == ios_base::oct) {
       *__buffer_ptr++ = '0';
     } else if (__basefield == ios_base::hex) {
@@ -999,7 +1020,11 @@ _LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::_
     }
   }
 
-  auto __res = std::__to_chars_integral(__buffer_ptr, __char_buffer + __buffer_size, __uval, __base);
+  // Only bases 8, 10 and 16, not the other bases of to_chars.
+  char* __buffer_end = __char_buffer + __buffer_size;
+  auto __res         = __basefield == ios_base::oct ? std::__to_chars_integral<8>(__buffer_ptr, __buffer_end, __uval)
+                     : __basefield == ios_base::hex ? std::__to_chars_integral<16>(__buffer_ptr, __buffer_end, __uval)
+                                                    : std::__to_chars_itoa(__buffer_ptr, __buffer_end, __uval, false_type());
   _LIBCPP_ASSERT_INTERNAL(__res.__ec == std::errc(0), "to_chars: invalid maximum buffer size computed?");
 
   // Make letters uppercase
@@ -1102,7 +1127,12 @@ num_put<_CharT, _OutputIterator>::do_put(iter_type __s, ios_base& __iob, char_ty
 template <class _CharT, class _OutputIterator>
 _OutputIterator
 num_put<_CharT, _OutputIterator>::do_put(iter_type __s, ios_base& __iob, char_type __fl, long double __v) const {
+#  if defined(__I86__) && __LDBL_MANT_DIG__ == __DBL_MANT_DIG__
+  // long double is double: use the same code.
+  return this->__do_put_floating_point(__s, __iob, __fl, static_cast<double>(__v), "");
+#  else
   return this->__do_put_floating_point(__s, __iob, __fl, __v, "L");
+#  endif
 }
 
 template <class _CharT, class _OutputIterator>

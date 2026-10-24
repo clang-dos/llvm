@@ -168,6 +168,20 @@ void tools::MinGW::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("console");
   }
 
+  // A Windows version in the triple, as in i586-pc-windows4.0-gnu, is the
+  // oldest Windows the program runs on. Older Windows refuses to load programs
+  // that ask for a newer version, so set the subsystem and OS version from it.
+  // Versions given with -Wl come later and win.
+  VersionTuple WindowsVersion = TC.getEffectiveTriple().getOSVersion();
+  if (!WindowsVersion.empty()) {
+    const char *Major = Args.MakeArgString(Twine(WindowsVersion.getMajor()));
+    const char *Minor =
+        Args.MakeArgString(Twine(WindowsVersion.getMinor().value_or(0)));
+    CmdArgs.append({"--major-subsystem-version", Major,
+                    "--minor-subsystem-version", Minor, "--major-os-version",
+                    Major, "--minor-os-version", Minor});
+  }
+
   if (Args.hasArg(options::OPT_mdll))
     CmdArgs.push_back("--dll");
   else if (Args.hasArg(options::OPT_shared))

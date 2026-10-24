@@ -12,6 +12,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/X86TargetParser.h"
@@ -107,6 +108,18 @@ std::string x86::getX86TargetCPU(const Driver &D, const ArgList &Args,
   // Everything else goes to x86-64 in 64-bit mode.
   if (Is64Bit)
     return "x86-64";
+
+  // A Windows version before Vista in the triple, as in i486-pc-windows4.10-gnu
+  // for Windows 98, targets the CPU of the arch name. Windows 95 and NT 4.0 do
+  // not save SSE registers, so no SSE is the default.
+  VersionTuple WindowsVersion = Triple.getOSVersion();
+  if (Triple.isOSWindows() && !WindowsVersion.empty() &&
+      WindowsVersion < VersionTuple(6))
+    return llvm::StringSwitch<std::string>(Triple.getArchName())
+        .Case("i386", "i386")
+        .Case("i486", "i486")
+        .Case("i586", "pentium")
+        .Default("i686");
 
   switch (Triple.getOS()) {
   case llvm::Triple::NetBSD:

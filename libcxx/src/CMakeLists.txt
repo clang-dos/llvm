@@ -95,6 +95,7 @@ if (LIBCXX_ENABLE_LOCALIZATION)
     ios.cpp
     ios.instantiations.cpp
     iostream.cpp
+    wiostream.cpp
     locale.cpp
     ostream.cpp
     regex.cpp

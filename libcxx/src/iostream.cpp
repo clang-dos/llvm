@@ -6,115 +6,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "std_stream.h"
-
-#include <__memory/construct_at.h>
-#include <__ostream/basic_ostream.h>
-#include <fstream>
-#include <istream>
-
-#define ABI_NAMESPACE_STR _LIBCPP_TOSTRING(_LIBCPP_ABI_NAMESPACE)
+#include "iostream_objects.h"
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
-
-// This file implements the various stream objects provided inside <iostream>. We're doing some ODR violations in here,
-// so this quite fragile. Specifically, the size of the stream objects (i.e. cout, cin etc.) needs to stay the same.
-// For that reason, we have `stream` and `stream_data` separated into two objects. The public `stream` objects only
-// contain the actual stream, while the private `stream_data` objects contains the `basic_streambuf` we're using as well
-// as the mbstate_t. `stream_data` objects are only accessible within the library, so they aren't ABI sensitive and we
-// can change them as we want.
-
-template <class StreamT>
-union stream {
-  constexpr stream() {}
-  stream(const stream&)            = delete;
-  stream& operator=(const stream&) = delete;
-  constexpr ~stream() {}
-
-  StreamT value;
-};
-
-template <class StreamT, class SyncBufT, class UnsyncBufT>
-union stream_data {
-  constexpr stream_data() {}
-  constexpr ~stream_data() {}
-  struct {
-    union {
-      SyncBufT sync_buffer;
-      UnsyncBufT unsync_buffer;
-    };
-    mbstate_t mb;
-  };
-};
-
-template <class StreamT, class SyncBufT, class UnsyncBufT>
-void init_stream(FILE* stdstream, stream<StreamT>& stream, stream_data<StreamT, SyncBufT, UnsyncBufT>& data) {
-  data.mb = {};
-  std::construct_at(&data.sync_buffer, stdstream, &data.mb);
-  std::construct_at(&stream.value, &data.sync_buffer);
-}
-
-template <class StreamT, class SyncBufT, class UnsyncBufT>
-void switch_to_sync_stream(FILE* stdstream, stream<StreamT>& stream, stream_data<StreamT, SyncBufT, UnsyncBufT>& data) {
-  data.unsync_buffer.__adopt_file(nullptr, {}); // reset the file, so that basic_filebuf doesn't close standard streams
-  std::destroy_at(&data.unsync_buffer);
-  data.mb = {};
-  std::construct_at(&data.sync_buffer, stdstream, &data.mb);
-  stream.value.rdbuf(&data.sync_buffer);
-}
-
-template <class StreamT, class SyncBufT, class UnsyncBufT>
-void switch_to_unsync_stream(FILE* stdstream,
-                             stream<StreamT>& stream,
-                             stream_data<StreamT, SyncBufT, UnsyncBufT>& data,
-                             ios_base::openmode mode) {
-  std::destroy_at(&data.sync_buffer);
-  std::construct_at(&data.unsync_buffer);
-  data.unsync_buffer.__adopt_file(stdstream, mode);
-  stream.value.rdbuf(&data.unsync_buffer);
-}
-
-#define CHAR_MANGLING_char "D"
-#define CHAR_MANGLING_wchar_t "_W"
-#define CHAR_MANGLING(CharT) CHAR_MANGLING_##CharT
-
-#ifdef _LIBCPP_COMPILER_CLANG_BASED
-#  define STRING_DATA_CONSTINIT constinit
-#else
-#  define STRING_DATA_CONSTINIT
-#endif
-
-#ifdef _LIBCPP_ABI_MICROSOFT
-#  define STREAM(StreamT, SyncBufT, UnsyncBufT, CharT, var)                                                            \
-    STRING_DATA_CONSTINIT stream_data<StreamT<CharT>, SyncBufT<CharT>, UnsyncBufT<CharT>> var##_data;                  \
-    _LIBCPP_EXPORTED_FROM_ABI STRING_DATA_CONSTINIT stream<StreamT<CharT>> var __asm__(                                \
-        "?" #var "@" ABI_NAMESPACE_STR "@std@@3V?$" #StreamT                                                           \
-        "@" CHAR_MANGLING(CharT) "U?$char_traits@" CHAR_MANGLING(CharT) "@" ABI_NAMESPACE_STR "@std@@@12@A")
-#else
-#  define STREAM(StreamT, SyncBufT, UnsyncBufT, CharT, var)                                                            \
-    STRING_DATA_CONSTINIT stream_data<StreamT<CharT>, SyncBufT<CharT>, UnsyncBufT<CharT>> var##_data;                  \
-    _LIBCPP_EXPORTED_FROM_ABI STRING_DATA_CONSTINIT stream<StreamT<CharT>> var
-#endif
-
-// These definitions and the declarations in <iostream> technically cause ODR violations, since they have different
-// types (stream_data and {i,o}stream respectively). This means that <iostream> should never be included in this TU.
-
-#if _LIBCPP_HAS_FILESYSTEM
-template <class CharT>
-using unsync_buffer = basic_filebuf<CharT>;
-#else
-// If we don't have access to files we can't treat the standard streams as files either - just save a dummy object in
-// that case.
-template <class>
-using unsync_buffer = char;
-#endif
 
 STREAM(basic_istream, __stdinbuf, unsync_buffer, char, cin);
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, char, cout);
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, char, cerr);
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, char, clog);
-#if _LIBCPP_HAS_WIDE_CHARACTERS
+#if _LIBCPP_HAS_WIDE_CHARACTERS && !_LIBCPP_SEPARATE_WIDE_STREAMS
 STREAM(basic_istream, __stdinbuf, unsync_buffer, wchar_t, wcin);
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, wchar_t, wcout);
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, wchar_t, wcerr);
@@ -161,7 +62,7 @@ DoIOSInit::DoIOSInit() {
   std::unitbuf(cerr.value);
   cerr.value.tie(&cout.value);
 
-#if _LIBCPP_HAS_WIDE_CHARACTERS
+#if _LIBCPP_HAS_WIDE_CHARACTERS && !_LIBCPP_SEPARATE_WIDE_STREAMS
   init_stream(stdin, wcin, wcin_data);
   init_stream(stdout, wcout, wcout_data);
   init_stream(stderr, wcerr, wcerr_data);
@@ -177,7 +78,7 @@ DoIOSInit::~DoIOSInit() {
   cout.value.flush();
   clog.value.flush();
 
-#if _LIBCPP_HAS_WIDE_CHARACTERS
+#if _LIBCPP_HAS_WIDE_CHARACTERS && !_LIBCPP_SEPARATE_WIDE_STREAMS
   wcout.value.flush();
   wclog.value.flush();
 #endif
@@ -189,6 +90,10 @@ ios_base::Init::Init() {
 
 ios_base::Init::~Init() {}
 
+#if _LIBCPP_SEPARATE_WIDE_STREAMS
+void (*__sync_wide_streams_with_stdio)(bool);
+#endif
+
 bool ios_base::sync_with_stdio(bool sync) {
   static bool previous_state = true;
   bool r                     = previous_state;
@@ -199,7 +104,7 @@ bool ios_base::sync_with_stdio(bool sync) {
       switch_to_sync_stream(stdin, cin, cin_data);
       switch_to_sync_stream(stdout, cout, cout_data);
       switch_to_sync_stream(stderr, clog, clog_data);
-#  if _LIBCPP_HAS_WIDE_CHARACTERS
+#  if _LIBCPP_HAS_WIDE_CHARACTERS && !_LIBCPP_SEPARATE_WIDE_STREAMS
       switch_to_sync_stream(stdin, wcin, wcin_data);
       switch_to_sync_stream(stdout, wcout, wcout_data);
       switch_to_sync_stream(stderr, wclog, wclog_data);
@@ -208,12 +113,16 @@ bool ios_base::sync_with_stdio(bool sync) {
       switch_to_unsync_stream(stdin, cin, cin_data, ios::in);
       switch_to_unsync_stream(stdout, cout, cout_data, ios::out);
       switch_to_unsync_stream(stderr, clog, clog_data, ios::out);
-#  if _LIBCPP_HAS_WIDE_CHARACTERS
+#  if _LIBCPP_HAS_WIDE_CHARACTERS && !_LIBCPP_SEPARATE_WIDE_STREAMS
       switch_to_unsync_stream(stdin, wcin, wcin_data, ios::in);
       switch_to_unsync_stream(stdout, wcout, wcout_data, ios::out);
       switch_to_unsync_stream(stderr, wclog, wclog_data, ios::out);
 #  endif
     }
+#  if _LIBCPP_SEPARATE_WIDE_STREAMS
+    if (__sync_wide_streams_with_stdio)
+      __sync_wide_streams_with_stdio(sync);
+#  endif
   }
 #endif // _LIBCPP_HAS_FILESYSTEM
 

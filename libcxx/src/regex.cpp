@@ -306,22 +306,28 @@ struct classnames {
   regex_traits<char>::char_class_type mask_;
 };
 
+// A ctype mask as a class type. Where the mask is a signed char (newlib on
+// targets with a signed char), it must not sign-extend into __regex_word.
+constexpr regex_traits<char>::char_class_type __mask(ctype_base::mask __m) {
+  return static_cast<regex_traits<char>::char_class_type>(static_cast<make_unsigned_t<ctype_base::mask>>(__m));
+}
+
 const classnames ClassNames[] = {
-    {"alnum", ctype_base::alnum},
-    {"alpha", ctype_base::alpha},
-    {"blank", ctype_base::blank},
-    {"cntrl", ctype_base::cntrl},
-    {"d", ctype_base::digit},
-    {"digit", ctype_base::digit},
-    {"graph", ctype_base::graph},
-    {"lower", ctype_base::lower},
-    {"print", ctype_base::print},
-    {"punct", ctype_base::punct},
-    {"s", ctype_base::space},
-    {"space", ctype_base::space},
-    {"upper", ctype_base::upper},
+    {"alnum", __mask(ctype_base::alnum)},
+    {"alpha", __mask(ctype_base::alpha)},
+    {"blank", __mask(ctype_base::blank)},
+    {"cntrl", __mask(ctype_base::cntrl)},
+    {"d", __mask(ctype_base::digit)},
+    {"digit", __mask(ctype_base::digit)},
+    {"graph", __mask(ctype_base::graph)},
+    {"lower", __mask(ctype_base::lower)},
+    {"print", __mask(ctype_base::print)},
+    {"punct", __mask(ctype_base::punct)},
+    {"s", __mask(ctype_base::space)},
+    {"space", __mask(ctype_base::space)},
+    {"upper", __mask(ctype_base::upper)},
     {"w", regex_traits<char>::__regex_word},
-    {"xdigit", ctype_base::xdigit}};
+    {"xdigit", __mask(ctype_base::xdigit)}};
 
 struct use_strcmp {
   bool operator()(const collationnames& x, const char* y) const { return strcmp(x.elem_, y) < 0; }

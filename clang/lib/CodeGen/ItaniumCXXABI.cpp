@@ -2732,8 +2732,12 @@ namespace {
     CallGuardAbort(llvm::GlobalVariable *Guard) : Guard(Guard) {}
 
     void Emit(CodeGenFunction &CGF, Flags flags) override {
-      CGF.EmitNounwindRuntimeCall(getGuardAbortFn(CGF.CGM, Guard->getType()),
-                                  Guard);
+      llvm::Value *Arg = Guard;
+      if (CGF.CGM.getTriple().getArch() == llvm::Triple::i8086)
+        Arg = CGF.Builder.CreateAddrSpaceCast(Guard, CGF.CGM.DefaultPtrTy);
+      CGF.EmitNounwindRuntimeCall(
+          getGuardAbortFn(CGF.CGM, cast<llvm::PointerType>(Arg->getType())),
+          Arg);
     }
   };
 }
@@ -2783,6 +2787,10 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
   llvm::PointerType *guardPtrTy = llvm::PointerType::get(
       CGF.CGM.getLLVMContext(),
       CGF.CGM.getDataLayout().getDefaultGlobalsAddressSpace());
+  // On i8086 the runtime takes the guard as a default pointer, which is far
+  // with far data, and the guard is near, in DGROUP.
+  if (CGM.getTriple().getArch() == llvm::Triple::i8086)
+    guardPtrTy = CGM.DefaultPtrTy;
 
   // Create the guard variable if we don't already have it (as we
   // might if we're double-emitting this function body).
@@ -2917,7 +2925,8 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
   if (threadsafe) {
     // Call __cxa_guard_acquire.
     llvm::Value *V
-      = CGF.EmitNounwindRuntimeCall(getGuardAcquireFn(CGM, guardPtrTy), guard);
+      = CGF.EmitNounwindRuntimeCall(getGuardAcquireFn(CGM, guardPtrTy),
+                                    Builder.CreateAddrSpaceCast(guard, guardPtrTy));
 
     llvm::BasicBlock *InitBlock = CGF.createBasicBlock("init");
 
@@ -2944,8 +2953,9 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
     CGF.PopCleanupBlock();
 
     // Call __cxa_guard_release.  This cannot throw.
-    CGF.EmitNounwindRuntimeCall(getGuardReleaseFn(CGM, guardPtrTy),
-                                guardAddr.emitRawPointer(CGF));
+    CGF.EmitNounwindRuntimeCall(
+        getGuardReleaseFn(CGM, guardPtrTy),
+        Builder.CreateAddrSpaceCast(guardAddr.emitRawPointer(CGF), guardPtrTy));
   } else if (D.isLocalVarDecl()) {
     // For local variables, store 1 into the first byte of the guard variable
     // after the object initialization completes so that initialization is

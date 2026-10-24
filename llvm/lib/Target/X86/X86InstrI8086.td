@@ -25,9 +25,11 @@ def : Pat<(i16 (anyext GR8:$src)),
           (INSERT_SUBREG (i16 (IMPLICIT_DEF)), GR8:$src, sub_8bit)>;
 
 def : Pat<(zextloadi16i8 addr:$src),
-          (INSERT_SUBREG (MOV16r0), (MOV8rm addr:$src), sub_8bit)>;
+          (INSERT_SUBREG (i16 (COPY_TO_REGCLASS (MOV16r0), GR16)),
+                         (MOV8rm addr:$src), sub_8bit)>;
 def : Pat<(zextloadi16i1 addr:$src),
-          (INSERT_SUBREG (MOV16r0), (MOV8rm addr:$src), sub_8bit)>;
+          (INSERT_SUBREG (i16 (COPY_TO_REGCLASS (MOV16r0), GR16)),
+                         (MOV8rm addr:$src), sub_8bit)>;
 def : Pat<(extloadi16i8 addr:$src),
           (INSERT_SUBREG (i16 (IMPLICIT_DEF)), (MOV8rm addr:$src), sub_8bit)>;
 def : Pat<(extloadi16i1 addr:$src),

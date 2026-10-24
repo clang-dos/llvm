@@ -128,9 +128,8 @@ define i16 @zext8(i8 %a) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
-; CHECK-NEXT:    movb 4(%bp), %cl
 ; CHECK-NEXT:    xorw %ax, %ax
-; CHECK-NEXT:    movb %cl, %al
+; CHECK-NEXT:    movb 4(%bp), %al
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
   %z = zext i8 %a to i16
@@ -193,9 +192,8 @@ define i16 @and8(i16 %a) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
-; CHECK-NEXT:    movb 4(%bp), %cl
 ; CHECK-NEXT:    xorw %ax, %ax
-; CHECK-NEXT:    movb %cl, %al
+; CHECK-NEXT:    movb 4(%bp), %al
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
   %t = and i16 %a, 255

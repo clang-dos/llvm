@@ -46,9 +46,8 @@ define i16 @mask_low_byte(i16 %x) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
-; CHECK-NEXT:    movb 4(%bp), %cl
 ; CHECK-NEXT:    xorw %ax, %ax
-; CHECK-NEXT:    movb %cl, %al
+; CHECK-NEXT:    movb 4(%bp), %al
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
   %r = and i16 %x, 255

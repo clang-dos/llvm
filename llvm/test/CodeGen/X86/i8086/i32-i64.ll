@@ -75,10 +75,9 @@ define i32 @shl32v(i32 %a, i32 %b) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
+; CHECK-NEXT:    xorw %ax, %ax
 ; CHECK-NEXT:    movb 8(%bp), %al
-; CHECK-NEXT:    xorw %cx, %cx
-; CHECK-NEXT:    movb %al, %cl
-; CHECK-NEXT:    pushw %cx
+; CHECK-NEXT:    pushw %ax
 ; CHECK-NEXT:    pushw 6(%bp)
 ; CHECK-NEXT:    pushw 4(%bp)
 ; CHECK-NEXT:    callw __ashlsi3
@@ -309,10 +308,9 @@ define i32 @sh(i32 %a, i32 %b) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
+; CHECK-NEXT:    xorw %ax, %ax
 ; CHECK-NEXT:    movb 8(%bp), %al
-; CHECK-NEXT:    xorw %cx, %cx
-; CHECK-NEXT:    movb %al, %cl
-; CHECK-NEXT:    pushw %cx
+; CHECK-NEXT:    pushw %ax
 ; CHECK-NEXT:    pushw 6(%bp)
 ; CHECK-NEXT:    pushw 4(%bp)
 ; CHECK-NEXT:    callw __ashlsi3
@@ -327,10 +325,9 @@ define i32 @lr(i32 %a, i32 %b) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
+; CHECK-NEXT:    xorw %ax, %ax
 ; CHECK-NEXT:    movb 8(%bp), %al
-; CHECK-NEXT:    xorw %cx, %cx
-; CHECK-NEXT:    movb %al, %cl
-; CHECK-NEXT:    pushw %cx
+; CHECK-NEXT:    pushw %ax
 ; CHECK-NEXT:    pushw 6(%bp)
 ; CHECK-NEXT:    pushw 4(%bp)
 ; CHECK-NEXT:    callw __lshrsi3
@@ -345,10 +342,9 @@ define i32 @ar(i32 %a, i32 %b) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
+; CHECK-NEXT:    xorw %ax, %ax
 ; CHECK-NEXT:    movb 8(%bp), %al
-; CHECK-NEXT:    xorw %cx, %cx
-; CHECK-NEXT:    movb %al, %cl
-; CHECK-NEXT:    pushw %cx
+; CHECK-NEXT:    pushw %ax
 ; CHECK-NEXT:    pushw 6(%bp)
 ; CHECK-NEXT:    pushw 4(%bp)
 ; CHECK-NEXT:    callw __ashrsi3

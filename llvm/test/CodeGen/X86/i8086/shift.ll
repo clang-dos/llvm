@@ -119,9 +119,8 @@ define i16 @shr8(i16 %a) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
-; CHECK-NEXT:    movb 5(%bp), %cl
 ; CHECK-NEXT:    xorw %ax, %ax
-; CHECK-NEXT:    movb %cl, %al
+; CHECK-NEXT:    movb 5(%bp), %al
 ; CHECK-NEXT:    popw %bp
 ; CHECK-NEXT:    retw
 ;
@@ -129,9 +128,8 @@ define i16 @shr8(i16 %a) {
 ; I186:       # %bb.0:
 ; I186-NEXT:    pushw %bp
 ; I186-NEXT:    movw %sp, %bp
-; I186-NEXT:    movb 5(%bp), %cl
 ; I186-NEXT:    xorw %ax, %ax
-; I186-NEXT:    movb %cl, %al
+; I186-NEXT:    movb 5(%bp), %al
 ; I186-NEXT:    popw %bp
 ; I186-NEXT:    retw
   %r = lshr i16 %a, 8

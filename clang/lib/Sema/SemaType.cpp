@@ -140,6 +140,7 @@ static void diagnoseBadTypeAttribute(Sema &S, const ParsedAttr &attr,
   case ParsedAttr::AT_PreserveMost:                                            \
   case ParsedAttr::AT_PreserveAll:                                             \
   case ParsedAttr::AT_M68kRTD:                                                 \
+  case ParsedAttr::AT_I8086Interrupt:                                          \
   case ParsedAttr::AT_PreserveNone:                                            \
   case ParsedAttr::AT_RISCVVectorCC:                                           \
   case ParsedAttr::AT_RISCVVLSCC
@@ -5252,13 +5253,20 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       // An address space on the result type can make the function near or
       // far instead (i8086, as in Open Watcom: void __far f(void)).
       LangAS FnAS = LangAS::Default;
+      bool HasFnQualifier = false;
       if (T.hasAddressSpace())
         if (std::optional<LangAS> AS =
                 Context.getTargetInfo().getFunctionAddressSpaceForQualifier(
                     T.getAddressSpace())) {
           FnAS = *AS;
+          HasFnQualifier = true;
           T = Context.removeAddrSpaceQualType(T);
         }
+      // Some calling conventions make a function near or far (i8086
+      // __interrupt functions are far).
+      if (!HasFnQualifier)
+        FnAS = Context.getTargetInfo().getFunctionAddressSpaceForCallingConv(
+            EI.getCC());
 
       // OpenCL disallows functions without a prototype, but it doesn't enforce
       // strict prototypes as in C23 because it allows a function definition to
@@ -7219,6 +7227,9 @@ namespace {
     QualType Original;
     const FunctionType *Fn;
     SmallVector<unsigned char /*WrapKind*/, 8> Stack;
+    /// An address space for the function type when wrap() rebuilds it, if
+    /// it has none.
+    LangAS FnAS = LangAS::Default;
 
     FunctionTypeUnwrapper(Sema &S, QualType T) : Original(T) {
       while (true) {
@@ -7277,8 +7288,12 @@ namespace {
 
   private:
     QualType wrap(ASTContext &C, QualType Old, unsigned I) {
-      if (I == Stack.size())
-        return C.getQualifiedType(Fn, Old.getQualifiers());
+      if (I == Stack.size()) {
+        Qualifiers Quals = Old.getQualifiers();
+        if (FnAS != LangAS::Default && !Quals.hasAddressSpace())
+          Quals.setAddressSpace(FnAS);
+        return C.getQualifiedType(Fn, Quals);
+      }
 
       // Build up the inner type, applying the qualifiers from the old
       // type to the new type.
@@ -7291,7 +7306,10 @@ namespace {
     }
 
     QualType wrap(ASTContext &C, const Type *Old, unsigned I) {
-      if (I == Stack.size()) return QualType(Fn, 0);
+      if (I == Stack.size())
+        return FnAS == LangAS::Default
+                   ? QualType(Fn, 0)
+                   : C.getAddrSpaceQualType(QualType(Fn, 0), FnAS);
 
       switch (static_cast<WrapKind>(Stack[I++])) {
       case Desugar:
@@ -7944,6 +7962,8 @@ static Attr *getCCTypeAttr(ASTContext &Ctx, ParsedAttr &Attr) {
     return createSimpleAttr<PreserveAllAttr>(Ctx, Attr);
   case ParsedAttr::AT_M68kRTD:
     return createSimpleAttr<M68kRTDAttr>(Ctx, Attr);
+  case ParsedAttr::AT_I8086Interrupt:
+    return createSimpleAttr<I8086InterruptAttr>(Ctx, Attr);
   case ParsedAttr::AT_PreserveNone:
     return createSimpleAttr<PreserveNoneAttr>(Ctx, Attr);
   case ParsedAttr::AT_RISCVVectorCC:
@@ -8551,6 +8571,9 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
   if (CCOld == CC) {
     Equivalent = type;
   } else {
+    // Some conventions make a function near or far (i8086 __interrupt).
+    unwrapped.FnAS =
+        S.Context.getTargetInfo().getFunctionAddressSpaceForCallingConv(CC);
     auto EI = unwrapped.get()->getExtInfo().withCallingConv(CC);
     Equivalent =
       unwrapped.wrap(S, S.Context.adjustFunctionType(unwrapped.get(), EI));

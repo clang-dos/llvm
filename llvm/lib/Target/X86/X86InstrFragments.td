@@ -323,6 +323,11 @@ def X86farcall : SDNode<"X86ISD::FARCALL", SDT_X86Call,
                         [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                          SDNPVariadic]>;
 
+// i8086: PUSHF and a far call, to an interrupt function.
+def X86farcall_intr : SDNode<"X86ISD::FARCALL_INTR", SDT_X86Call,
+                             [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                              SDNPVariadic]>;
+
 def X86NoTrackCall : SDNode<"X86ISD::NT_CALL", SDT_X86Call,
                             [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                              SDNPVariadic]>;

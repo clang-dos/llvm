@@ -2630,6 +2630,20 @@ void X86AsmPrinter::emitInstruction(const MachineInstr *MI) {
     EmitSEHInstruction(MI);
     return;
   }
+  case X86::FARCALL16m_INTR: {
+    EmitAndCountInstruction(MCInstBuilder(X86::PUSHF16));
+    MCInst Call;
+    Call.setOpcode(X86::FARCALL16m);
+    for (const MachineOperand &MO : MI->operands())
+      if (MCOperand Op = MCInstLowering.LowerMachineOperand(MI, MO);
+          Op.isValid())
+        Call.addOperand(Op);
+    EmitAndCountInstruction(Call);
+    return;
+  }
+  case X86::FARCALL16sym_INTR:
+    EmitAndCountInstruction(MCInstBuilder(X86::PUSHF16));
+    [[fallthrough]];
   case X86::FARCALL16sym: {
     // lcall $sym@SEG, $sym
     MachineOperand Seg = MI->getOperand(0);

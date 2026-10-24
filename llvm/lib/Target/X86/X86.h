@@ -382,6 +382,10 @@ public:
 
 FunctionPass *createX86PartialReductionLegacyPass();
 
+/// i8086: make an interrupt function's accesses through its pointer to the
+/// saved registers SS-relative.
+FunctionPass *createX86I8086InterruptArgsLegacyPass();
+
 /// Lowers i8086 huge pointer arithmetic, conversions and comparisons, which
 /// work on linear addresses, to operations on segment:offset pairs.
 class X86HugePointersPass
@@ -549,6 +553,7 @@ void initializeX86LowerAMXTypeLegacyPassPass(PassRegistry &);
 void initializeX86LowerTileCopyLegacyPass(PassRegistry &);
 void initializeX86OptimizeLEAsLegacyPass(PassRegistry &);
 void initializeX86PartialReductionLegacyPass(PassRegistry &);
+void initializeX86I8086InterruptArgsLegacyPass(PassRegistry &);
 void initializeX86HugePointersLegacyPass(PassRegistry &);
 void initializeX86PreTileConfigLegacyPass(PassRegistry &);
 void initializeX86ReturnThunksLegacyPass(PassRegistry &);

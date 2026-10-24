@@ -526,6 +526,13 @@ public:
     return std::nullopt;
   }
 
+  /// The address space of a function of calling convention CC that has no
+  /// address space qualifier, or LangAS::Default for the usual one. On
+  /// i8086 an __interrupt function is far, as in Open Watcom.
+  virtual LangAS getFunctionAddressSpaceForCallingConv(CallingConv CC) const {
+    return LangAS::Default;
+  }
+
   /// The address space of the C++ ABI's own globals (vtables, VTTs, type_info
   /// objects and type names), when it is not that of other globals: in the
   /// i8086 far-data models they are far data, outside DGROUP.

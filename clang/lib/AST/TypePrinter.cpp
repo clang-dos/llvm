@@ -1196,6 +1196,9 @@ void TypePrinter::printFunctionAfter(const FunctionType::ExtInfo &Info,
     case CC_M68kRTD:
       OS << " __attribute__((m68k_rtd))";
       break;
+    case CC_I8086Interrupt:
+      OS << " __attribute__((i8086_interrupt))";
+      break;
     case CC_PreserveNone:
       OS << " __attribute__((preserve_none))";
       break;
@@ -2141,6 +2144,9 @@ void TypePrinter::printAttributedAfter(const AttributedType *T,
     break;
   case attr::M68kRTD:
     OS << "m68k_rtd";
+    break;
+  case attr::I8086Interrupt:
+    OS << "i8086_interrupt";
     break;
   case attr::RISCVVectorCC:
     OS << "riscv_vector_cc";

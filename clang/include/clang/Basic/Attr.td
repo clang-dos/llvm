@@ -3672,6 +3672,11 @@ def M68kRTD: DeclOrTypeAttr {
   let Documentation = [M68kRTDDocs];
 }
 
+def I8086Interrupt : DeclOrTypeAttr {
+  let Spellings = [Clang<"i8086_interrupt">];
+  let Documentation = [I8086InterruptDocs];
+}
+
 def PreserveNone : DeclOrTypeAttr,
                    TargetSpecificAttr<TargetArch<!listconcat(TargetAArch64.Arches, TargetAnyX86.Arches)>> {
   let Spellings = [Clang<"preserve_none">];

@@ -1138,6 +1138,8 @@ def CC_X86_64 : CallingConv<[
 // cdecl: every argument on the stack, pushed right to left, each in a 2-byte
 // aligned slot. The caller removes the arguments.
 def CC_X86_16_C : CallingConv<[
+  // The parameters of an interrupt function are the registers it saved.
+  CCIfCC<"CallingConv::X86_INTR", CCCustom<"CC_X86_16_Intr">>,
   CCIfByVal<CCPassByVal<2, 2>>,
   CCIfType<[i1, i8], CCPromoteToType<i16>>,
   CCIfType<[i16], CCAssignToStack<2, 2>>,

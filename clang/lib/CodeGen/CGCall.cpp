@@ -110,6 +110,8 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
     return llvm::CallingConv::SwiftTail;
   case CC_M68kRTD:
     return llvm::CallingConv::M68k_RTD;
+  case CC_I8086Interrupt:
+    return llvm::CallingConv::X86_INTR;
   case CC_PreserveNone:
     return llvm::CallingConv::PreserveNone;
     // clang-format off
@@ -312,6 +314,9 @@ static CallingConv getCallingConventionForDecl(const ObjCMethodDecl *D,
 
   if (D->hasAttr<M68kRTDAttr>())
     return CC_M68kRTD;
+
+  if (D->hasAttr<I8086InterruptAttr>())
+    return CC_I8086Interrupt;
 
   if (D->hasAttr<PreserveNoneAttr>())
     return CC_PreserveNone;
@@ -3223,10 +3228,12 @@ void CodeGenModule::ConstructAttributeList(StringRef Name,
 
       // HLSL out and inout parameters must not be marked with ByVal or
       // DeadOnReturn attributes because stores to these parameters by the
-      // callee are visible to the caller.
+      // callee are visible to the caller. So are stores to the registers
+      // that an i8086 interrupt function saved (union INTPACK).
       if (auto ParamABI = FI.getExtParameterInfo(ArgNo).getABI();
           ParamABI != ParameterABI::HLSLOut &&
-          ParamABI != ParameterABI::HLSLInOut) {
+          ParamABI != ParameterABI::HLSLInOut &&
+          FI.getCallingConvention() != llvm::CallingConv::X86_INTR) {
 
         // Depending on the ABI, this may be either a byval or a dead_on_return
         // argument.

@@ -93,6 +93,7 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86Target() {
   initializeX86LoadValueInjectionRetHardeningLegacyPass(PR);
   initializeX86OptimizeLEAsLegacyPass(PR);
   initializeX86PartialReductionLegacyPass(PR);
+  initializeX86I8086InterruptArgsLegacyPass(PR);
   initializeX86HugePointersLegacyPass(PR);
   initializeX86ReturnThunksLegacyPass(PR);
   initializeX86DAGToDAGISelLegacyPass(PR);
@@ -442,6 +443,9 @@ void X86PassConfig::addIRPasses() {
   addPass(createX86LowerAMXTypeLegacyPass());
 
   TargetPassConfig::addIRPasses();
+
+  if (TM->getTargetTriple().getArch() == Triple::i8086)
+    addPass(createX86I8086InterruptArgsLegacyPass());
 
   if (TM->getOptLevel() != CodeGenOptLevel::None) {
     addPass(createInterleavedAccessPass());

@@ -1961,6 +1961,9 @@ void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
   Builder.defineMacro("_export", "__attribute__((dllexport))");
   Builder.defineMacro("__loadds", "__attribute__((__loadds__))");
   Builder.defineMacro("_loadds", "__attribute__((__loadds__))");
+  // Interrupt handlers, which are far functions.
+  Builder.defineMacro("__interrupt", "__attribute__((__i8086_interrupt__))");
+  Builder.defineMacro("_interrupt", "__attribute__((__i8086_interrupt__))");
   if (!Opts.Borland)
     Builder.defineMacro("_pascal", "__pascal");
   switch (CPU) {

@@ -3893,6 +3893,16 @@ void ItaniumRTTIBuilder::BuildVTablePointer(const Type *Ty,
 
   CGM.setDSOLocal(cast<llvm::GlobalValue>(VTable->stripPointerCasts()));
 
+  // On 16-bit DOS, where code is limited to 64 KiB, a type_info object refers
+  // to its class's vtable weakly. Only dynamic_cast and the exception catch
+  // code call type_info's virtual functions, and they refer to the vtables
+  // themselves, so a program that only has type_info objects (every C++
+  // program has some, from std::exception) does not link those functions.
+  if (CGM.getTriple().getArch() == llvm::Triple::i8086)
+    if (auto *GV = dyn_cast<llvm::GlobalVariable>(VTable->stripPointerCasts()))
+      if (GV->isDeclaration())
+        GV->setLinkage(llvm::GlobalValue::ExternalWeakLinkage);
+
   llvm::Type *PtrDiffTy =
       CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());
 

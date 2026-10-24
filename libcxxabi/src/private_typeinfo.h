@@ -16,6 +16,20 @@
 
 namespace __cxxabiv1 {
 
+// On 16-bit DOS (i8086), where code is limited to 64 KiB, clang refers to
+// the vtables of the type_info classes weakly from type_info objects, so
+// that a program does not link their virtual functions just because it has
+// type_info objects. Code that calls those virtual functions (dynamic_cast,
+// exception catch matching) uses _LIBCXXABI_LINK_TYPE_INFO_VTABLES() to link
+// the vtables.
+#if defined(__I86__)
+extern "C" _LIBCXXABI_HIDDEN const void* const __cxa_type_info_vtables[];
+#  define _LIBCXXABI_LINK_TYPE_INFO_VTABLES()                                                                          \
+    __asm__ volatile("" : : "r"((unsigned short)(__UINTPTR_TYPE__)__cxa_type_info_vtables))
+#else
+#  define _LIBCXXABI_LINK_TYPE_INFO_VTABLES() ((void)0)
+#endif
+
 class _LIBCXXABI_TYPE_VIS __shim_type_info : public std::type_info {
 public:
   _LIBCXXABI_HIDDEN ~__shim_type_info() override;

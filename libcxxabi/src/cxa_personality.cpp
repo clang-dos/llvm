@@ -652,6 +652,8 @@ static void scan_eh_tab(scan_results &results, _Unwind_Action actions,
                         bool native_exception,
                         _Unwind_Exception *unwind_exception,
                         _Unwind_Context *context) {
+    // Catch matching calls the virtual functions of the type_info classes.
+    _LIBCXXABI_LINK_TYPE_INFO_VTABLES();
     // Initialize results to found nothing but an error
     results.ttypeIndex = 0;
     results.actionRecord = 0;

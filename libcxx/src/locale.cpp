@@ -110,9 +110,61 @@ const locale::category locale::time;
 const locale::category locale::messages;
 const locale::category locale::all;
 
+#if defined(__I86__)
+// The 8086 keeps a locale's facets in a plain array that grows with malloc.
+// vector with __sso_allocator costs about 600 bytes of code in every program
+// that writes to a stream, and these few operations are all __imp needs.
+class __facet_table {
+  locale::facet** p_;
+  size_t n_;
+  size_t cap_;
+
+public:
+  explicit __facet_table(size_t n) : p_(nullptr), n_(0), cap_(0) { resize(n); }
+  __facet_table(const __facet_table&) = delete;
+  ~__facet_table() { free(p_); }
+
+  __facet_table& operator=(const __facet_table& o) {
+    if (this != &o) {
+      n_ = 0;
+      resize(o.n_);
+      if (o.n_)
+        memcpy(p_, o.p_, o.n_ * sizeof(*p_));
+    }
+    return *this;
+  }
+
+  size_t size() const { return n_; }
+  locale::facet*& operator[](size_t i) { return p_[i]; }
+  locale::facet* operator[](size_t i) const { return p_[i]; }
+  void clear() { n_ = 0; }
+
+  void resize(size_t n) {
+    if (n > cap_) {
+      // malloc and copy rather than realloc, which programs seldom link.
+      locale::facet** p = static_cast<locale::facet**>(malloc(n * sizeof(*p_)));
+      if (!p)
+        std::__throw_bad_alloc();
+      if (n_)
+        memcpy(p, p_, n_ * sizeof(*p_));
+      free(p_);
+      p_   = p;
+      cap_ = n;
+    }
+    if (n > n_)
+      memset(p_ + n_, 0, (n - n_) * sizeof(*p_));
+    n_ = n;
+  }
+};
+#endif
+
 class _LIBCPP_HIDDEN locale::__imp : public facet {
   enum { N = 30 };
+#if defined(__I86__)
+  __facet_table facets_;
+#else
   vector<facet*, __sso_allocator<facet*, N> > facets_;
+#endif
   string name_;
 
 public:

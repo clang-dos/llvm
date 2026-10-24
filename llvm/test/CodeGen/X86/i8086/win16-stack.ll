@@ -5,6 +5,8 @@
 ; DS.
 ; RUN: llc -mtriple=i8086-pc-win16 -target-abi=small < %s | FileCheck %s --check-prefixes=CHECK,WIN
 ; RUN: llc -mtriple=i8086-pc-msdos -target-abi=small < %s | FileCheck %s --check-prefixes=CHECK,DOS
+; RUN: llc -mtriple=i8086-pc-win16 -target-abi=small -no-x86-call-frame-opt < %s | FileCheck %s --check-prefixes=NOPUSH,NOPUSH-WIN
+; RUN: llc -mtriple=i8086-pc-msdos -target-abi=small -no-x86-call-frame-opt < %s | FileCheck %s --check-prefixes=NOPUSH,NOPUSH-DOS
 
 declare void @use_far(ptr addrspace(2))
 declare void @use(ptr)
@@ -122,15 +124,21 @@ define void @move(ptr %p) {
   ret void
 }
 
-; A struct passed by value is copied to the stack with SS.
+; A struct passed by value is pushed, or, when the arguments are not
+; pushed, copied to the stack with SS.
 %pair = type { ptr addrspace(2), i16 }
 declare void @takepair(ptr byval(%pair) align 2)
 
 ; CHECK-LABEL: _byval_copy:
-; CHECK:      movw %sp, %bx
-; WIN-NEXT:   movw %ax, %ss:4(%bx)
-; DOS-NEXT:   movw %ax, 4(%bx)
-; CHECK:      callw _takepair
+; CHECK:      pushw %ax
+; CHECK-NEXT: pushw %dx
+; CHECK-NEXT: pushw %cx
+; CHECK-NEXT: callw _takepair
+; NOPUSH-LABEL: _byval_copy:
+; NOPUSH:          movw %sp, %bx
+; NOPUSH-WIN-NEXT: movw %ax, %ss:4(%bx)
+; NOPUSH-DOS-NEXT: movw %ax, 4(%bx)
+; NOPUSH:          callw _takepair
 define void @byval_copy() noinline optnone {
   %p = alloca %pair, align 2
   %q = getelementptr inbounds %pair, ptr %p, i16 0, i32 1

@@ -398,6 +398,13 @@ public:
     if (Prologue == "all" ||
         (Prologue == "exported" && FD->hasAttr<DLLExportAttr>()))
       Fn->addFnAttr("i8086-windows-prologue");
+    // A DLL runs on its caller's stack, so a near pointer, which means DS,
+    // cannot point to a local. In the near data models the backend moves
+    // the locals whose address escapes to a frame in DGROUP, with the
+    // SafeStack pass.
+    if (CGM.getCodeGenOpts().WindowsDLL &&
+        !isI8086FarDataModel(CGM.getTarget()))
+      Fn->addFnAttr(llvm::Attribute::SafeStack);
   }
 
 private:

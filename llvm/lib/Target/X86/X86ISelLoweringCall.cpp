@@ -676,6 +676,16 @@ Value *X86TargetLowering::getSafeStackPointerLocation(
     return SegmentOffset(IRB, Offset, getAddressSpace());
   }
 
+  // 16-bit Windows DLL code in the near data models keeps the locals whose
+  // address escapes in a frame in DGROUP, one per task that calls the DLL;
+  // the DLL's startup code finds the current task's frame pointer.
+  if (Subtarget.getTargetTriple().getArch() == Triple::i8086) {
+    Module *M = IRB.GetInsertBlock()->getModule();
+    FunctionCallee Fn = M->getOrInsertFunction(
+        "__win16_frame_pointer_address", PointerType::get(M->getContext(), 0));
+    return IRB.CreateCall(Fn);
+  }
+
   // Fuchsia is similar.
   if (Subtarget.isTargetFuchsia()) {
     // <zircon/tls.h> defines ZX_TLS_UNSAFE_SP_OFFSET with this value.
@@ -1295,15 +1305,29 @@ static bool hasCalleePopSRet(const SmallVectorImpl<T> &Args,
 /// Make a copy of an aggregate at address specified by "Src" to address
 /// "Dst" with size and alignment information specified by the specific
 /// parameter attribute. The copy will be passed as a byval function parameter.
-static SDValue CreateCopyOfByValArgument(SDValue Src, SDValue Dst,
-                                         SDValue Chain, ISD::ArgFlagsTy Flags,
-                                         SelectionDAG &DAG, const SDLoc &dl) {
+static SDValue CreateCopyOfByValArgument(
+    SDValue Src, SDValue Dst, SDValue Chain, ISD::ArgFlagsTy Flags,
+    SelectionDAG &DAG, const SDLoc &dl,
+    MachinePointerInfo DstInfo = MachinePointerInfo(),
+    MachinePointerInfo SrcInfo = MachinePointerInfo()) {
   SDValue SizeNode = DAG.getIntPtrConstant(Flags.getByValSize(), dl);
   Align Alignment = Flags.getNonZeroByValAlign();
   return DAG.getMemcpy(Chain, dl, Dst, Src, SizeNode, Alignment, Alignment,
                        /*isVolatile*/ false, /*AlwaysInline=*/true,
-                       /*CI=*/nullptr, std::nullopt, MachinePointerInfo(),
-                       MachinePointerInfo());
+                       /*CI=*/nullptr, std::nullopt, DstInfo, SrcInfo);
+}
+
+/// The memory a byval argument of a 16-bit call is copied from. On 16-bit
+/// Windows, a copy from a local variable needs SS (see X86FixupAddr16), which
+/// it finds through the IR value.
+static MachinePointerInfo byValSourceInfo(const X86Subtarget &Subtarget,
+                                          const CallBase *CB,
+                                          const ISD::OutputArg &Out) {
+  if (!Subtarget.isTarget16BitABI() || !CB ||
+      Out.OrigArgIndex >= CB->arg_size() ||
+      !CB->paramHasAttr(Out.OrigArgIndex, Attribute::ByVal))
+    return MachinePointerInfo();
+  return MachinePointerInfo(CB->getArgOperand(Out.OrigArgIndex));
 }
 
 /// Return true if the calling convention is one that we can guarantee TCO for.
@@ -2059,13 +2083,20 @@ SDValue X86TargetLowering::LowerMemOpCallTo(SDValue Chain, SDValue StackPtr,
                                             SelectionDAG &DAG,
                                             const CCValAssign &VA,
                                             ISD::ArgFlagsTy Flags,
-                                            bool isByVal) const {
+                                            bool isByVal,
+                                            MachinePointerInfo SrcInfo) const {
   unsigned LocMemOffset = VA.getLocMemOffset();
   SDValue PtrOff = DAG.getIntPtrConstant(LocMemOffset, dl);
   PtrOff = DAG.getNode(ISD::ADD, dl, getPointerTy(DAG.getDataLayout()),
                        StackPtr, PtrOff);
   if (isByVal)
-    return CreateCopyOfByValArgument(Arg, PtrOff, Chain, Flags, DAG, dl);
+    return CreateCopyOfByValArgument(
+        Arg, PtrOff, Chain, Flags, DAG, dl,
+        Subtarget.isTarget16BitABI()
+            ? MachinePointerInfo::getStack(DAG.getMachineFunction(),
+                                           LocMemOffset)
+            : MachinePointerInfo(),
+        SrcInfo);
 
   MaybeAlign Alignment;
   if (Subtarget.isTargetWindowsMSVC() && !Subtarget.is64Bit() &&
@@ -2550,8 +2581,9 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       if (!StackPtr.getNode())
         StackPtr = DAG.getCopyFromReg(Chain, dl, RegInfo->getStackRegister(),
                                       getPointerTy(DAG.getDataLayout()));
-      MemOpChains.push_back(LowerMemOpCallTo(Chain, StackPtr, Arg,
-                                             dl, DAG, VA, Flags, isByVal));
+      MemOpChains.push_back(LowerMemOpCallTo(
+          Chain, StackPtr, Arg, dl, DAG, VA, Flags, isByVal,
+          byValSourceInfo(Subtarget, CLI.CB, Outs[OutIndex])));
     }
   }
 

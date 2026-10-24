@@ -2247,6 +2247,10 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
       // points) through the entry sequence, as Open Watcom -zW does.
       CmdArgs.push_back("-mwindows-prologue=exported");
     }
+    // Code for a DLL, which runs with SS != DS.
+    if (getToolChain().getTriple().isOSWin16() &&
+        Args.hasArg(options::OPT_shared, options::OPT_mwindows_dll))
+      CmdArgs.push_back("-mwindows-dll");
   }
 
   if (!Args.hasFlag(options::OPT_mred_zone, options::OPT_mno_red_zone, true) ||

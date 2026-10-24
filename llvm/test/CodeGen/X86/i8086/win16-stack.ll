@@ -120,3 +120,22 @@ define void @move(ptr %p) {
   call void @llvm.memmove.p0.p0.i16(ptr align 2 %p, ptr align 2 %a, i16 80, i1 false)
   ret void
 }
+
+; A struct passed by value is copied to the stack with SS.
+%pair = type { ptr addrspace(2), i16 }
+declare void @takepair(ptr byval(%pair) align 2)
+
+; CHECK-LABEL: _byval_copy:
+; CHECK:      movw %sp, %bx
+; WIN-NEXT:   movw %ax, %ss:4(%bx)
+; DOS-NEXT:   movw %ax, 4(%bx)
+; CHECK:      callw _takepair
+define void @byval_copy() noinline optnone {
+  %p = alloca %pair, align 2
+  %q = getelementptr inbounds %pair, ptr %p, i16 0, i32 1
+  store i16 3, ptr %q, align 2
+  br label %next
+next:
+  call void @takepair(ptr byval(%pair) align 2 %p)
+  ret void
+}

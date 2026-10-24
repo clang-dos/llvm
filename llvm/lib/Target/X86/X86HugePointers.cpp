@@ -327,8 +327,13 @@ public:
   bool runOnFunction(Function &F) override {
     if (!F.getParent()->getTargetTriple().isX86_16())
       return false;
+    // The code generator runs SafeStack just before this pass; the attribute
+    // goes, so that the second SafeStack pass leaves the function alone.
+    bool Changed = F.hasFnAttribute(Attribute::SafeStack);
+    F.removeFnAttr(Attribute::SafeStack);
     return HugePointers(F).run(
-        F, getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F));
+               F, getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F)) ||
+           Changed;
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {

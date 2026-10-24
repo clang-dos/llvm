@@ -522,9 +522,14 @@ bool X86PassConfig::addILPOpts() {
 
 bool X86PassConfig::addPreISel() {
   const Triple &TT = TM->getTargetTriple();
-  // After CodeGenPrepare, which may sink address computations.
-  if (TT.isX86_16())
+  // After CodeGenPrepare, which may sink address computations. In a 16-bit
+  // Windows DLL in a near data model, SafeStack first moves the locals whose
+  // address escapes into DGROUP, so that the stack pointers left are the ones
+  // that need SS.
+  if (TT.isX86_16()) {
+    addPass(createSafeStackPass());
     addPass(createX86HugePointersLegacyPass());
+  }
   // Only add this pass for 32-bit x86 Windows.
   if (TT.isOSWindows() && TT.isX86_32())
     addPass(createX86WinEHStateLegacyPass());

@@ -5663,6 +5663,12 @@ def mwindows_prologue_EQ : Joined<["-"], "mwindows-prologue=">, Group<m_Group>,
            "or all (every far function, as -zw)">,
   Values<"none,exported,all">,
   MarshallingInfoString<CodeGenOpts<"WindowsPrologue">>;
+def mwindows_dll : Flag<["-"], "mwindows-dll">, Group<m_Group>,
+  Flags<[TargetSpecific]>, Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Compile i8086 code for a 16-bit Windows DLL, which runs on its "
+           "caller's stack: in the small and medium models, locals whose "
+           "address is taken live in DGROUP (implied by -shared)">,
+  MarshallingInfoFlag<CodeGenOpts<"WindowsDLL">>;
 def mlarge_data_threshold_EQ : Joined<["-"], "mlarge-data-threshold=">, Group<m_Group>,
   Flags<[TargetSpecific]>, Visibility<[ClangOption, CC1Option,FlangOption, FC1Option]>,
   MarshallingInfoInt<TargetOpts<"LargeDataThreshold">, "0">;

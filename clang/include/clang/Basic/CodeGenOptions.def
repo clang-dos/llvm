@@ -33,6 +33,7 @@ CODEGENOPT(ExperimentalABILowering, 1, 0, Benign) ///< -fexperimental-abi-loweri
                                                   ///< through the in-tree LLVMABI
                                                   ///< library where supported.
 CODEGENOPT(Crel, 1, 0, Benign) ///< -Wa,--crel
+CODEGENOPT(WindowsDLL, 1, 0, Benign) ///< -mwindows-dll (i8086)
 ENUM_CODEGENOPT(RelocSectionSym, RelocSectionSymType, 2,
                 RelocSectionSymType::All, Benign) ///< -Wa,--reloc-section-sym=
 CODEGENOPT(ImplicitMapSyms, 1, 0, Benign) ///< -Wa,-mmapsyms=implicit

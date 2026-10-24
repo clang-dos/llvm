@@ -122,8 +122,10 @@ class SafeStack {
   /// alignment of any object on the stack exceeds this value.
   ///
   /// 16 seems like a reasonable upper bound on the alignment of objects that we
-  /// might expect to appear on the stack on most common targets.
-  static constexpr Align StackAlignment = Align::Constant<16>();
+  /// might expect to appear on the stack on most common targets. Targets with
+  /// 16-bit pointers (i8086) use their own stack alignment, as their frames
+  /// are in a small segment.
+  Align StackAlignment = Align::Constant<16>();
 
   /// Return the value of the stack canary.
   Value *getStackGuard(IRBuilder<> &IRB, Function &F);
@@ -192,7 +194,10 @@ public:
       : F(F), TL(TL), Libcalls(Libcalls), DL(DL), DTU(DTU), SE(SE),
         StackPtrTy(DL.getAllocaPtrType(F.getContext())),
         AddrTy(DL.getAddressType(StackPtrTy)),
-        Int32Ty(Type::getInt32Ty(F.getContext())) {}
+        Int32Ty(Type::getInt32Ty(F.getContext())) {
+    if (MaybeAlign A = DL.getStackAlignment(); A && DL.getPointerSize() < 4)
+      StackAlignment = *A;
+  }
 
   // Run the transformation on the associated function.
   // Returns whether the function was changed.

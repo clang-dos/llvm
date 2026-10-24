@@ -140,6 +140,12 @@ extern template class _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS messages_byname<wchar_t>;
 #  endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
+// The facets of the classic locale.
+_LIBCPP_CLASSIC_FACET(messages<char>)
+#  if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_CLASSIC_FACET(messages<wchar_t>)
+#  endif
+
 _LIBCPP_END_NAMESPACE_STD
 
 #endif // _LIBCPP_HAS_LOCALIZATION

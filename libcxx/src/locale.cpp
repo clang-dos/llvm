@@ -140,67 +140,92 @@ private:
   }
   template <class F>
   void install_from(const __imp& other);
+  template <class F, class... Args>
+  void install_new(Args... args);
+
+public:
+  void install_classic();
+#if _LIBCPP_LAZY_CLASSIC_FACETS
+  const locale::facet* use_facet(long id, locale::__facet_factory make) const;
+  bool has_facet(long id, locale::__facet_factory make) const;
+  // The classic locale's facet, made with all the others if need be.
+  static const locale::facet* classic_facet(long id);
+#endif
 };
 
 locale::__imp::__imp(size_t refs) : facet(refs), facets_(N), name_("C") {
   facets_.clear();
-  install(&make<std::collate<char> >(1u));
-#if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<std::collate<wchar_t> >(1u));
+#if !_LIBCPP_LAZY_CLASSIC_FACETS
+  install_classic();
 #endif
-  install(&make<std::ctype<char> >(nullptr, false, 1u));
+}
+
+template <class F, class... Args>
+void locale::__imp::install_new(Args... args) {
+  long id = F::id.__get();
+  if (!has_facet(id))
+    install(&make<F>(args...), id);
+}
+
+// Installs the standard facets that are not there yet.
+void locale::__imp::install_classic() {
+  install_new<std::collate<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<std::ctype<wchar_t> >(1u));
+  install_new<std::collate<wchar_t> >(1u);
 #endif
-  install(&make<codecvt<char, char, mbstate_t> >(1u));
+  install_new<std::ctype<char> >(nullptr, false, 1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<codecvt<wchar_t, char, mbstate_t> >(1u));
+  install_new<std::ctype<wchar_t> >(1u);
+#endif
+  install_new<codecvt<char, char, mbstate_t> >(1u);
+#if _LIBCPP_HAS_WIDE_CHARACTERS
+  install_new<codecvt<wchar_t, char, mbstate_t> >(1u);
 #endif
   _LIBCPP_SUPPRESS_DEPRECATED_PUSH
-  install(&make<codecvt<char16_t, char, mbstate_t> >(1u));
-  install(&make<codecvt<char32_t, char, mbstate_t> >(1u));
+  install_new<codecvt<char16_t, char, mbstate_t> >(1u);
+  install_new<codecvt<char32_t, char, mbstate_t> >(1u);
 #if _LIBCPP_HAS_CHAR8_T
-  install(&make<codecvt<char16_t, char8_t, mbstate_t> >(1u));
-  install(&make<codecvt<char32_t, char8_t, mbstate_t> >(1u));
+  install_new<codecvt<char16_t, char8_t, mbstate_t> >(1u);
+  install_new<codecvt<char32_t, char8_t, mbstate_t> >(1u);
 #endif
   _LIBCPP_SUPPRESS_DEPRECATED_POP
-  install(&make<numpunct<char> >(1u));
+  install_new<numpunct<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<numpunct<wchar_t> >(1u));
+  install_new<numpunct<wchar_t> >(1u);
 #endif
-  install(&make<num_get<char> >(1u));
+  install_new<num_get<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<num_get<wchar_t> >(1u));
+  install_new<num_get<wchar_t> >(1u);
 #endif
-  install(&make<num_put<char> >(1u));
+  install_new<num_put<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<num_put<wchar_t> >(1u));
+  install_new<num_put<wchar_t> >(1u);
 #endif
-  install(&make<moneypunct<char, false> >(1u));
-  install(&make<moneypunct<char, true> >(1u));
+  install_new<moneypunct<char, false> >(1u);
+  install_new<moneypunct<char, true> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<moneypunct<wchar_t, false> >(1u));
-  install(&make<moneypunct<wchar_t, true> >(1u));
+  install_new<moneypunct<wchar_t, false> >(1u);
+  install_new<moneypunct<wchar_t, true> >(1u);
 #endif
-  install(&make<money_get<char> >(1u));
+  install_new<money_get<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<money_get<wchar_t> >(1u));
+  install_new<money_get<wchar_t> >(1u);
 #endif
-  install(&make<money_put<char> >(1u));
+  install_new<money_put<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<money_put<wchar_t> >(1u));
+  install_new<money_put<wchar_t> >(1u);
 #endif
-  install(&make<time_get<char> >(1u));
+  install_new<time_get<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<time_get<wchar_t> >(1u));
+  install_new<time_get<wchar_t> >(1u);
 #endif
-  install(&make<time_put<char> >(1u));
+  install_new<time_put<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<time_put<wchar_t> >(1u));
+  install_new<time_put<wchar_t> >(1u);
 #endif
-  install(&make<std::messages<char> >(1u));
+  install_new<std::messages<char> >(1u);
 #if _LIBCPP_HAS_WIDE_CHARACTERS
-  install(&make<std::messages<wchar_t> >(1u));
+  install_new<std::messages<wchar_t> >(1u);
 #endif
 }
 
@@ -337,7 +362,11 @@ locale::__imp::__imp(const __imp& other, const string& name, locale::category c)
 template <class F>
 inline void locale::__imp::install_from(const locale::__imp& one) {
   long id = F::id.__get();
+#if _LIBCPP_LAZY_CLASSIC_FACETS
+  install(const_cast<F*>(static_cast<const F*>(one.use_facet(id, __classic_facet_factory<F>::__get()))), id);
+#else
   install(const_cast<F*>(static_cast<const F*>(one.use_facet(id))), id);
+#endif
 }
 
 locale::__imp::__imp(const __imp& other, const __imp& one, locale::category c)
@@ -453,10 +482,45 @@ void locale::__imp::install(facet* f, long id) {
 }
 
 const locale::facet* locale::__imp::use_facet(long id) const {
+#if _LIBCPP_LAZY_CLASSIC_FACETS
+  if (!has_facet(id))
+    return classic_facet(id);
+#else
   if (!has_facet(id))
     std::__throw_bad_cast();
+#endif
   return facets_[static_cast<size_t>(id)];
 }
+
+#if _LIBCPP_LAZY_CLASSIC_FACETS
+// A locale that lacks a standard facet would have had the classic locale's,
+// which is made on first use: by make, or with all the others when the
+// caller has no make for it.
+const locale::facet* locale::__imp::classic_facet(long id) {
+  __imp& c = classic_locale_imp_.__get();
+  if (!c.has_facet(id))
+    c.install_classic();
+  if (!c.has_facet(id))
+    std::__throw_bad_cast();
+  return c.facets_[static_cast<size_t>(id)];
+}
+
+const locale::facet* locale::__imp::use_facet(long id, locale::__facet_factory make) const {
+  if (has_facet(id))
+    return facets_[static_cast<size_t>(id)];
+  __imp& c = classic_locale_imp_.__get();
+  if (!c.has_facet(id)) {
+    if (!make)
+      std::__throw_bad_cast();
+    c.install(make(), id);
+  }
+  return c.facets_[static_cast<size_t>(id)];
+}
+
+bool locale::__imp::has_facet(long id, locale::__facet_factory make) const {
+  return has_facet(id) || make || classic_locale_imp_.__get().has_facet(id);
+}
+#endif
 
 // locale
 
@@ -546,7 +610,24 @@ locale locale::global(const locale& loc) {
   return r;
 }
 
+#if _LIBCPP_LAZY_CLASSIC_FACETS
+bool locale::has_facet(id& x) const {
+  long i = x.__get();
+  if (__locale_->has_facet(i))
+    return true;
+  locale::__imp& c = locale::__imp::classic_locale_imp_.__get();
+  c.install_classic();
+  return c.has_facet(i);
+}
+
+const locale::facet* locale::__use_facet(id& x, __facet_factory make) const {
+  return __locale_->use_facet(x.__get(), make);
+}
+
+bool locale::__has_facet(id& x, __facet_factory make) const { return __locale_->has_facet(x.__get(), make); }
+#else
 bool locale::has_facet(id& x) const { return __locale_->has_facet(x.__get()); }
+#endif
 
 const locale::facet* locale::use_facet(id& x) const { return __locale_->use_facet(x.__get()); }
 

@@ -1090,6 +1090,16 @@ extern template class _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS num_put<wchar_t>;
 #  endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
+// The facets of the classic locale.
+_LIBCPP_CLASSIC_FACET(numpunct<char>)
+_LIBCPP_CLASSIC_FACET(num_get<char>)
+_LIBCPP_CLASSIC_FACET(num_put<char>)
+#  if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_CLASSIC_FACET(numpunct<wchar_t>)
+_LIBCPP_CLASSIC_FACET(num_get<wchar_t>)
+_LIBCPP_CLASSIC_FACET(num_put<wchar_t>)
+#  endif
+
 _LIBCPP_END_NAMESPACE_STD
 
 _LIBCPP_POP_MACROS

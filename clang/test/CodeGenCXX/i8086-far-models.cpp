@@ -95,3 +95,16 @@ int callm(A *p, int (A::*m)()) { return (p->*m)(); }
 // HUGE: call addrspace(5) void @__cxa_guard_release(ptr addrspace(3) addrspacecast (ptr @_ZGVZ4getdvE1d to ptr addrspace(3)))
 struct D { D(); };
 D &getd() { static D d; return d; }
+
+// The VTT is far data with the vtables, and a base constructor takes it as
+// a pointer of that address space.
+// SMALL-LABEL: define{{.*}} @_ZN2VBC1Ev(
+// SMALL: call addrspace(4) void @_ZN2VAC2Ev(ptr {{.*}}, ptr noundef getelementptr inbounds nuw (i8, ptr @_ZTT2VB, i16 2))
+// COMPACT-LABEL: define{{.*}} @_ZN2VBC1Ev(
+// COMPACT: call addrspace(4) void @_ZN2VAC2Ev(ptr addrspace(2) {{.*}}, ptr addrspace(2) noundef getelementptr inbounds nuw (i8, ptr addrspace(2) @_ZTT2VB, i16 4))
+// HUGE-LABEL: define{{.*}} @_ZN2VBC1Ev(
+// HUGE: call addrspace(5) void @_ZN2VAC2Ev(ptr addrspace(3) {{.*}}, ptr addrspace(3) noundef getelementptr inbounds nuw (i8, ptr addrspace(3) @_ZTT2VB, i32 4))
+struct V { int v; V(); };
+struct VA : virtual V { int a; VA(); };
+struct VB : VA { VB(); };
+VB::VB() {}

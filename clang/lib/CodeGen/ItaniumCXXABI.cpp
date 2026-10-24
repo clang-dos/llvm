@@ -623,6 +623,15 @@ static llvm::IntegerType *getMemFnPtrTy(CodeGenModule &CGM) {
   return CGM.PtrDiffTy;
 }
 
+/// The address space of a VTT, which is a C++ runtime global: they can have
+/// an address space of their own (i8086 far data).
+static LangAS getVTTAddressSpace(CodeGenModule &CGM) {
+  if (std::optional<unsigned> AS =
+          CGM.getTarget().getCXXRuntimeGlobalsAddressSpace())
+    return getLangASFromTargetAS(*AS);
+  return CGM.GetGlobalVarAddressSpace(nullptr);
+}
+
 /// The pointer type of functions loaded from vtables and member function
 /// pointers.
 static llvm::PointerType *getVirtualFnPtrTy(CodeGenModule &CGM) {
@@ -1937,7 +1946,7 @@ ItaniumCXXABI::buildStructorSignature(GlobalDecl GD,
   if ((isa<CXXConstructorDecl>(GD.getDecl()) ? GD.getCtorType() == Ctor_Base
                                              : GD.getDtorType() == Dtor_Base) &&
       cast<CXXMethodDecl>(GD.getDecl())->getParent()->getNumVBases() != 0) {
-    LangAS AS = CGM.GetGlobalVarAddressSpace(nullptr);
+    LangAS AS = getVTTAddressSpace(CGM);
     QualType Q = Context.getAddrSpaceQualType(Context.VoidPtrTy, AS);
     ArgTys.insert(ArgTys.begin() + 1,
                   Context.getPointerType(CanQualType::CreateUnsafe(Q)));
@@ -1973,7 +1982,7 @@ void ItaniumCXXABI::addImplicitStructorParams(CodeGenFunction &CGF,
     ASTContext &Context = getContext();
 
     // FIXME: avoid the fake decl
-    LangAS AS = CGM.GetGlobalVarAddressSpace(nullptr);
+    LangAS AS = getVTTAddressSpace(CGM);
     QualType Q = Context.getAddrSpaceQualType(Context.VoidPtrTy, AS);
     QualType T = Context.getPointerType(Q);
     auto *VTTDecl = ImplicitParamDecl::Create(
@@ -2022,7 +2031,7 @@ CGCXXABI::AddedStructorArgs ItaniumCXXABI::getImplicitConstructorArgs(
   // some targets.
   llvm::Value *VTT =
       CGF.GetVTTParameter(GlobalDecl(D, Type), ForVirtualBase, Delegating);
-  LangAS AS = CGM.GetGlobalVarAddressSpace(nullptr);
+  LangAS AS = getVTTAddressSpace(CGM);
   QualType Q = getContext().getAddrSpaceQualType(getContext().VoidPtrTy, AS);
   QualType VTTTy = getContext().getPointerType(Q);
   return AddedStructorArgs::prefix({{VTT, VTTTy}});

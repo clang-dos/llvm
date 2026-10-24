@@ -6444,6 +6444,11 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
           if (isPtrSizeAddressSpace(Q1.getAddressSpace()) ||
               isPtrSizeAddressSpace(Q2.getAddressSpace()))
             MaybeQ1 = true;
+          // Address spaces that convert to each other (an i8086 far
+          // pointer and a far default pointer): the default one.
+          else if (MaybeQ1 && (Q1.getAddressSpace() == LangAS::Default ||
+                               Q2.getAddressSpace() == LangAS::Default))
+            MaybeQ1 = Q1.getAddressSpace() == LangAS::Default;
           else
             return QualType(); // No unique best address space.
         }

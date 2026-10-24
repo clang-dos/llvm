@@ -6677,6 +6677,11 @@ static FunctionDecl *rewriteBuiltinFunctionDecl(Sema *Sema, ASTContext &Context,
       ArgExprs.size() < FT->getNumParams())
     return nullptr;
 
+  // On the i8086 the library functions take the memory model's pointers; a
+  // near or far pointer argument converts to them.
+  if (Context.getTargetInfo().getTriple().getArch() == llvm::Triple::i8086)
+    return nullptr;
+
   bool NeedsNewDecl = false;
   unsigned i = 0;
   SmallVector<QualType, 8> OverloadParams;

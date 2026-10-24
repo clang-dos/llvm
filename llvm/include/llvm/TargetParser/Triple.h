@@ -1324,9 +1324,16 @@ public:
   /// Tests whether the target uses emulated TLS as default.
   ///
   /// Note: Android API level 29 (10) introduced ELF TLS.
+  ///
+  /// Note: before Vista, Windows sets up a DLL's native TLS only when the DLL
+  /// is loaded with the program, not with LoadLibrary, so MinGW targets for
+  /// an older Windows version (such as windows5.1, Windows XP) use emulated
+  /// TLS, as GCC does.
   bool hasDefaultEmulatedTLS() const {
     return (isAndroid() && isAndroidVersionLT(29)) || isOSOpenBSD() ||
-           isWindowsCygwinEnvironment() || isOHOSFamily();
+           isWindowsCygwinEnvironment() || isOHOSFamily() ||
+           (isWindowsGNUEnvironment() && getOSMajorVersion() != 0 &&
+            getOSMajorVersion() < 6);
   }
 
   /// True if the target uses TLSDESC by default.

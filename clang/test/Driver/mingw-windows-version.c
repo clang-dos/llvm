@@ -70,3 +70,18 @@
 // RUN: %clang -### --target=i386-pc-windows3.10-gnu --sysroot= -fuse-ld=ld \
 // RUN:   %s 2>&1 | FileCheck --check-prefix=RDATA-RO %s
 // RDATA-RO-NOT: -section:.rdata
+
+// Before Vista, native TLS works only in the program and the DLLs loaded
+// with it, so versions below 6.0 use emulated TLS by default.
+// RUN: %clang -### --target=i586-pc-windows5.1-gnu --sysroot= -c %s 2>&1 \
+// RUN:   | FileCheck --check-prefix=EMUTLS %s
+// RUN: %clang -### --target=i486-pc-windows4.0-gnu --sysroot= -c %s 2>&1 \
+// RUN:   | FileCheck --check-prefix=EMUTLS %s
+// RUN: %clang -### --target=i586-pc-windows5.1-gnu --sysroot= -c \
+// RUN:   -fno-emulated-tls %s 2>&1 | FileCheck --check-prefix=NOEMUTLS %s
+// RUN: %clang -### --target=i686-pc-windows6.0-gnu --sysroot= -c %s 2>&1 \
+// RUN:   | FileCheck --check-prefix=NOEMUTLS %s
+// RUN: %clang -### --target=i686-w64-mingw32 --sysroot= -c %s 2>&1 \
+// RUN:   | FileCheck --check-prefix=NOEMUTLS %s
+// EMUTLS: "-femulated-tls"
+// NOEMUTLS-NOT: "-femulated-tls"

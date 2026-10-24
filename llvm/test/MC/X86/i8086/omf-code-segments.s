@@ -1,7 +1,7 @@
 # With far code, a module's code that does not fit in 64 KiB goes on in more
 # code segments, <module>_TEXT_1 and so on, of class CODE. Each section,
 # and room for each code COMDAT, goes in the current one while it fits.
-# Far calls and far pointers reach any of them; a near jump between two of
+# Far calls (one ptr16:16 fixup each) and far pointers reach any of them; a near jump between two of
 # them is an error.
 # RUN: llvm-mc -triple=i8086-pc-msdos -target-abi=large -filetype=obj %s -o %t.obj
 # RUN: %python %S/Inputs/omfdump.py %t.obj | FileCheck %s
@@ -17,11 +17,9 @@
 # CHECK:      PUBDEF '_a' group=0 seg=1 off=0000
 # CHECK:      PUBDEF '_d' group=0 seg=2 off=8000
 # CHECK:      LEDATA seg=1 off=0000
-# CHECK-NEXT:   FIXUP @001 seg offset16 frame=F5 target=T4:2
-# CHECK-NEXT:   FIXUP @003 seg base16 frame=F5 target=T4:2
+# CHECK-NEXT:   FIXUP @001 seg ptr16:16 frame=F5 target=T4:2
 # CHECK:      LEDATA seg=2 off=7F80
-# CHECK-NEXT:   FIXUP @081 seg offset16 frame=F5 target=T6:1
-# CHECK-NEXT:   FIXUP @083 seg base16 frame=F5 target=T6:1
+# CHECK-NEXT:   FIXUP @081 seg ptr16:16 frame=F5 target=T6:1
 # CHECK:      COMDAT '_c' flags=00 attr=10 align=1 group=0 seg=3 off=0000
 
 # NEAR: error: segment _TEXT is larger than 64 KiB

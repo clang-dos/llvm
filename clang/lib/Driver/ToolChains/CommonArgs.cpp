@@ -989,9 +989,11 @@ llvm::StringRef tools::getLTOParallelism(const ArgList &Args, const Driver &D) {
   return LtoJobsArg->getValue();
 }
 
-// PS4/PS5 uses -ffunction-sections and -fdata-sections by default.
+// PS4/PS5 uses -ffunction-sections and -fdata-sections by default. So does
+// i8086, where they let the linker (with option eliminate, which the MSDOS
+// toolchain passes) drop each function and variable a program does not use.
 bool tools::isUseSeparateSections(const llvm::Triple &Triple) {
-  return Triple.isPS();
+  return Triple.isPS() || Triple.getArch() == llvm::Triple::i8086;
 }
 
 void tools::addSeparateSectionFlags(const llvm::Triple &Triple,

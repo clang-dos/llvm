@@ -15310,6 +15310,15 @@ QualType Sema::CheckAddressOfOperand(ExprResult &OrigOp, SourceLocation OpLoc) {
     CXXMethodDecl *MD = cast<CXXMethodDecl>(DRE->getDecl());
 
     CheckUseOfCXXMethodAsAddressOfOperand(OpLoc, OrigOp.get(), MD);
+    // i8086: a member function pointer holds a code pointer of the memory
+    // model's kind.
+    if (op->getType().hasAddressSpace()) {
+      Diag(OpLoc, diag::err_i8086_member_pointer_distance)
+          << (Context.getTargetAddressSpace(op->getType().getAddressSpace()) ==
+              5)
+          << OrigOp.get()->getSourceRange();
+      return QualType();
+    }
     QualType MPTy = Context.getMemberPointerType(
         op->getType(), DRE->getQualifier(), MD->getParent());
 

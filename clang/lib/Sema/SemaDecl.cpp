@@ -3830,6 +3830,24 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
   std::tie(PrevDiag, OldLocation) =
       getNoteDiagForInvalidRedeclaration(Old, New);
 
+  // i8086: a function is near or far in all its declarations, and a later
+  // declaration without __near or __far keeps that of the first, as in Open
+  // Watcom.
+  {
+    LangAS OldAS = Old->getType().getAddressSpace();
+    LangAS NewAS = New->getType().getAddressSpace();
+    if (OldAS != NewAS) {
+      if (NewAS == LangAS::Default) {
+        New->setType(Context.getAddrSpaceQualType(New->getType(), OldAS));
+      } else {
+        Diag(New->getLocation(), diag::err_conflicting_types)
+            << New->getDeclName();
+        Diag(OldLocation, PrevDiag) << Old << Old->getType();
+        return true;
+      }
+    }
+  }
+
   // Don't complain about this if we're in GNU89 mode and the old function
   // is an extern inline function.
   // Don't complain about specializations. They are not supposed to have
@@ -11107,6 +11125,18 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     else if (!Previous.empty())
       // Recover gracefully from an invalid redeclaration.
       D.setRedeclaration(true);
+
+    // i8086: a vtable entry is a pointer of the memory model's kind, so a
+    // virtual function cannot be near or far on its own.
+    if (auto *MD = dyn_cast<CXXMethodDecl>(NewFD))
+      if (!MD->isInvalidDecl() && MD->isVirtual() &&
+          MD->getType().hasAddressSpace()) {
+        Diag(MD->getLocation(), diag::err_i8086_virtual_distance)
+            << MD
+            << (Context.getTargetAddressSpace(
+                    MD->getType().getAddressSpace()) == 5);
+        MD->setInvalidDecl();
+      }
 
     assert((NewFD->isInvalidDecl() || NewFD->isMultiVersion() ||
             !D.isRedeclaration() ||

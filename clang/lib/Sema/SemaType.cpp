@@ -2807,6 +2807,14 @@ QualType Sema::BuildMemberPointerType(QualType T, const CXXScopeSpec &SS,
     return QualType();
   }
 
+  // i8086: a member function pointer holds a code pointer of the memory
+  // model's kind.
+  if (T->isFunctionType() && T.hasAddressSpace()) {
+    Diag(Loc, diag::err_i8086_member_pointer_distance)
+        << (Context.getTargetAddressSpace(T.getAddressSpace()) == 5);
+    return QualType();
+  }
+
   // C++ 8.3.3p3: A pointer to member shall not point to ... a member
   //   with reference type, or "cv void."
   if (T->isReferenceType()) {
@@ -4335,6 +4343,9 @@ static Attr *createNullabilityAttr(ASTContext &Ctx, ParsedAttr &Attr,
 // Returns true if this is an invalid case.
 // ISO/IEC TR 18037 S5.3 (amending C99 6.7.3): "No type shall be qualified
 // by qualifiers for two or more different address spaces."
+static bool BuildAddressSpaceIndex(Sema &S, LangAS &ASIdx,
+                                   const Expr *AddrSpace, SourceLocation AttrLoc);
+
 static bool DiagnoseMultipleAddrSpaceAttributes(Sema &S, LangAS ASOld,
                                                 LangAS ASNew,
                                                 SourceLocation AttrLoc) {
@@ -5454,6 +5465,51 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
                  state.getDeclarator().getContext() ==
                      DeclaratorContext::LambdaExpr;
         };
+
+        // i8086: __near, __far or __huge after the parameter list of a
+        // non-static member function qualifies `this`, as in Microsoft C++
+        // 7: `int get() __far` takes a far `this`. (Before the name, or
+        // after the parameters of other functions, the qualifier makes the
+        // function far instead.)
+        if (!state.getSema().getLangOpts().OpenCLCPlusPlus &&
+            IsClassMember() && chunkIndex == 0 &&
+            D.getDeclSpec().getStorageClassSpec() != DeclSpec::SCS_typedef &&
+            D.getDeclSpec().getStorageClassSpec() != DeclSpec::SCS_static &&
+            Context.getTargetInfo()
+                .getFunctionAddressSpaceForQualifier(
+                    getLangASFromTargetAS(0))
+                .has_value()) {
+          // GNU attributes after the parameter list are the declarator's,
+          // or the chunk's after a trailing return type.
+          SmallVector<ParsedAttr *, 2> Trailing;
+          for (ParsedAttr &AL : DeclType.getAttrs())
+            Trailing.push_back(&AL);
+          for (ParsedAttr &AL : D.getAttributes())
+            if (AL.isGNUAttribute())
+              Trailing.push_back(&AL);
+          for (ParsedAttr *ALP : Trailing) {
+            ParsedAttr &AL = *ALP;
+            if (AL.isInvalid() || AL.getKind() != ParsedAttr::AT_AddressSpace ||
+                AL.getNumArgs() != 1 ||
+                AL.getArgAsExpr(0)->isValueDependent())
+              continue;
+            LangAS ThisAS;
+            if (!BuildAddressSpaceIndex(S, ThisAS, AL.getArgAsExpr(0),
+                                        AL.getLoc())) {
+              AL.setInvalid();
+              D.setInvalidType(true);
+              continue;
+            }
+            if (EPI.TypeQuals.hasAddressSpace() &&
+                EPI.TypeQuals.getAddressSpace() != ThisAS) {
+              S.Diag(AL.getLoc(), diag::err_attribute_address_multiple_qualifiers);
+              D.setInvalidType(true);
+            } else {
+              EPI.TypeQuals.addAddressSpace(ThisAS);
+            }
+            AL.setInvalid();
+          }
+        }
 
         if (state.getSema().getLangOpts().OpenCLCPlusPlus && IsClassMember()) {
           LangAS ASIdx = LangAS::Default;

@@ -3662,6 +3662,12 @@ def err_attribute_address_space_negative : Error<
   "address space is negative">;
 def err_attribute_address_space_too_high : Error<
   "address space is larger than the maximum supported (%0)">;
+def err_i8086_virtual_distance : Error<
+  "virtual function %0 cannot be %select{__near|__far}1 in this memory model; "
+  "its vtable entry is a %select{far|near}1 pointer">;
+def err_i8086_member_pointer_distance : Error<
+  "pointer to member function cannot point to a %select{__near|__far}0 "
+  "function in this memory model">;
 def err_attribute_address_multiple_qualifiers : Error<
   "multiple address spaces specified for type">;
 def warn_attribute_address_multiple_identical_qualifiers : Warning<

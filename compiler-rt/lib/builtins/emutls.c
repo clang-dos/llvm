@@ -187,10 +187,20 @@ static void emutls_exit(void) {
   }
 }
 
+// InitOnceExecuteOnce needs Windows Vista. For older Windows, down to
+// Windows 95, a spin lock on InterlockedExchange runs emutls_init once.
+#if _WIN32_WINNT >= 0x0600
+#define EMUTLS_INIT_ONCE 1
+#endif
+
+#ifdef EMUTLS_INIT_ONCE
 static BOOL CALLBACK emutls_init(PINIT_ONCE p0, PVOID p1, PVOID *p2) {
   (void)p0;
   (void)p1;
   (void)p2;
+#else
+static BOOL emutls_init(void) {
+#endif
   emutls_mutex =
       (LPCRITICAL_SECTION)_aligned_malloc(sizeof(CRITICAL_SECTION), 16);
   if (!emutls_mutex) {
@@ -210,8 +220,22 @@ static BOOL CALLBACK emutls_init(PINIT_ONCE p0, PVOID p1, PVOID *p2) {
 }
 
 static __inline void emutls_init_once(void) {
+#ifdef EMUTLS_INIT_ONCE
   static INIT_ONCE once;
   InitOnceExecuteOnce(&once, emutls_init, NULL, NULL);
+#else
+  // InterlockedExchange is a full barrier, so emutls_init's stores are seen
+  // before done is.
+  static LONG volatile lock;
+  static LONG volatile done;
+  if (done)
+    return;
+  while (InterlockedExchange(&lock, 1))
+    Sleep(0);
+  if (!done && emutls_init())
+    InterlockedExchange(&done, 1);
+  InterlockedExchange(&lock, 0);
+#endif
 }
 
 static __inline void emutls_lock(void) { EnterCriticalSection(emutls_mutex); }

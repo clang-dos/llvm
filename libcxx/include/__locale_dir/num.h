@@ -459,10 +459,21 @@ protected:
     return __b;
   }
 
-  template <class _MaybeSigned>
-  iter_type __do_get_integral(
-      iter_type __first, iter_type __last, ios_base& __iob, ios_base::iostate& __err, _MaybeSigned& __v) const {
-    using _Unsigned = __make_unsigned_t<_MaybeSigned>;
+  // Parses an integer into __val, without the range check of the type it is
+  // for. Returns, in __state, 0 when there is no number (the value is 0), 1
+  // when it overflows _Unsigned, and 2 otherwise.
+  template <class _Unsigned>
+  iter_type __do_get_integral_digits(
+      iter_type __first,
+      iter_type __last,
+      ios_base& __iob,
+      ios_base::iostate& __err,
+      _Unsigned& __val,
+      bool& __negate,
+      int& __state) const {
+    __state  = 0;
+    __negate = false;
+    __val    = 0;
 
     // Stage 1
     int __base = this->__get_base(__iob);
@@ -484,7 +495,6 @@ protected:
 
     if (__first == __last) {
       __err |= ios_base::eofbit | ios_base::failbit;
-      __v = 0;
       return __first;
     }
 
@@ -494,7 +504,6 @@ protected:
         *__g_end++ = 0;
     }
 
-    bool __negate = false;
     // __c == '+' || __c == '-'
     if (auto __c = *__first; __c == __atoms[24] || __c == __atoms[25]) {
       __negate = __c == __atoms[25];
@@ -503,7 +512,6 @@ protected:
 
     if (__first == __last) {
       __err |= ios_base::eofbit | ios_base::failbit;
-      __v = 0;
       return __first;
     }
 
@@ -517,7 +525,6 @@ protected:
         ++__first;
         if (__first == __last) {
           __err |= ios_base::eofbit;
-          __v = 0;
           return __first;
         }
         // __c2 == 'x' || __c2 == 'X'
@@ -543,7 +550,6 @@ protected:
         ++__first;
         if (__first == __last) {
           __err |= ios_base::eofbit;
-          __v = 0;
           return __first;
         }
         // __c == 'x' || __c == 'X'
@@ -555,7 +561,6 @@ protected:
     }
 
     // Calculate the actual number
-    _Unsigned __val   = 0;
     bool __overflowed = false;
     for (; __first != __last; ++__first) {
       auto __c = *__first;
@@ -581,10 +586,45 @@ protected:
       ++__dc;
     }
 
-    if (!__parsed_num) {
+    if (!__parsed_num)
       __err |= ios_base::failbit;
+    else
+      __state = __overflowed ? 1 : 2;
+
+    if (__grouping.size() != 0 && __g_end - __g < __num_get_base::__num_get_buf_sz)
+      *__g_end++ = __dc;
+
+    // Digit grouping checked
+    __check_grouping(__grouping, __g, __g_end, __err);
+    // EOF checked
+    if (__first == __last)
+      __err |= ios_base::eofbit;
+    return __first;
+  }
+
+  // On i8086 every integer type is parsed as unsigned long long and then
+  // range checked, so that the parser is there once, not once for each type:
+  // it is a lot of code for a 64 KiB code segment.
+  template <class _MaybeSigned>
+  iter_type __do_get_integral(
+      iter_type __first, iter_type __last, ios_base& __iob, ios_base::iostate& __err, _MaybeSigned& __v) const {
+    using _Unsigned = __make_unsigned_t<_MaybeSigned>;
+#  if defined(__I86__)
+    using _Parsed = unsigned long long;
+#  else
+    using _Parsed = _Unsigned;
+#  endif
+    _Parsed __val;
+    bool __negate;
+    int __state;
+    __first = __do_get_integral_digits(__first, __last, __iob, __err, __val, __negate, __state);
+    if (__state == 2 && __val > static_cast<_Parsed>(numeric_limits<_Unsigned>::max())) {
+      __err |= ios_base::failbit;
+      __state = 1;
+    }
+    if (__state == 0) {
       __v = 0;
-    } else if (__overflowed) {
+    } else if (__state == 1) {
       __err |= ios_base::failbit;
       __v = is_signed<_MaybeSigned>::value && __negate
               ? numeric_limits<_MaybeSigned>::min()
@@ -608,15 +648,6 @@ protected:
     } else {
       __v = -__val;
     }
-
-    if (__grouping.size() != 0 && __g_end - __g < __num_get_base::__num_get_buf_sz)
-      *__g_end++ = __dc;
-
-    // Digit grouping checked
-    __check_grouping(__grouping, __g, __g_end, __err);
-    // EOF checked
-    if (__first == __last)
-      __err |= ios_base::eofbit;
     return __first;
   }
 

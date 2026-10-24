@@ -1,7 +1,8 @@
 ; A 16-bit Windows DLL runs on its caller's stack, so SS is not DS. On
 ; win16, locals reached through BX, SI or DI get an SS override, far
 ; pointers to locals take SS as their segment, and a memcpy or memset of
-; the stack is a loop through a far pointer. On DOS, SS is DS.
+; the stack is a loop that addresses the locals through BP. On DOS, SS is
+; DS.
 ; RUN: llc -mtriple=i8086-pc-win16 -target-abi=small < %s | FileCheck %s --check-prefixes=CHECK,WIN
 ; RUN: llc -mtriple=i8086-pc-msdos -target-abi=small < %s | FileCheck %s --check-prefixes=CHECK,DOS
 
@@ -57,8 +58,8 @@ define void @farlocal() {
 
 ; CHECK-LABEL: _copy:
 ; WIN-NOT:     _memcpy
-; WIN:         movw %ss,
-; WIN:         movb %es:
+; WIN:         movb {{-?[0-9]+}}(%bp,
+; WIN:         movb %{{.*}}, {{-?[0-9]+}}(%bp,
 ; WIN-NOT:     _memcpy
 ; DOS:         callw _memcpy
 ; CHECK:       retw
@@ -86,7 +87,7 @@ define void @copy4(i1 %c) {
 
 ; CHECK-LABEL: _clear:
 ; WIN-NOT:     _memset
-; WIN:         movw %ss,
+; WIN:         movb $0, {{-?[0-9]+}}(%bp,
 ; DOS:         callw _memset
 ; CHECK:       retw
 define void @clear() {

@@ -108,6 +108,65 @@ FunctionPass *llvm::createX86ProtectAddr16LegacyPass() {
   return new X86ProtectAddr16Legacy();
 }
 
+/// Removes jumps to the next block, which -O0 leaves after every block, as
+/// no branch folding or block placement runs. Code is limited to 64 KiB.
+static bool removeFallthroughJumps(MachineFunction &MF) {
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  bool Changed = false;
+  for (MachineBasicBlock &MBB : MF) {
+    MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
+    SmallVector<MachineOperand, 4> Cond;
+    if (TII->analyzeBranch(MBB, TBB, FBB, Cond) || !TBB)
+      continue;
+    if (Cond.empty()) {
+      // An unconditional jump.
+      if (!MBB.isLayoutSuccessor(TBB))
+        continue;
+      TII->removeBranch(MBB);
+    } else if (FBB && MBB.isLayoutSuccessor(FBB)) {
+      // A conditional jump and a jump to the next block.
+      TII->removeBranch(MBB);
+      TII->insertBranch(MBB, TBB, nullptr, Cond, DebugLoc());
+    } else if (FBB && MBB.isLayoutSuccessor(TBB) &&
+               !TII->reverseBranchCondition(Cond)) {
+      // A conditional jump to the next block and a jump elsewhere.
+      TII->removeBranch(MBB);
+      TII->insertBranch(MBB, FBB, nullptr, Cond, DebugLoc());
+    } else {
+      continue;
+    }
+    Changed = true;
+  }
+  return Changed;
+}
+
+namespace {
+class X86RemoveFallthroughJumpsLegacy : public MachineFunctionPass {
+public:
+  static char ID;
+  X86RemoveFallthroughJumpsLegacy() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    if (!MF.getSubtarget<X86Subtarget>().isTarget16BitABI())
+      return false;
+    return removeFallthroughJumps(MF);
+  }
+
+  StringRef getPassName() const override {
+    return "X86 16-bit Fallthrough Jump Removal";
+  }
+};
+} // end anonymous namespace
+
+char X86RemoveFallthroughJumpsLegacy::ID = 0;
+
+INITIALIZE_PASS(X86RemoveFallthroughJumpsLegacy, "x86-remove-fallthrough-jumps",
+                "X86 16-bit Fallthrough Jump Removal", false, false)
+
+FunctionPass *llvm::createX86RemoveFallthroughJumpsLegacyPass() {
+  return new X86RemoveFallthroughJumpsLegacy();
+}
+
 bool X86ProtectAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
   if (!MF.getSubtarget<X86Subtarget>().isTarget16BitABI())
     return false;
@@ -298,5 +357,27 @@ bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
         Changed |= addStackSegment(MI, MemOp);
     }
   }
+
+  // A far pointer to a local copies SS into ES, which is left unused once
+  // removeStackSegment has its loads and stores go through BP. Without
+  // optimization nothing else removes these copies.
+  bool Removed;
+  do {
+    Removed = false;
+    for (MachineBasicBlock &MBB : MF)
+      for (MachineInstr &MI : llvm::make_early_inc_range(llvm::reverse(MBB)))
+        if (MI.isCopy() && MI.getOperand(0).getReg().isVirtual() &&
+            MRI->use_nodbg_empty(MI.getOperand(0).getReg())) {
+          Register Src = MI.getOperand(1).getReg();
+          if (Src.isPhysical() && !X86::SEGMENT_REGRegClass.contains(Src))
+            continue;
+          for (MachineOperand &MO : llvm::make_early_inc_range(
+                   MRI->reg_operands(MI.getOperand(0).getReg())))
+            if (MO.isDebug())
+              MO.setReg(Register());
+          MI.eraseFromParent();
+          Removed = Changed = true;
+        }
+  } while (Removed);
   return Changed;
 }

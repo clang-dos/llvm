@@ -69,6 +69,7 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86Target() {
   initializeWinEHStateLegacyPass(PR);
   initializeX86FixupAddr16LegacyPass(PR);
   initializeX86ProtectAddr16LegacyPass(PR);
+  initializeX86RemoveFallthroughJumpsLegacyPass(PR);
   initializeX86FixupBWInstLegacyPass(PR);
   initializeCompressEVEXLegacyPass(PR);
   initializeFixupLEAsLegacyPass(PR);
@@ -601,6 +602,9 @@ void X86PassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOptLevel::None) {
     addPass(new X86ExecutionDomainFix());
     addPass(createBreakFalseDepsLegacyPass());
+  } else if (TM->getTargetTriple().isX86_16()) {
+    // Code is limited to 64 KiB; -O0 leaves a jump after every block.
+    addPass(createX86RemoveFallthroughJumpsLegacyPass());
   }
 
   addPass(createX86IndirectBranchTrackingLegacyPass());

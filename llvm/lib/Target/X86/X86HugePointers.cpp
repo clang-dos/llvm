@@ -194,6 +194,62 @@ static bool markStackCasts(Function &F) {
   return !Casts.empty();
 }
 
+/// Copies far casts of static allocas into each block that uses them. The
+/// cast of a frame index is selected in the block that uses it, where a load
+/// or store through it becomes a BP-relative access. Used in another block,
+/// the far pointer would be a virtual register pair, which -O0 spills and
+/// reloads around every access through ES.
+static bool sinkStackCasts(Function &F) {
+  SmallVector<AddrSpaceCastInst *, 16> Casts;
+  for (Instruction &I : instructions(F)) {
+    auto *C = dyn_cast<AddrSpaceCastInst>(&I);
+    if (!C || C->getDestAddressSpace() != X86AS::FAR_DATA)
+      continue;
+    Value *Src = C->getOperand(0);
+    if (auto *S = dyn_cast<AddrSpaceCastInst>(Src);
+        S && S->getDestAddressSpace() == X86AS::NEAR_STACK)
+      Src = S->getOperand(0);
+    if (auto *AI = dyn_cast<AllocaInst>(Src); AI && AI->isStaticAlloca())
+      Casts.push_back(C);
+  }
+  bool Changed = false;
+  for (AddrSpaceCastInst *C : Casts) {
+    auto *Inner = dyn_cast<AddrSpaceCastInst>(C->getOperand(0));
+    DenseMap<BasicBlock *, Instruction *> PerBlock;
+    for (Use &U : llvm::make_early_inc_range(C->uses())) {
+      auto *User = cast<Instruction>(U.getUser());
+      Instruction *InsertPt = User;
+      if (auto *Phi = dyn_cast<PHINode>(User))
+        InsertPt = Phi->getIncomingBlock(U)->getTerminator();
+      BasicBlock *BB = InsertPt->getParent();
+      if (BB == C->getParent())
+        continue;
+      Instruction *&Copy = PerBlock[BB];
+      if (!Copy) {
+        // Before the first use in the block: the uses come in no order. A
+        // PHI's use is in its incoming block, at the end.
+        Instruction *First = InsertPt;
+        for (Instruction &I : *BB) {
+          if (&I == InsertPt)
+            break;
+          if (!isa<PHINode>(I) && is_contained(I.operands(), C)) {
+            First = &I;
+            break;
+          }
+        }
+        IRBuilder<> B(First);
+        Value *Src = C->getOperand(0);
+        if (Inner)
+          Src = B.CreateAddrSpaceCast(Inner->getOperand(0), Inner->getType());
+        Copy = cast<Instruction>(B.CreateAddrSpaceCast(Src, C->getType()));
+      }
+      U.set(Copy);
+      Changed = true;
+    }
+  }
+  return Changed;
+}
+
 /// Returns \p P as a far pointer through SS if it is a near stack pointer.
 static Value *farStackPointer(IRBuilder<> &B, Value *P) {
   if (P->getType()->getPointerAddressSpace() != 0 || !isStackPointer(P))
@@ -275,6 +331,7 @@ static bool expandStackMemIntrinsics(Function &F,
 bool HugePointers::run(Function &F, const TargetTransformInfo &TTI) {
   bool Changed = expandStackMemIntrinsics(F, TTI);
   Changed |= markStackCasts(F);
+  Changed |= sinkStackCasts(F);
   SmallVector<Instruction *, 32> Work;
   for (Instruction &I : instructions(F)) {
     expandConstants(&I);

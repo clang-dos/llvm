@@ -324,6 +324,9 @@ FunctionPass *createX86FixupAddr16LegacyPass();
 /// registers of 8086 memory operands.
 FunctionPass *createX86ProtectAddr16LegacyPass();
 
+/// Removes jumps to the next block in unoptimized 16-bit code.
+FunctionPass *createX86RemoveFallthroughJumpsLegacyPass();
+
 /// Return a Machine IR pass that reassigns instruction chains from one domain
 /// to another, when profitable.
 class X86DomainReassignmentPass
@@ -520,6 +523,7 @@ FunctionPass *createX86ArgumentStackSlotLegacyPass();
 void initializeCompressEVEXLegacyPass(PassRegistry &);
 void initializeX86FixupAddr16LegacyPass(PassRegistry &);
 void initializeX86ProtectAddr16LegacyPass(PassRegistry &);
+void initializeX86RemoveFallthroughJumpsLegacyPass(PassRegistry &);
 void initializeX86FixupBWInstLegacyPass(PassRegistry &);
 void initializeFixupLEAsLegacyPass(PassRegistry &);
 void initializeX86ArgumentStackSlotLegacyPass(PassRegistry &);

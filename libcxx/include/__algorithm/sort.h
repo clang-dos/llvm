@@ -50,10 +50,18 @@ _LIBCPP_PUSH_MACROS
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
+// The branchless sort avoids mispredicted branches. The 8086 predicts no
+// branches and has no conditional moves, and its code is limited to 64 KiB,
+// so it uses the smaller sort.
+#if defined(__I86__)
+template <class _Compare, class _Iter, class _Tp = typename iterator_traits<_Iter>::value_type>
+inline const bool __use_branchless_sort = false;
+#else
 template <class _Compare, class _Iter, class _Tp = typename iterator_traits<_Iter>::value_type>
 inline const bool __use_branchless_sort =
     __libcpp_is_contiguous_iterator<_Iter>::value && __is_cheap_to_copy<_Tp> && is_arithmetic<_Tp>::value &&
     (__desugars_to_v<__less_tag, _Compare, _Tp, _Tp> || __desugars_to_v<__greater_tag, _Compare, _Tp, _Tp>);
+#endif
 
 namespace __detail {
 

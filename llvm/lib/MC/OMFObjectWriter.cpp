@@ -255,6 +255,8 @@ class OMFObjectWriter final : public MCObjectWriter {
   void addFarSection(const MCSectionELF &Sec);
   /// The kinds of far data, each with its shared segment.
   enum FarKind { FK_Data, FK_Const, FK_Bss, FK_End, FK_Count };
+  // The size from which a far variable has a segment of its own.
+  static constexpr uint64_t MinOwnFarSegment = 0x1000;
   static FarKind getFarKind(StringRef Name) {
     return Name.starts_with(".farbss")      ? FK_Bss
            : Name.starts_with(".farrodata") ? FK_Const
@@ -449,12 +451,17 @@ void OMFObjectWriter::findComdats() {
     if (!K || (*K != SK_Text && *K != SK_Const && *K != SK_Data &&
                *K != SK_Bss && *K != SK_Count))
       continue;
-    // Only a section of its own: in a group, or named like .text.foo. Far
-    // data only in a group: other far variables can be over 64 KiB.
-    if (!Sec.getGroup() &&
-        (*K == SK_Count || Sec.getName().find('.', 1) == StringRef::npos))
+    // Only a section of its own: in a group, or named like .text.foo.
+    if (!Sec.getGroup() && Sec.getName().find('.', 1) == StringRef::npos)
       continue;
-    if (Excluded.count(&Sec) || Asm->getSectionAddressSize(Sec) == 0)
+    uint64_t Size = Asm->getSectionAddressSize(Sec);
+    if (Excluded.count(&Sec) || Size == 0)
+      continue;
+    // A far variable of its own is a COMDAT only when it is small enough
+    // for the shared far segment: a larger one has a segment of its own.
+    if (*K == SK_Count &&
+        (getFarKind(Sec.getName()) == FK_End || Size > 0x10000 ||
+         (!Sec.getGroup() && Size >= MinOwnFarSegment)))
       continue;
     auto It = Globals.find(&Sec);
     const MCSymbol *Sym = nullptr;
@@ -576,8 +583,7 @@ void OMFObjectWriter::addFarSection(const MCSectionELF &Sec) {
   StringRef Var = Name.split('.').second.split('.').second;
   uint64_t Size = Asm->getSectionAddressSize(Sec);
   // Small far variables share a segment.
-  constexpr uint64_t MinOwnSegment = 0x1000;
-  if (Var.empty() || Size < MinOwnSegment || Kind == FK_End) {
+  if (Var.empty() || Size < MinOwnFarSegment || Kind == FK_End) {
     SegIdx K = getFarPool(Kind, Size, Sec.getAlign());
     Segment &Seg = Segs[K];
     Seg.Size = alignTo(Seg.Size, Sec.getAlign());

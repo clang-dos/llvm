@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdio>  // std::vsnprintf & friends
 #include <cstdlib> // std::strtof & friends
+#include <cstring>
 #include <ctime>   // std::strftime
 #include <cwchar>  // wide char manipulation
 #include <string_view>
@@ -27,9 +28,25 @@ namespace __locale {
 // Locale management
 //
 // FIXME: base and mask currently unused. Needs manual work to construct the new locale
+#if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+// A locale is its name. The name stands in for the _locale_t too, so that
+// the locale is not null and two locales compare equal only if they share
+// the name. setlocale checks that the name is valid.
+__locale_t __newlocale(int /*mask*/, const char* locale, __locale_t /*base*/) {
+  if (std::strcmp(locale, "C") != 0) {
+    const char* __current = ::setlocale(LC_ALL, nullptr);
+    std::string __saved(__current ? __current : "C");
+    if (!::setlocale(LC_ALL, locale))
+      return {};
+    ::setlocale(LC_ALL, __saved.c_str());
+  }
+  return {reinterpret_cast<::_locale_t>(const_cast<char*>(locale)), locale};
+}
+#else
 __locale_t __newlocale(int /*mask*/, const char* locale, __locale_t /*base*/) {
   return {::_create_locale(LC_ALL, locale), locale};
 }
+#endif
 
 __lconv_t* __localeconv(__locale_t& loc) {
   __locale_guard __current(loc);
@@ -273,6 +290,12 @@ const char* __get_locale_encoding(__locale_t loc) {
     }
   }
 
+#if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+  // No GetLocaleInfoEx before Vista: ask the C runtime for the code page of
+  // the locale it sets.
+  __locale_guard __current(loc);
+  return __codepage_name(::___lc_codepage_func());
+#else
   wchar_t locale_wbuffer[LOCALE_NAME_MAX_LENGTH + 1]{};
   wchar_t number_buffer[11]{};
 
@@ -293,6 +316,7 @@ const char* __get_locale_encoding(__locale_t loc) {
 
   unsigned int acp = std::wcstoul(number_buffer, nullptr, 10);
   return __codepage_name(acp);
+#endif
 }
 
 //
@@ -307,9 +331,62 @@ long double __strtold_c_locale(const char* nptr, char** endptr) {
 }
 #endif
 
+#if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+float __strtof_c_locale(const char* nptr, char** endptr) {
+  __locale_guard __current(__get_c_locale());
+  return std::strtof(nptr, endptr);
+}
+
+double __strtod_c_locale(const char* nptr, char** endptr) {
+  __locale_guard __current(__get_c_locale());
+  return std::strtod(nptr, endptr);
+}
+#endif
+
 //
 // Character manipulation functions
 //
+#if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+// Each sets the locale for the call and calls the plain function.
+#  define _LIBCPP_WITH_LOCALE(__ret, __name, __params, __call)                                                         \
+    __ret __name __params {                                                                                            \
+      __locale_guard __current(__loc);                                                                                 \
+      return __call;                                                                                                   \
+    }
+_LIBCPP_WITH_LOCALE(int, __toupper, (int __c, __locale_t __loc), std::toupper(__c))
+_LIBCPP_WITH_LOCALE(int, __tolower, (int __c, __locale_t __loc), std::tolower(__c))
+_LIBCPP_WITH_LOCALE(int, __strcoll, (const char* __s1, const char* __s2, __locale_t __loc), std::strcoll(__s1, __s2))
+_LIBCPP_WITH_LOCALE(size_t,
+                    __strxfrm,
+                    (char* __dest, const char* __src, size_t __n, __locale_t __loc),
+                    std::strxfrm(__dest, __src, __n))
+_LIBCPP_WITH_LOCALE(int,
+                    __mbtowc,
+                    (wchar_t * __pwc, const char* __pmb, size_t __max, __locale_t __loc),
+                    std::mbtowc(__pwc, __pmb, __max))
+#  if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_WITH_LOCALE(int, __iswctype, (wint_t __c, wctype_t __type, __locale_t __loc), ::iswctype(__c, __type))
+_LIBCPP_WITH_LOCALE(int, __iswspace, (wint_t __c, __locale_t __loc), ::iswspace(__c))
+_LIBCPP_WITH_LOCALE(int, __iswprint, (wint_t __c, __locale_t __loc), ::iswprint(__c))
+_LIBCPP_WITH_LOCALE(int, __iswcntrl, (wint_t __c, __locale_t __loc), ::iswcntrl(__c))
+_LIBCPP_WITH_LOCALE(int, __iswupper, (wint_t __c, __locale_t __loc), ::iswupper(__c))
+_LIBCPP_WITH_LOCALE(int, __iswlower, (wint_t __c, __locale_t __loc), ::iswlower(__c))
+_LIBCPP_WITH_LOCALE(int, __iswalpha, (wint_t __c, __locale_t __loc), ::iswalpha(__c))
+_LIBCPP_WITH_LOCALE(int, __iswdigit, (wint_t __c, __locale_t __loc), ::iswdigit(__c))
+_LIBCPP_WITH_LOCALE(int, __iswpunct, (wint_t __c, __locale_t __loc), ::iswpunct(__c))
+_LIBCPP_WITH_LOCALE(int, __iswxdigit, (wint_t __c, __locale_t __loc), ::iswxdigit(__c))
+_LIBCPP_WITH_LOCALE(wint_t, __towupper, (wint_t __c, __locale_t __loc), ::towupper(__c))
+_LIBCPP_WITH_LOCALE(wint_t, __towlower, (wint_t __c, __locale_t __loc), ::towlower(__c))
+_LIBCPP_WITH_LOCALE(
+    int, __wcscoll, (const wchar_t* __ws1, const wchar_t* __ws2, __locale_t __loc), std::wcscoll(__ws1, __ws2))
+_LIBCPP_WITH_LOCALE(size_t,
+                    __wcsxfrm,
+                    (wchar_t * __dest, const wchar_t* __src, size_t __n, __locale_t __loc),
+                    std::wcsxfrm(__dest, __src, __n))
+#  endif // _LIBCPP_HAS_WIDE_CHARACTERS
+#  undef _LIBCPP_WITH_LOCALE
+#endif // _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+
 #if defined(__MINGW32__) && __MSVCRT_VERSION__ < 0x0800
 size_t __strftime(char* ret, size_t n, const char* format, const struct tm* tm, __locale_t loc) {
   __locale_guard __current(loc);

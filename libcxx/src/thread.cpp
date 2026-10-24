@@ -160,8 +160,13 @@ unsigned __thread_hardware_concurrency() noexcept {
   if (result < 0)
     return 0;
   return static_cast<unsigned>(result);
-#elif defined(_WIN32)
+#elif defined(_WIN32) && _WIN32_WINNT >= 0x0601
   return static_cast<unsigned>(GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
+#elif defined(_WIN32)
+  // Processor groups and GetActiveProcessorCount are from Windows 7.
+  SYSTEM_INFO __info;
+  GetSystemInfo(&__info);
+  return static_cast<unsigned>(__info.dwNumberOfProcessors);
 #else // defined(CTL_HW) && defined(HW_NCPU)
   // TODO: grovel through /proc or check cpuid on x86 and similar
   // instructions on other architectures.

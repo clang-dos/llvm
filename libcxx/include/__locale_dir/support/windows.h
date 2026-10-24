@@ -26,6 +26,17 @@
 #  pragma GCC system_header
 #endif
 
+// msvcrt.dll before Vista has no locale objects: no _create_locale and no
+// _l functions (Windows 2000 and XP). The mingw-w64 headers declare
+// _create_locale only where msvcrt.dll has the _l functions. Without them,
+// a locale is only its name, and functions that take one set it with
+// setlocale for the call, as for the functions msvcrt.dll never had.
+#if defined(__MINGW32__) && __MSVCRT_VERSION__ < 0x0800 && !(__MSVCRT_VERSION__ == 0x0600 && _WIN32_WINNT >= 0x0600)
+#  define _LIBCPP_WIN32_NO_LOCALE_OBJECTS 1
+#else
+#  define _LIBCPP_WIN32_NO_LOCALE_OBJECTS 0
+#endif
+
 _LIBCPP_BEGIN_NAMESPACE_STD
 _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 namespace __locale {
@@ -159,7 +170,11 @@ inline _LIBCPP_HIDE_FROM_ABI __locale_t __get_c_locale();
 
 #if defined(_LIBCPP_BUILDING_LIBRARY)
 _LIBCPP_EXPORTED_FROM_ABI __locale_t __newlocale(int __mask, const char* __locale, __locale_t __base);
+#  if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+inline _LIBCPP_HIDE_FROM_ABI void __freelocale(__locale_t) {}
+#  else
 inline _LIBCPP_HIDE_FROM_ABI void __freelocale(__locale_t __loc) { ::_free_locale(__loc); }
+#  endif
 inline _LIBCPP_HIDE_FROM_ABI char* __setlocale(int __category, const char* __locale) {
   char* __new_locale = ::setlocale(__category, __locale);
   if (__new_locale == nullptr)
@@ -178,6 +193,20 @@ _LIBCPP_EXPORTED_FROM_ABI const char* __get_locale_encoding(__locale_t __loc);
 template <class _FloatT>
 _LIBCPP_HIDE_FROM_ABI _FloatT __str_to_float_c_locale(const char* __nptr, char** __endptr);
 
+#if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+_LIBCPP_EXPORTED_FROM_ABI float __strtof_c_locale(const char*, char**);
+_LIBCPP_EXPORTED_FROM_ABI double __strtod_c_locale(const char*, char**);
+
+template <>
+inline _LIBCPP_HIDE_FROM_ABI float __str_to_float_c_locale<float>(const char* __nptr, char** __endptr) {
+  return __strtof_c_locale(__nptr, __endptr);
+}
+
+template <>
+inline _LIBCPP_HIDE_FROM_ABI double __str_to_float_c_locale<double>(const char* __nptr, char** __endptr) {
+  return __strtod_c_locale(__nptr, __endptr);
+}
+#else
 template <>
 inline _LIBCPP_HIDE_FROM_ABI float __str_to_float_c_locale<float>(const char* __nptr, char** __endptr) {
   return ::_strtof_l(__nptr, __endptr, __get_c_locale());
@@ -187,6 +216,7 @@ template <>
 inline _LIBCPP_HIDE_FROM_ABI double __str_to_float_c_locale<double>(const char* __nptr, char** __endptr) {
   return ::_strtod_l(__nptr, __endptr, __get_c_locale());
 }
+#endif
 
 #if defined(_LIBCPP_MSVCRT)
 template <>
@@ -208,6 +238,29 @@ inline _LIBCPP_HIDE_FROM_ABI long double __str_to_float_c_locale<long double>(co
 // Character manipulation functions
 //
 #if defined(_LIBCPP_BUILDING_LIBRARY)
+#  if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+_LIBCPP_EXPORTED_FROM_ABI int __toupper(int, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __tolower(int, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __strcoll(const char*, const char*, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI size_t __strxfrm(char*, const char*, size_t, __locale_t);
+#    if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_EXPORTED_FROM_ABI int __iswctype(wint_t, wctype_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswspace(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswprint(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswcntrl(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswupper(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswlower(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswalpha(wint_t, __locale_t);
+inline _LIBCPP_HIDE_FROM_ABI int __iswblank(wint_t __c, __locale_t /*loc*/) { return (__c == L' ' || __c == L'\t'); }
+_LIBCPP_EXPORTED_FROM_ABI int __iswdigit(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswpunct(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __iswxdigit(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI wint_t __towupper(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI wint_t __towlower(wint_t, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI int __wcscoll(const wchar_t*, const wchar_t*, __locale_t);
+_LIBCPP_EXPORTED_FROM_ABI size_t __wcsxfrm(wchar_t*, const wchar_t*, size_t, __locale_t);
+#    endif // _LIBCPP_HAS_WIDE_CHARACTERS
+#  else    // _LIBCPP_WIN32_NO_LOCALE_OBJECTS
 inline _LIBCPP_HIDE_FROM_ABI int __toupper(int __c, __locale_t __loc) { return ::_toupper_l(__c, __loc); }
 
 inline _LIBCPP_HIDE_FROM_ABI int __tolower(int __c, __locale_t __loc) { return ::_tolower_l(__c, __loc); }
@@ -220,7 +273,7 @@ inline _LIBCPP_HIDE_FROM_ABI size_t __strxfrm(char* __dest, const char* __src, s
   return ::_strxfrm_l(__dest, __src, __n, __loc);
 }
 
-#  if _LIBCPP_HAS_WIDE_CHARACTERS
+#    if _LIBCPP_HAS_WIDE_CHARACTERS
 inline _LIBCPP_HIDE_FROM_ABI int __iswctype(wint_t __c, wctype_t __type, __locale_t __loc) {
   return ::_iswctype_l(__c, __type, __loc);
 }
@@ -245,7 +298,9 @@ inline _LIBCPP_HIDE_FROM_ABI int __wcscoll(const wchar_t* __ws1, const wchar_t* 
 inline _LIBCPP_HIDE_FROM_ABI size_t __wcsxfrm(wchar_t* __dest, const wchar_t* __src, size_t __n, __locale_t __loc) {
   return ::_wcsxfrm_l(__dest, __src, __n, __loc);
 }
-#  endif // _LIBCPP_HAS_WIDE_CHARACTERS
+#    endif // _LIBCPP_HAS_WIDE_CHARACTERS
+
+#  endif // _LIBCPP_WIN32_NO_LOCALE_OBJECTS
 
 #  if defined(__MINGW32__) && __MSVCRT_VERSION__ < 0x0800
 _LIBCPP_EXPORTED_FROM_ABI _LIBCPP_ATTRIBUTE_FORMAT(__strftime__, 3, 0) size_t
@@ -271,9 +326,13 @@ __mbsnrtowcs(wchar_t* __restrict, const char** __restrict, size_t, size_t, mbsta
 _LIBCPP_EXPORTED_FROM_ABI size_t
 __mbrtowc(wchar_t* __restrict, const char* __restrict, size_t, mbstate_t* __restrict, __locale_t);
 
+#  if _LIBCPP_WIN32_NO_LOCALE_OBJECTS
+_LIBCPP_EXPORTED_FROM_ABI int __mbtowc(wchar_t*, const char*, size_t, __locale_t);
+#  else
 inline _LIBCPP_HIDE_FROM_ABI int __mbtowc(wchar_t* __pwc, const char* __pmb, size_t __max, __locale_t __loc) {
   return ::_mbtowc_l(__pwc, __pmb, __max, __loc);
 }
+#  endif
 
 _LIBCPP_EXPORTED_FROM_ABI size_t __mbrlen(const char* __restrict, size_t, mbstate_t* __restrict, __locale_t);
 

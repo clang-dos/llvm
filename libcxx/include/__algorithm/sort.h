@@ -712,6 +712,60 @@ __partition_with_equals_on_left(_RandomAccessIterator __first, _RandomAccessIter
   return __first;
 }
 
+#if defined(__I86__)
+// The 8086's code is limited to 64 KiB, so it sorts with a small introsort:
+// the median of three as the pivot, a Hoare partition that stops on equal
+// elements, insertion sort below 16 elements, and heap sort when the
+// recursion gets too deep. The general sort below unrolls sorting networks
+// for 3, 4 and 5 elements, has two partitions and looks for runs that are
+// already sorted: about 9 KB of 8086 code for each type it sorts, against
+// about 1.5 KB for this one.
+template <class _AlgPolicy, class _Compare, class _RandomAccessIterator, bool _UseBitSetPartition>
+void __introsort(_RandomAccessIterator __first,
+                 _RandomAccessIterator __last,
+                 _Compare __comp,
+                 typename iterator_traits<_RandomAccessIterator>::difference_type __depth,
+                 bool = true) {
+  using _Ops = _IterOps<_AlgPolicy>;
+  typedef typename iterator_traits<_RandomAccessIterator>::difference_type difference_type;
+  while (__last - __first > difference_type(16)) {
+    if (__depth == 0) {
+      std::__partial_sort<_AlgPolicy, _Compare>(__first, __last, __last, __comp);
+      return;
+    }
+    --__depth;
+    // After this, *(__first + 1) <= *__first <= *(__last - 1), which stop
+    // both scans below without bounds checks.
+    _RandomAccessIterator __mid = __first + (__last - __first) / 2;
+    std::__sort3<_AlgPolicy, _Compare>(__first + difference_type(1), __mid, __last - difference_type(1), __comp);
+    _Ops::iter_swap(__first, __mid);
+    _RandomAccessIterator __i = __first;
+    _RandomAccessIterator __j = __last;
+    while (true) {
+      do
+        ++__i;
+      while (__comp(*__i, *__first));
+      do
+        --__j;
+      while (__comp(*__first, *__j));
+      if (!(__i < __j))
+        break;
+      _Ops::iter_swap(__i, __j);
+    }
+    _Ops::iter_swap(__first, __j);
+    // Recurse into the smaller side, so the stack stays O(log n).
+    if (__j - __first < __last - __j) {
+      std::__introsort<_AlgPolicy, _Compare, _RandomAccessIterator, _UseBitSetPartition>(__first, __j, __comp, __depth);
+      __first = __j + difference_type(1);
+    } else {
+      std::__introsort<_AlgPolicy, _Compare, _RandomAccessIterator, _UseBitSetPartition>(
+          __j + difference_type(1), __last, __comp, __depth);
+      __last = __j;
+    }
+  }
+  std::__insertion_sort<_AlgPolicy, _Compare>(__first, __last, __comp);
+}
+#else
 // The main sorting function.  Implements introsort combined with other ideas:
 //  - option of using block quick sort for partitioning,
 //  - guarded and unguarded insertion sort for small lengths,
@@ -833,6 +887,7 @@ void __introsort(_RandomAccessIterator __first,
     __first    = ++__i;
   }
 }
+#endif // defined(__I86__)
 
 _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 template <class _Comp, class _RandomAccessIterator>

@@ -38900,6 +38900,24 @@ void X86TargetLowering::SetupEntryBlockForSjLj(MachineInstr &MI,
   MachineRegisterInfo *MRI = &MF->getRegInfo();
   const X86InstrInfo *TII = Subtarget.getInstrInfo();
 
+  if (Subtarget.is16Bit()) {
+    // The function context on i8086: a near pointer, an i32 call site, four
+    // i32 data words, the personality (a near or far code pointer), a near
+    // LSDA pointer, then the jump buffer of 16-bit words. jbuf[1] is the
+    // dispatch's offset and, with far code, jbuf[3] its segment.
+    unsigned JBuf = 2 + 4 + 16 + (Subtarget.hasFarCode16() ? 4 : 2) + 2;
+    MachineInstrBuilder MIB =
+        BuildMI(*MBB, MI, MIMD, TII->get(X86::MOV16mi));
+    addFrameReference(MIB, FI, JBuf + 2);
+    MIB.addMBB(DispatchBB);
+    if (Subtarget.hasFarCode16()) {
+      MIB = BuildMI(*MBB, MI, MIMD, TII->get(X86::MOV16ms));
+      addFrameReference(MIB, FI, JBuf + 6);
+      MIB.addReg(X86::CS);
+    }
+    return;
+  }
+
   MVT PVT = getPointerTy(MF->getDataLayout());
   assert((PVT == MVT::i64 || PVT == MVT::i32) && "Invalid Pointer Size!");
 
@@ -38999,7 +39017,8 @@ X86TargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
   DispatchBB->setIsEHPad(true);
 
   MachineBasicBlock *TrapBB = MF->CreateMachineBasicBlock();
-  BuildMI(TrapBB, MIMD, TII->get(X86::TRAP));
+  BuildMI(TrapBB, MIMD,
+          TII->get(Subtarget.isPre386() ? X86::TRAP_8086 : X86::TRAP));
   DispatchBB->addSuccessor(TrapBB);
 
   MachineBasicBlock *DispContBB = MF->CreateMachineBasicBlock();
@@ -39038,6 +39057,30 @@ X86TargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
         .addRegMask(RI.getNoPreservedMask());
   }
 
+  if (Subtarget.is16Bit()) {
+    // The call site is the low word of the i32 after the near prev pointer.
+    // The jump table is in the function's code, read through CS.
+    assert(!RI.hasBasePointer(*MF) && "no base pointer in 16-bit code");
+    Register IReg = MRI->createVirtualRegister(&X86::GR16RegClass);
+    addFrameReference(BuildMI(DispatchBB, MIMD, TII->get(X86::MOV16rm), IReg),
+                      FI, 2);
+    BuildMI(DispatchBB, MIMD, TII->get(X86::CMP16ri))
+        .addReg(IReg)
+        .addImm(LPadList.size());
+    BuildMI(DispatchBB, MIMD, TII->get(X86::JCC_1))
+        .addMBB(TrapBB)
+        .addImm(X86::COND_AE);
+    Register IReg2 = MRI->createVirtualRegister(&X86::GR16RegClass);
+    BuildMI(DispContBB, MIMD, TII->get(X86::ADD16rr), IReg2)
+        .addReg(IReg)
+        .addReg(IReg);
+    BuildMI(DispContBB, MIMD, TII->get(X86::JMP16m))
+        .addReg(0)
+        .addImm(1)
+        .addReg(IReg2)
+        .addJumpTableIndex(MJTI)
+        .addReg(X86::CS);
+  } else {
   // IReg is used as an index in a memory operand and therefore can't be SP
   Register IReg = MRI->createVirtualRegister(&X86::GR32_NOSPRegClass);
   addFrameReference(BuildMI(DispatchBB, MIMD, TII->get(X86::MOV32rm), IReg), FI,
@@ -39109,6 +39152,7 @@ X86TargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
         .addReg(IReg)
         .addJumpTableIndex(MJTI)
         .addReg(0);
+  }
   }
 
   // Add the jump table entries as successors to the MBB.

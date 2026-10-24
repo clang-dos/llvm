@@ -44,6 +44,11 @@ public:
     return ToolChain::RLT_CompilerRT;
   }
   const char *getDefaultLinker() const override { return "wlink"; }
+  // C++ exceptions unwind through setjmp/longjmp-style function contexts.
+  llvm::ExceptionHandling
+  GetExceptionModel(const llvm::opt::ArgList &Args) const override {
+    return llvm::ExceptionHandling::SjLj;
+  }
 
   void
   AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,

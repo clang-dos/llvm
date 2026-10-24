@@ -43,6 +43,17 @@ MSDOS::MSDOS(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
     llvm::sys::path::append(LibDir, "win16");
   SmallString<128> ModelDir(LibDir);
   llvm::sys::path::append(ModelDir, MemoryModel);
+  // With C++ exceptions (off by default), libc++ and libc++abi built with
+  // them, and the unwinder, come from <model>/eh.
+  const Arg *EH = Args.getLastArg(
+      options::OPT_fcxx_exceptions, options::OPT_fno_cxx_exceptions,
+      options::OPT_fexceptions, options::OPT_fno_exceptions);
+  if (EH && (EH->getOption().matches(options::OPT_fexceptions) ||
+             EH->getOption().matches(options::OPT_fcxx_exceptions))) {
+    SmallString<128> EHDir(ModelDir);
+    llvm::sys::path::append(EHDir, "eh");
+    getFilePaths().push_back(std::string(EHDir));
+  }
   getFilePaths().push_back(std::string(ModelDir));
   getFilePaths().push_back(std::string(LibDir));
 }
@@ -221,10 +232,10 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Default libraries are linked when the sysroot has them.
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
-    // C++ programs also get libc++ and libc++abi.
-    SmallVector<StringRef, 4> Names;
+    // C++ programs also get libc++, libc++abi and its unwinder.
+    SmallVector<StringRef, 5> Names;
     if (TC.ShouldLinkCXXStdlib(Args))
-      Names.append({"c++", "c++abi"});
+      Names.append({"c++", "c++abi", "unwind"});
     Names.append({"c", "clang_rt.builtins"});
     for (StringRef Name : Names)
       if (std::optional<std::string> Path = findLibrary(TC, Args, Name)) {

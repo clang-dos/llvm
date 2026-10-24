@@ -54,6 +54,9 @@ namespace llvm {
   /// or .farrodata.<name>, which the OMF writer makes a far data segment.
   class X86OMFTargetObjectFile : public X86ELFTargetObjectFile {
   public:
+    void initialize(MCContext &Ctx, const TargetMachine &TM,
+                    const Module &M) override;
+
     bool shouldPutJumpTableInFunctionSection(bool UsesLabelDifference,
                                              const Function &F) const override {
       return true;

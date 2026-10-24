@@ -2511,6 +2511,10 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
                                          : ExceptionHandling::DwarfCFI;
   }
 
+  // 16-bit code has no DWARF unwinder, and OMF objects no .eh_frame.
+  if (getArch() == Triple::i8086)
+    return ExceptionHandling::SjLj;
+
   if (isAArch64() || isX86() || isPPC() || isMIPS() || isSPARC() || isBPF() ||
       isRISCV() || isLoongArch())
     return ExceptionHandling::DwarfCFI;

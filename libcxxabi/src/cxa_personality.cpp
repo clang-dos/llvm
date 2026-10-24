@@ -450,6 +450,16 @@ get_shim_type_info(uint64_t ttypeIndex, const uint8_t* classInfo,
         call_terminate(native_exception, unwind_exception);
     }
     classInfo -= ttypeIndex;
+#if defined(__I86__) && defined(__HUGE__)
+    // 16-bit DOS, huge model: the type table holds far pointers
+    // (segment:offset) from the linker, while a huge pointer as an integer is
+    // a linear address. Read the entry as a pointer.
+    if ((ttypeEncoding & 0x0F) == DW_EH_PE_udata4) {
+        const __shim_type_info* type;
+        memcpy(&type, classInfo, sizeof(type));
+        return type;
+    }
+#endif
     return (const __shim_type_info*)readEncodedPointer(&classInfo,
                                                        ttypeEncoding, base);
 }

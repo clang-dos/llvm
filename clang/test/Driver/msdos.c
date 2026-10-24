@@ -96,6 +96,15 @@ int main(void) { return 0; }
 // NOCXX-NOT: c++{{/|\\\\}}v1
 // NOCXX-NOT: libc++
 
+// With exceptions, SjLj unwinding and the libraries in <model>/eh.
+// RUN: %clangxx --target=i8086-pc-msdos --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -fexceptions -### -x c++ %s 2>&1 | FileCheck %s --check-prefix=EH
+// EH:      "-cc1"
+// EH-SAME: "-fcxx-exceptions" "-fexceptions" "-exception-model=sjlj"
+// EH:      "{{.*}}wlink"
+// EH-SAME: "library" "{{.*}}eh{{/|\\\\}}libc++.a" "library" "{{.*}}eh{{/|\\\\}}libc++abi.a"
+// EH-SAME: "library" "{{.*}}eh{{/|\\\\}}libunwind.a"
+
 // In the far-data models, variables over 32767 bytes are far data by
 // default. -mlarge-data-threshold= changes that, and 0 turns it off.
 // RUN: %clang --target=i8086-pc-msdos -mcmodel=compact -### -c %s 2>&1 \

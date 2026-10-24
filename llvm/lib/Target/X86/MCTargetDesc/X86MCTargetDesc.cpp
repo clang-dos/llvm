@@ -701,6 +701,11 @@ static MCAsmInfo *createX86MCAsmInfo(const MCRegisterInfo &MRI,
     MAI = new X86ELFMCAsmInfo(TheTriple, Options);
   }
 
+  // 16-bit code has no DWARF unwinder, and OMF objects have no .eh_frame:
+  // exceptions use setjmp/longjmp-style function contexts.
+  if (TheTriple.getArch() == Triple::i8086)
+    MAI->setExceptionsType(ExceptionHandling::SjLj);
+
   // Only Intel-syntax output needs to avoid register/keyword collisions; AT&T
   // disambiguates registers with '%' and doesn't treat `byte`, `ptr`, etc. as
   // keywords.

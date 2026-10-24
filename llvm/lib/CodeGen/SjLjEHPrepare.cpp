@@ -114,6 +114,10 @@ bool SjLjEHPrepareImpl::doInitialization(Module &M) {
   // Build the function context structure.
   // builtin_setjmp uses a five word jbuf
   Type *VoidPtrTy = PointerType::getUnqual(M.getContext());
+  // The personality is a function pointer, which can be larger than a data
+  // pointer.
+  Type *PersonalityTy = PointerType::get(
+      M.getContext(), M.getDataLayout().getProgramAddressSpace());
   unsigned DataBits =
       TM ? TM->getSjLjDataSize() : TargetMachine::DefaultSjLjDataSize;
   DataTy = Type::getIntNTy(M.getContext(), DataBits);
@@ -122,7 +126,7 @@ bool SjLjEHPrepareImpl::doInitialization(Module &M) {
   FunctionContextTy = StructType::get(VoidPtrTy,         // __prev
                                       DataTy,            // call_site
                                       doubleUnderDataTy, // __data
-                                      VoidPtrTy,         // __personality
+                                      PersonalityTy,     // __personality
                                       VoidPtrTy,         // __lsda
                                       doubleUnderJBufTy  // __jbuf
   );
@@ -220,7 +224,13 @@ SjLjEHPrepareImpl::setupFunctionContext(Function &F,
     Value *ExceptionAddr = Builder.CreateConstGEP2_32(doubleUnderDataTy, FCData,
                                                       0, 0, "exception_gep");
     Value *ExnVal = Builder.CreateLoad(DataTy, ExceptionAddr, true, "exn_val");
-    ExnVal = Builder.CreateIntToPtr(ExnVal, Builder.getPtrTy());
+    // The exception pointer has the landing pad's pointer type, which need
+    // not be in address space 0.
+    Type *ExnTy = Builder.getPtrTy();
+    if (auto *ST = dyn_cast<StructType>(LPI->getType()))
+      if (ST->getNumElements() > 0 && ST->getElementType(0)->isPointerTy())
+        ExnTy = ST->getElementType(0);
+    ExnVal = Builder.CreateIntToPtr(ExnVal, ExnTy);
 
     Value *SelectorAddr = Builder.CreateConstGEP2_32(doubleUnderDataTy, FCData,
                                                      0, 1, "exn_selector_gep");

@@ -775,6 +775,12 @@ public:
 
   StringRef getABI() const override { return ABIName; }
 
+  // The exception pointer and selector are the first two data words of the
+  // SjLj function context.
+  int getEHDataRegisterNumber(unsigned RegNo) const override {
+    return RegNo < 2 ? int(RegNo) : -1;
+  }
+
   bool setABI(const std::string &Name) override {
     std::optional<llvm::X86::MemoryModel16> M =
         llvm::X86::parseMemoryModel16(Name);

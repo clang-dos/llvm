@@ -17,6 +17,7 @@
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 
 using namespace llvm;
 using namespace dwarf;
@@ -101,6 +102,19 @@ static MCSection *getFarDataSection(MCContext &Ctx, const GlobalObject *GO,
                              Flags | ELF::SHF_GROUP, 0, C->getName(),
                              /*IsComdat=*/true);
   return Ctx.getELFSection(Prefix + TM.getSymbol(GO)->getName(), Type, Flags);
+}
+
+void X86OMFTargetObjectFile::initialize(MCContext &Ctx,
+                                        const TargetMachine &TM,
+                                        const Module &M) {
+  X86ELFTargetObjectFile::initialize(Ctx, TM, M);
+  // The type table of an exception table points to type_info objects: near
+  // data pointers, or far ones (segment:offset) in the far data models.
+  std::optional<X86::MemoryModel16> Model =
+      X86::parseMemoryModel16(TM.Options.MCOptions.getABIName());
+  TTypeEncoding = Model && X86::isFarDataModel16(*Model)
+                      ? dwarf::DW_EH_PE_udata4
+                      : dwarf::DW_EH_PE_udata2;
 }
 
 MCSection *X86OMFTargetObjectFile::SelectSectionForGlobal(

@@ -143,6 +143,9 @@ extern _LIBCPP_HIDDEN void (*__sync_wide_streams_with_stdio)(bool);
 using cin_stream_data = stream_data<basic_istream<char>, __stdinbuf<char>, unsync_buffer<char> >;
 extern _LIBCPP_HIDDEN stream<basic_istream<char> >* __cin_for_sync;
 extern _LIBCPP_HIDDEN cin_stream_data* __cin_data_for_sync;
+// stdin, as cin.cpp saw it. Naming stdin in iostream.cpp would link stdin's
+// FILE, read() and their text mode code into programs that only write.
+extern _LIBCPP_HIDDEN FILE* __cin_file_for_sync;
 #endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS

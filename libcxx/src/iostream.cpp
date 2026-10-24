@@ -102,6 +102,7 @@ void (*__sync_wide_streams_with_stdio)(bool);
 #if _LIBCPP_SEPARATE_CIN
 stream<basic_istream<char> >* __cin_for_sync;
 cin_stream_data* __cin_data_for_sync;
+FILE* __cin_file_for_sync;
 #endif
 
 bool ios_base::sync_with_stdio(bool sync) {
@@ -136,9 +137,9 @@ bool ios_base::sync_with_stdio(bool sync) {
 #  if _LIBCPP_SEPARATE_CIN
     if (__cin_for_sync) {
       if (sync)
-        switch_to_sync_stream(stdin, *__cin_for_sync, *__cin_data_for_sync);
+        switch_to_sync_stream(__cin_file_for_sync, *__cin_for_sync, *__cin_data_for_sync);
       else
-        switch_to_unsync_stream(stdin, *__cin_for_sync, *__cin_data_for_sync, ios::in);
+        switch_to_unsync_stream(__cin_file_for_sync, *__cin_for_sync, *__cin_data_for_sync, ios::in);
     }
 #  endif
 #  if _LIBCPP_SEPARATE_WIDE_STREAMS

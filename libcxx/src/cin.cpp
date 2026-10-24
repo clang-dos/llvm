@@ -28,6 +28,7 @@ public:
     cin.value.tie(&cout.value);
     __cin_for_sync      = &cin;
     __cin_data_for_sync = &cin_data;
+    __cin_file_for_sync = stdin;
   }
 };
 

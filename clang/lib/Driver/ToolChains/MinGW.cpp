@@ -180,6 +180,12 @@ void tools::MinGW::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.append({"--major-subsystem-version", Major,
                     "--minor-subsystem-version", Minor, "--major-os-version",
                     Major, "--minor-os-version", Minor});
+    // LLD puts the import address table in .rdata. The Windows NT 3.x loader
+    // predates the IAT directory, which later loaders use to make the table
+    // writable while they fill it in, so make .rdata writable for it (and
+    // for Win32s, which also asks for 3.10).
+    if (WindowsVersion < VersionTuple(4) && TC.HasNativeLLVMSupport())
+      CmdArgs.push_back("-Xlink=-section:.rdata,RW");
   }
 
   if (Args.hasArg(options::OPT_mdll))

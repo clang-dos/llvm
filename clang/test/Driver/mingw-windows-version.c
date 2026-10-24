@@ -53,3 +53,20 @@
 // RUN: %clang -### --target=i586-pc-windows4.0-gnu --sysroot= -c %s 2>&1 \
 // RUN:   | FileCheck --check-prefix=TRIPLE %s
 // TRIPLE: "-triple" "i586-pc-windows4.0-gnu"
+
+// Windows NT 3.1, 3.5 and 3.51 (and Win32s, which wants 3.10): LLD also
+// makes .rdata, where it puts the import address table, writable.
+// RUN: %clang -### --target=i386-pc-windows3.10-gnu --sysroot= -fuse-ld=lld \
+// RUN:   %s 2>&1 | FileCheck --check-prefixes=CPU-I386,V3_10,RDATA-RW %s
+// RUN: %clang -### --target=i486-pc-windows3.51-gnu --sysroot= -fuse-ld=lld \
+// RUN:   %s 2>&1 | FileCheck --check-prefixes=CPU-I486,V3_51,RDATA-RW %s
+// V3_10: "--major-subsystem-version" "3" "--minor-subsystem-version" "10" "--major-os-version" "3" "--minor-os-version" "10"
+// V3_51: "--major-subsystem-version" "3" "--minor-subsystem-version" "51" "--major-os-version" "3" "--minor-os-version" "51"
+// RDATA-RW-SAME: "-Xlink=-section:.rdata,RW"
+
+// Not for Windows 4.0 and later, or for GNU ld, which keeps a writable .idata.
+// RUN: %clang -### --target=i486-pc-windows4.0-gnu --sysroot= -fuse-ld=lld \
+// RUN:   %s 2>&1 | FileCheck --check-prefix=RDATA-RO %s
+// RUN: %clang -### --target=i386-pc-windows3.10-gnu --sysroot= -fuse-ld=ld \
+// RUN:   %s 2>&1 | FileCheck --check-prefix=RDATA-RO %s
+// RDATA-RO-NOT: -section:.rdata

@@ -392,6 +392,10 @@ public:
   /// function instead of to trap instructions.
   std::string TrapFuncName;
 
+  /// i8086 far functions with the 16-bit Windows entry sequence: "" or
+  /// "none", "exported" (__export functions) or "all".
+  std::string WindowsPrologue;
+
   /// A list of dependent libraries.
   std::vector<std::string> DependentLibraries;
 

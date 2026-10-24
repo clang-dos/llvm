@@ -89,6 +89,10 @@ public:
   /// The i8086 (16-bit ABI) prologue and epilogue: always a BP frame.
   void emitPrologue16(MachineFunction &MF, MachineBasicBlock &MBB) const;
   void emitEpilogue16(MachineFunction &MF, MachineBasicBlock &MBB) const;
+  /// i8086: the function has the 16-bit Windows entry sequence.
+  bool hasWindowsPrologue16(const MachineFunction &MF) const;
+  /// i8086: the prologue saves DS below the saved BP and loads it.
+  bool savesDS16(const MachineFunction &MF) const;
 
   void adjustForSegmentedStacks(MachineFunction &MF,
                                 MachineBasicBlock &PrologueMBB) const override;

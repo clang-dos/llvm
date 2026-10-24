@@ -2235,6 +2235,14 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
   if (getToolChain().getTriple().getArch() == llvm::Triple::i8086) {
     CmdArgs.push_back("-target-abi");
     CmdArgs.push_back(x86::getI8086MemoryModel(D, Args).data());
+    if (const Arg *A = Args.getLastArg(options::OPT_mwindows_prologue_EQ)) {
+      StringRef V = A->getValue();
+      if (llvm::is_contained({"none", "exported", "all"}, V))
+        A->render(Args, CmdArgs);
+      else
+        D.Diag(diag::err_drv_unsupported_option_argument)
+            << A->getSpelling() << V;
+    }
   }
 
   if (!Args.hasFlag(options::OPT_mred_zone, options::OPT_mno_red_zone, true) ||

@@ -3241,6 +3241,14 @@ bool X86FrameLowering::assignCalleeSavedSpillSlots(
     SpillSlotOffset -= SlotSize;
     MFI.CreateFixedSpillStackObject(SlotSize, SpillSlotOffset);
 
+    // The i8086 Windows and __loadds entry sequences save DS directly below
+    // the saved BP.
+    if (Is16BitABI && savesDS16(MF)) {
+      SpillSlotOffset -= SlotSize;
+      MFI.CreateFixedSpillStackObject(SlotSize, SpillSlotOffset);
+      CalleeSavedFrameSize += SlotSize;
+    }
+
     // The async context lives directly before the frame pointer, and we
     // allocate a second slot to preserve stack alignment.
     if (X86FI->hasSwiftAsyncContext()) {
@@ -4309,6 +4317,10 @@ bool X86FrameLowering::canUseAsEpilogue(const MachineBasicBlock &MBB) const {
 }
 
 bool X86FrameLowering::enableShrinkWrapping(const MachineFunction &MF) const {
+  // The Windows entry sequence must start the function, and DS must be
+  // loaded before the function body.
+  if (savesDS16(MF))
+    return false;
   // If we may need to emit frameless compact unwind information, give
   // up as this is currently broken: PR25614.
   bool CompactUnwind =
@@ -5048,6 +5060,54 @@ void X86FrameLowering::spillFPBP(MachineFunction &MF) const {
 //
 // Restoring SP from BP also handles variable-sized objects. No unwind or
 // debug frame information is emitted yet.
+//
+// A far function with "i8086-windows-prologue" has the 16-bit Windows entry
+// sequence, as Microsoft C and Open Watcom write it:
+//
+//   push ds / pop ax / nop  ; the loader patches these 3 bytes: to NOPs for
+//                           ; an exported function of a program, which is
+//                           ; then entered with AX = its data segment, or
+//                           ; to "mov ax, DGROUP" in a DLL
+//   inc  bp                 ; an odd saved BP marks a far frame
+//   push bp
+//   mov  bp, sp
+//   push ds                 ; [bp-2] = caller's DS
+//   mov  ds, ax
+//   ...
+//   pop  ds
+//   pop  bp
+//   dec  bp
+//   retf
+//
+// With "i8086-loadds" (__loadds) as well, the first 3 bytes are
+// "mov ax, DGROUP" already. "i8086-loadds" alone saves DS the same way and
+// loads DGROUP into it after "mov bp, sp". In the tiny model DGROUP is CS.
+
+bool X86FrameLowering::hasWindowsPrologue16(const MachineFunction &MF) const {
+  return Is16BitABI && STI.isFarFunction16(MF.getFunction()) &&
+         MF.getFunction().hasFnAttribute("i8086-windows-prologue");
+}
+
+bool X86FrameLowering::savesDS16(const MachineFunction &MF) const {
+  return Is16BitABI &&
+         (hasWindowsPrologue16(MF) ||
+          MF.getFunction().hasFnAttribute("i8086-loadds"));
+}
+
+/// Emit "mov ax, DGROUP" (or "mov ax, cs" when DGROUP is the code segment).
+static void emitLoadDGROUP16(const X86Subtarget &STI, const TargetInstrInfo &TII,
+                             MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator MBBI,
+                             const DebugLoc &DL) {
+  if (STI.getMemoryModel16() == X86::MemoryModel16::Tiny)
+    BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16rs), X86::AX)
+        .addReg(X86::CS)
+        .setMIFlag(MachineInstr::FrameSetup);
+  else
+    BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16ri), X86::AX)
+        .addExternalSymbol("\01DGROUP", X86II::MO_SEG)
+        .setMIFlag(MachineInstr::FrameSetup);
+}
 
 void X86FrameLowering::emitPrologue16(MachineFunction &MF,
                                       MachineBasicBlock &MBB) const {
@@ -5064,12 +5124,38 @@ void X86FrameLowering::emitPrologue16(MachineFunction &MF,
   // The saved BP is part of StackSize; so are the callee-saved pushes.
   uint64_t NumBytes = StackSize - SlotSize - X86FI->getCalleeSavedFrameSize();
 
+  bool Windows = hasWindowsPrologue16(MF);
+  bool LoadDS = MF.getFunction().hasFnAttribute("i8086-loadds");
+  if (Windows) {
+    if (LoadDS) {
+      emitLoadDGROUP16(STI, TII, MBB, MBBI, DL);
+    } else {
+      BuildMI(MBB, MBBI, DL, TII.get(X86::PUSHDS16))
+          .setMIFlag(MachineInstr::FrameSetup);
+      BuildMI(MBB, MBBI, DL, TII.get(X86::POP16r), X86::AX)
+          .setMIFlag(MachineInstr::FrameSetup);
+      BuildMI(MBB, MBBI, DL, TII.get(X86::NOOP))
+          .setMIFlag(MachineInstr::FrameSetup);
+    }
+    BuildMI(MBB, MBBI, DL, TII.get(X86::INC16r_alt), FramePtr)
+        .addReg(FramePtr)
+        .setMIFlag(MachineInstr::FrameSetup);
+  }
   BuildMI(MBB, MBBI, DL, TII.get(X86::PUSH16r))
       .addReg(FramePtr, RegState::Kill)
       .setMIFlag(MachineInstr::FrameSetup);
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16rr), FramePtr)
       .addReg(StackPtr)
       .setMIFlag(MachineInstr::FrameSetup);
+  if (savesDS16(MF)) {
+    BuildMI(MBB, MBBI, DL, TII.get(X86::PUSHDS16))
+        .setMIFlag(MachineInstr::FrameSetup);
+    if (!Windows)
+      emitLoadDGROUP16(STI, TII, MBB, MBBI, DL);
+    BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16sr), X86::DS)
+        .addReg(X86::AX, RegState::Kill)
+        .setMIFlag(MachineInstr::FrameSetup);
+  }
   for (MachineBasicBlock &EveryMBB : MF)
     EveryMBB.addLiveIn(FramePtr);
   MBB.sortUniqueLiveIns();
@@ -5117,8 +5203,15 @@ void X86FrameLowering::emitEpilogue16(MachineFunction &MF,
           .setMIFlag(MachineInstr::FrameDestroy);
   }
 
-  // Restore the caller's BP after the callee-saved registers.
+  // Restore the caller's DS and BP after the callee-saved registers.
+  if (savesDS16(MF))
+    BuildMI(MBB, Terminator, DL, TII.get(X86::POPDS16))
+        .setMIFlag(MachineInstr::FrameDestroy);
   BuildMI(MBB, Terminator, DL, TII.get(X86::POP16r), FramePtr)
       .setMIFlag(MachineInstr::FrameDestroy);
+  if (hasWindowsPrologue16(MF))
+    BuildMI(MBB, Terminator, DL, TII.get(X86::DEC16r_alt), FramePtr)
+        .addReg(FramePtr)
+        .setMIFlag(MachineInstr::FrameDestroy);
 }
 

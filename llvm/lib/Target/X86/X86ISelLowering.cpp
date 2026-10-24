@@ -29063,7 +29063,8 @@ SDValue X86TargetLowering::LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const {
   SDLoc dl(Op);  // FIXME probably not meaningful
   unsigned Depth = Op.getConstantOperandVal(0);
   assert(((FrameReg == X86::RBP && VT == MVT::i64) ||
-          (FrameReg == X86::EBP && VT == MVT::i32)) &&
+          (FrameReg == X86::EBP && VT == MVT::i32) ||
+          (FrameReg == X86::BP && VT == MVT::i16)) &&
          "Invalid Frame Register!");
   SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), dl, FrameReg, VT);
   while (Depth--)

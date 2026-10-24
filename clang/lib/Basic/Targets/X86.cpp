@@ -1959,6 +1959,8 @@ void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
   // and the pascal calling convention.
   Builder.defineMacro("__export", "__attribute__((dllexport))");
   Builder.defineMacro("_export", "__attribute__((dllexport))");
+  Builder.defineMacro("__loadds", "__attribute__((__loadds__))");
+  Builder.defineMacro("_loadds", "__attribute__((__loadds__))");
   if (!Opts.Borland)
     Builder.defineMacro("_pascal", "__pascal");
   switch (CPU) {

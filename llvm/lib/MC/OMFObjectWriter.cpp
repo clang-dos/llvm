@@ -161,6 +161,8 @@ struct OMFFixup {
   bool IsExternal;
   SegIdx TargetSeg;
   unsigned ExtIndex;
+  // The target is DGROUP itself (DGROUP@SEG, as in "mov ax, DGROUP").
+  bool GroupTarget = false;
 
   unsigned size() const { return LocType == OMF::LT_Pointer32 ? 4 : 2; }
 };
@@ -693,7 +695,16 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   SegIdx TargetSeg;
   uint64_t TargetOffset;
   unsigned TargetComdat;
-  if (!Sym->isCommon() && getComdatLocation(*Sym, TargetComdat, TargetOffset)) {
+  if (SegRef && Sym->isUndefined() && Sym->getName() == "DGROUP") {
+    if (!DGroupIndex) {
+      Ctx.reportError(Loc, "DGROUP@SEG in a module without DGROUP");
+      return;
+    }
+    R.IsExternal = false;
+    R.GroupTarget = true;
+    R.TargetSeg = SK_Text;
+    R.ExtIndex = 0;
+  } else if (!Sym->isCommon() && getComdatLocation(*Sym, TargetComdat, TargetOffset)) {
     // A COMDAT is reached through an external of its name.
     R.IsExternal = true;
     R.TargetSeg = SK_Text;
@@ -988,15 +999,19 @@ void OMFObjectWriter::writeFixups(SegIdx K, uint64_t Start, uint64_t End,
 
     // Use DGROUP as the frame for targets in DGROUP, so that data offsets
     // are relative to DS. Otherwise the frame is the target's own.
-    bool GroupFrame = R->IsExternal ? TargetObjectWriter->isCodeInDGROUP()
-                                    : inDGROUP(R->TargetSeg);
+    bool GroupFrame = R->GroupTarget || (R->IsExternal
+                                             ? TargetObjectWriter->isCodeInDGROUP()
+                                             : inDGROUP(R->TargetSeg));
     uint8_t Frame = GroupFrame ? OMF::F_Group : OMF::F_Target;
-    uint8_t Method =
-        R->IsExternal ? OMF::T_ExternalNoDisp : OMF::T_SegmentNoDisp;
+    uint8_t Method = R->GroupTarget  ? OMF::T_GroupNoDisp
+                     : R->IsExternal ? OMF::T_ExternalNoDisp
+                                     : OMF::T_SegmentNoDisp;
     FixUpp.byte((Frame << 4) | Method);
     if (GroupFrame)
       FixUpp.index(DGroupIndex);
-    FixUpp.index(R->IsExternal ? R->ExtIndex : Segs[R->TargetSeg].Index);
+    FixUpp.index(R->GroupTarget ? DGroupIndex
+                 : R->IsExternal ? R->ExtIndex
+                                 : Segs[R->TargetSeg].Index);
   }
   if (!FixUpp.empty())
     FixUpp.write(OS);

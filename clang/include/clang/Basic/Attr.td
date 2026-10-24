@@ -490,6 +490,7 @@ def TargetRISCV : TargetArch<["riscv32", "riscv64", "riscv32be", "riscv64be"]>;
 def TargetX86 : TargetArch<["x86"]>;
 def TargetX86_64 : TargetArch<["x86_64"]>;
 def TargetAnyX86 : TargetArch<["x86", "x86_64"]>;
+def TargetI8086 : TargetArch<["i8086"]>;
 def TargetSPIRV : TargetArch<["spirv", "spirv32", "spirv64"]>;
 def TargetWebAssembly : TargetArch<["wasm32", "wasm64"]>;
 def TargetNVPTX : TargetArch<["nvptx", "nvptx64"]>;
@@ -4085,6 +4086,13 @@ def AnyX86NoCfCheck : DeclOrTypeAttr, TargetSpecificAttr<TargetAnyX86>{
   let Spellings = [GCC<"nocf_check">];
   let Subjects = SubjectList<[FunctionLike]>;
   let Documentation = [AnyX86NoCfCheckDocs];
+}
+
+def I8086LoadDS : InheritableAttr, TargetSpecificAttr<TargetI8086> {
+  let Spellings = [Clang<"loadds">];
+  let Subjects = SubjectList<[Function]>;
+  let SimpleHandler = 1;
+  let Documentation = [I8086LoadDSDocs];
 }
 
 def X86ForceAlignArgPointer : InheritableAttr, TargetSpecificAttr<TargetAnyX86> {

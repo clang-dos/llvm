@@ -22,6 +22,8 @@
 // CHECK-DAG: #define __export __attribute__((dllexport))
 // CHECK-DAG: #define _export __attribute__((dllexport))
 // CHECK-DAG: #define _pascal __pascal
+// CHECK-DAG: #define __loadds __attribute__((__loadds__))
+// CHECK-DAG: #define _loadds __attribute__((__loadds__))
 
 // The MSDOS driver adds the sysroot's include directory; the host's headers
 // are never searched.

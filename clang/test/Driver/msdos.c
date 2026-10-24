@@ -111,3 +111,14 @@ int main(void) { return 0; }
 // RUN: %clang --target=i8086-pc-msdos -mcmodel=medium -### -c %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=NEARDATA
 // NEARDATA-NOT: -mlarge-data-threshold
+
+// -mwindows-prologue= is passed to cc1, and checked.
+// RUN: %clang --target=i8086-pc-msdos -mcmodel=large -mwindows-prologue=exported -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WINPRO
+// WINPRO: "-cc1"{{.*}} "-mwindows-prologue=exported"
+// RUN: not %clang --target=i8086-pc-msdos -mwindows-prologue=some -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WINPRO-BAD
+// WINPRO-BAD: error: unsupported argument 'some' to option '-mwindows-prologue='
+// RUN: not %clang --target=x86_64-linux-gnu -mwindows-prologue=all -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WINPRO-X64
+// WINPRO-X64: error: unsupported option '-mwindows-prologue=' for target 'x86_64-linux-gnu'

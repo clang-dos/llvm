@@ -5656,6 +5656,13 @@ def msize_t_EQ : Joined<["-"], "msize-t=">, Group<m_Group>,
   Flags<[TargetSpecific]>, Visibility<[ClangOption]>,
   HelpText<"Width of size_t in bits in the i8086 huge memory model: 32 (the "
            "default) or 16, as in Open Watcom">, Values<"16,32">;
+def mwindows_prologue_EQ : Joined<["-"], "mwindows-prologue=">, Group<m_Group>,
+  Flags<[TargetSpecific]>, Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Give i8086 far functions the 16-bit Windows entry sequence: none "
+           "(the default), exported (__export functions, as Open Watcom -zW) "
+           "or all (every far function, as -zw)">,
+  Values<"none,exported,all">,
+  MarshallingInfoString<CodeGenOpts<"WindowsPrologue">>;
 def mlarge_data_threshold_EQ : Joined<["-"], "mlarge-data-threshold=">, Group<m_Group>,
   Flags<[TargetSpecific]>, Visibility<[ClangOption, CC1Option,FlangOption, FC1Option]>,
   MarshallingInfoInt<TargetOpts<"LargeDataThreshold">, "0">;

@@ -353,6 +353,22 @@ public:
     return getLangASFromTargetAS(0);
   }
 
+  // __loadds, and the 16-bit Windows entry sequence of -mwindows-prologue=.
+  // The backend gives the Windows sequence to far functions only.
+  void setTargetAttributes(const Decl *D, llvm::GlobalValue *GV,
+                           CodeGen::CodeGenModule &CGM) const override {
+    const auto *FD = dyn_cast_or_null<FunctionDecl>(D);
+    auto *Fn = dyn_cast<llvm::Function>(GV);
+    if (!FD || !Fn)
+      return;
+    if (FD->hasAttr<I8086LoadDSAttr>())
+      Fn->addFnAttr("i8086-loadds");
+    StringRef Prologue = CGM.getCodeGenOpts().WindowsPrologue;
+    if (Prologue == "all" ||
+        (Prologue == "exported" && FD->hasAttr<DLLExportAttr>()))
+      Fn->addFnAttr("i8086-windows-prologue");
+  }
+
 private:
   static bool isFarVariable(CodeGenModule &CGM, const VarDecl *D) {
     uint64_t Threshold = CGM.getCodeGenOpts().LargeDataThreshold;

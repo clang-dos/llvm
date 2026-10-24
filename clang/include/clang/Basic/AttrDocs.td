@@ -6474,6 +6474,17 @@ should save and restore any modified registers except for ECX and EDX.
   }];
 }
 
+def I8086LoadDSDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+On i8086, ``__attribute__((loadds))`` (``__loadds`` or ``_loadds``, as in
+Open Watcom and Microsoft C) makes the function save ``DS``, load it with the
+program's data segment (DGROUP) on entry, and restore it on return, so that
+it can be called with any ``DS``: from an interrupt handler, a resident
+program or a Windows DLL, for example.
+  }];
+}
+
 def X86ForceAlignArgPointerDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{

@@ -1625,6 +1625,7 @@ void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
   // Check if the NRVO candidate was not globalized in OpenMP mode.
   if (getLangOpts().ElideConstructors && S.getNRVOCandidate() &&
       S.getNRVOCandidate()->isNRVOVariable() &&
+      canPlaceNRVOVariable(*S.getNRVOCandidate()) &&
       (!getLangOpts().OpenMP ||
        !CGM.getOpenMPRuntime()
             .getAddressOfLocalVariable(*this, S.getNRVOCandidate())

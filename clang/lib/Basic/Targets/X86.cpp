@@ -2008,4 +2008,10 @@ void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__DOS__");
     Builder.defineMacro("_DOS");
   }
+  // 16-bit Windows, as Open Watcom (__WINDOWS__) and Microsoft C (_WINDOWS)
+  // define it.
+  if (getTriple().isOSWin16()) {
+    Builder.defineMacro("__WINDOWS__");
+    Builder.defineMacro("_WINDOWS");
+  }
 }

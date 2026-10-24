@@ -336,10 +336,41 @@ namespace {
 /// far data instead, in a segment of its own outside DGROUP: address space
 /// 2, or 3 (huge) in the huge models, where it can be over 64 KiB. So is
 /// an extern variable of unknown size (extern char buf[]), which may be one.
+///
+/// The pointer to a returned aggregate is far in the far-data models, and in
+/// every model on 16-bit Windows. The result may be on the stack, and in a
+/// Windows DLL the stack segment is not DGROUP.
+static bool isI8086FarDataModel(const TargetInfo &Target) {
+  StringRef Model = Target.getABI();
+  return Model == "compact" || Model == "large" || Model.starts_with("huge");
+}
+
+static bool hasI8086FarSRet(const TargetInfo &Target) {
+  return isI8086FarDataModel(Target) || Target.getTriple().isOSWin16();
+}
+
+class I8086ABIInfo : public DefaultABIInfo {
+public:
+  I8086ABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
+
+  void computeInfo(CGFunctionInfo &FI) const override {
+    DefaultABIInfo::computeInfo(FI);
+    ABIArgInfo &Ret = FI.getReturnInfo();
+    if (Ret.isIndirect() && hasI8086FarSRet(getContext().getTargetInfo()))
+      Ret.setIndirectAddrSpace(2);
+  }
+};
+
 class I8086TargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   I8086TargetCodeGenInfo(CodeGen::CodeGenTypes &CGT)
-      : TargetCodeGenInfo(std::make_unique<DefaultABIInfo>(CGT)) {}
+      : TargetCodeGenInfo(std::make_unique<I8086ABIInfo>(CGT)) {}
+
+  LangAS getSRetAddrSpace(const CXXRecordDecl *RD) const override {
+    if (hasI8086FarSRet(getABIInfo().getContext().getTargetInfo()))
+      return getLangASFromTargetAS(2);
+    return TargetCodeGenInfo::getSRetAddrSpace(RD);
+  }
 
   LangAS getGlobalVarAddressSpace(CodeGenModule &CGM,
                                   const VarDecl *D) const override {
@@ -372,9 +403,7 @@ public:
 private:
   static bool isFarVariable(CodeGenModule &CGM, const VarDecl *D) {
     uint64_t Threshold = CGM.getCodeGenOpts().LargeDataThreshold;
-    StringRef Model = CGM.getTarget().getABI();
-    if (!Threshold || !(Model == "compact" || Model == "large" ||
-                        Model.starts_with("huge")))
+    if (!Threshold || !isI8086FarDataModel(CGM.getTarget()))
       return false;
     // Use the definition, or the declaration with the most type information.
     if (const VarDecl *Def = D->getDefinition())

@@ -5460,7 +5460,9 @@ InputInfoList Driver::BuildJobsForActionNoCache(
 
 const char *Driver::getDefaultImageName() const {
   llvm::Triple Target(llvm::Triple::normalize(TargetTriple));
-  return Target.isOSWindows() || Target.isOSMSDOS() ? "a.exe" : "a.out";
+  return Target.isOSWindows() || Target.isOSMSDOS() || Target.isOSWin16()
+             ? "a.exe"
+             : "a.out";
 }
 
 /// Create output filename based on ArgValue, which could either be a
@@ -6179,6 +6181,7 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       TC = std::make_unique<toolchains::Haiku>(*this, Target, Args);
       break;
     case llvm::Triple::MSDOS:
+    case llvm::Triple::Win16:
       TC = std::make_unique<toolchains::MSDOS>(*this, Target, Args);
       break;
     case llvm::Triple::Darwin:

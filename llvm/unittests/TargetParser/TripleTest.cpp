@@ -104,6 +104,14 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_TRUE(T.isOSMSDOS());
   EXPECT_TRUE(T.isOSBinFormatOMF());
 
+  T = Triple("i8086-pc-win16");
+  EXPECT_EQ(Triple::i8086, T.getArch());
+  EXPECT_EQ(Triple::Win16, T.getOS());
+  EXPECT_EQ(Triple::OMF, T.getObjectFormat());
+  EXPECT_TRUE(T.isOSWin16());
+  EXPECT_FALSE(T.isOSWindows());
+  EXPECT_FALSE(T.isOSMSDOS());
+
   T = Triple("ia16-unknown-dos-elf");
   EXPECT_EQ(Triple::i8086, T.getArch());
   EXPECT_EQ(Triple::MSDOS, T.getOS());
@@ -4034,6 +4042,7 @@ TEST(TripleTest, X86_16) {
   EXPECT_EQ("i8086", Triple::getArchTypeName(Triple::i8086));
   EXPECT_EQ("x86", Triple::getArchTypePrefix(Triple::i8086));
   EXPECT_EQ("msdos", Triple::getOSTypeName(Triple::MSDOS));
+  EXPECT_EQ("win16", Triple::getOSTypeName(Triple::Win16));
   EXPECT_EQ("omf", Triple::getObjectFormatTypeName(Triple::OMF));
   EXPECT_EQ(Triple::i8086, Triple::getArchTypeForLLVMName("i8086"));
 }

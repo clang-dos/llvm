@@ -353,7 +353,8 @@ public:
     QURT,
     H2,
     MSDOS, // MS-DOS and compatibles (16-bit real mode)
-    LastOSType = MSDOS
+    Win16, // 16-bit Windows (Windows 3.x NE programs and DLLs)
+    LastOSType = Win16
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -761,6 +762,9 @@ public:
 
   /// Tests whether the OS is MS-DOS.
   bool isOSMSDOS() const { return getOS() == Triple::MSDOS; }
+
+  /// 16-bit Windows (Windows 3.x).
+  bool isOSWin16() const { return getOS() == Triple::Win16; }
 
   bool isOSUnknown() const { return getOS() == Triple::UnknownOS; }
 

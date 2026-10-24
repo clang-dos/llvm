@@ -19,6 +19,11 @@
 // already exist, so the classes do not change register pressure tracking for
 // other x86 targets.
 //
+// On 16-bit Windows, a DLL runs on its caller's stack, so SS is not DS. An
+// access to a local variable through BX, SI or DI (which use DS) gets an SS
+// segment override. Accesses through BP already use SS, so an SS override on
+// a frame index is removed.
+//
 // After register allocation, a second pass clears the renamable flag on these
 // registers, so that later passes such as MachineCopyPropagation, which only
 // know the plain GR16 operand classes, do not replace them.
@@ -31,6 +36,10 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Analysis/ValueTracking.h"
 
 using namespace llvm;
 
@@ -51,6 +60,7 @@ public:
 
 private:
   bool fixupInstr(MachineInstr &MI, unsigned MemOp);
+  bool addStackSegment(MachineInstr &MI, unsigned MemOp);
   bool copyIfNeeded(MachineInstr &MI, MachineOperand &MO,
                     const TargetRegisterClass *RC);
 
@@ -206,6 +216,64 @@ bool X86FixupAddr16Legacy::fixupInstr(MachineInstr &MI, unsigned MemOp) {
   return Changed;
 }
 
+/// Returns true if \p MMO accesses the stack in the default address space.
+static bool isStackAccess(const MachineMemOperand *MMO) {
+  if (const PseudoSourceValue *PSV = MMO->getPseudoValue())
+    return PSV->isStack() || PSV->kind() == PseudoSourceValue::FixedStack;
+  const Value *V = MMO->getValue();
+  if (!V || MMO->getAddrSpace() != 0)
+    return false;
+  SmallVector<const Value *, 4> Objs;
+  getUnderlyingObjects(V, Objs);
+  if (Objs.empty())
+    return false;
+  for (const Value *O : Objs) {
+    if (isa<AllocaInst>(O))
+      continue;
+    if (const auto *A = dyn_cast<Argument>(O); A && A->hasByValAttr())
+      continue;
+    return false;
+  }
+  return true;
+}
+
+/// Returns true if \p R is SS, or a copy of it.
+static bool isSS(Register R, const MachineRegisterInfo &MRI) {
+  while (R.isVirtual()) {
+    const MachineInstr *Def = MRI.getVRegDef(R);
+    if (!Def || !Def->isCopy() || Def->getOperand(1).getSubReg())
+      return false;
+    R = Def->getOperand(1).getReg();
+  }
+  return R == X86::SS;
+}
+
+/// Removes an SS override from a frame index, which becomes BP and uses SS
+/// anyway.
+static bool removeStackSegment(MachineInstr &MI, unsigned MemOp,
+                               const MachineRegisterInfo &MRI) {
+  MachineOperand &Base = MI.getOperand(MemOp + X86::AddrBaseReg);
+  MachineOperand &Seg = MI.getOperand(MemOp + X86::AddrSegmentReg);
+  if (!Base.isFI() || !Seg.isReg() || !Seg.getReg() || !isSS(Seg.getReg(), MRI))
+    return false;
+  Seg.setReg(Register());
+  return true;
+}
+
+/// Adds an SS override to a stack access through a register other than BP.
+bool X86FixupAddr16Legacy::addStackSegment(MachineInstr &MI, unsigned MemOp) {
+  MachineOperand &Base = MI.getOperand(MemOp + X86::AddrBaseReg);
+  MachineOperand &Seg = MI.getOperand(MemOp + X86::AddrSegmentReg);
+  if (!Base.isReg() || !Base.getReg() || !Seg.isReg() || Seg.getReg())
+    return false;
+  if (MI.getOpcode() == X86::LEA16r || MI.memoperands_empty())
+    return false;
+  if (!llvm::all_of(MI.memoperands(), isStackAccess))
+    return false;
+  Seg.setReg(X86::SS);
+  return true;
+}
+
 bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
   const X86Subtarget &ST = MF.getSubtarget<X86Subtarget>();
   if (!ST.isTarget16BitABI())
@@ -214,6 +282,7 @@ bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
   TII = ST.getInstrInfo();
   MRI = &MF.getRegInfo();
   bool Changed = false;
+  bool SeparateStack = ST.getTargetTriple().isOSWin16();
 
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
@@ -221,8 +290,12 @@ bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
       if (MI.getOpcode() == X86::LEA32r || MI.getOpcode() == X86::LEA64_32r)
         continue;
       int MemOp = getMemOperandIdx(MI);
-      if (MemOp >= 0)
-        Changed |= fixupInstr(MI, MemOp);
+      if (MemOp < 0)
+        continue;
+      Changed |= fixupInstr(MI, MemOp);
+      Changed |= removeStackSegment(MI, MemOp, *MRI);
+      if (SeparateStack)
+        Changed |= addStackSegment(MI, MemOp);
     }
   }
   return Changed;

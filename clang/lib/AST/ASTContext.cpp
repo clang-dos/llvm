@@ -10056,6 +10056,16 @@ static TypedefDecl *CreateZOSVaListDecl(const ASTContext *Context) {
 }
 
 static TypedefDecl *CreateCharPtrBuiltinVaListDecl(const ASTContext *Context) {
+  // On 16-bit Windows the arguments may be on another program's stack (in a
+  // DLL), so a va_list is a far pointer in every memory model:
+  // typedef char __far *__builtin_va_list;
+  const TargetInfo &Target = Context->getTargetInfo();
+  if (Target.getTriple().isOSWin16()) {
+    QualType Far = Context->getAddrSpaceQualType(
+        Context->CharTy, getLangASFromTargetAS(2));
+    return Context->buildImplicitTypedef(Context->getPointerType(Far),
+                                         "__builtin_va_list");
+  }
   return CreateCharPtrNamedVaListDecl(Context, "__builtin_va_list");
 }
 

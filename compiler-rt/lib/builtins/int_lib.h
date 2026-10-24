@@ -64,7 +64,7 @@
   COMPILER_RT_ALIAS_VISIBILITY(aliasname) \
   __asm__(SYMBOL_NAME(aliasname) " = " SYMBOL_NAME(name)); \
   COMPILER_RT_ABI __typeof(name) aliasname;
-#elif defined(__MSDOS__)
+#elif defined(__MSDOS__) || defined(__WINDOWS__)
 // OMF objects have no alias records that every linker reads, so define the
 // alias as a second public name at the same address.
 #define COMPILER_RT_ALIAS(name, aliasname)                                     \

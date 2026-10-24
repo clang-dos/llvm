@@ -28,9 +28,19 @@ MSDOS::MSDOS(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
       MemoryModel(x86::getI8086MemoryModel(D, Args).str()) {
   getProgramPaths().push_back(getDriver().Dir);
 
-  // Libraries for the memory model first, then shared ones.
+  // Windows runs in protected mode, where segment arithmetic does not work:
+  // the huge models are out, and a .COM program is a DOS thing.
+  if (Triple.isOSWin16() && (MemoryModel == "tiny" ||
+                             StringRef(MemoryModel).starts_with("huge")))
+    D.Diag(diag::err_drv_unsupported_option_argument_for_target)
+        << "-mcmodel=" << MemoryModel << Triple.str();
+
+  // Libraries for the memory model first, then shared ones. Windows
+  // libraries are in lib/win16.
   SmallString<128> LibDir(computeSysRoot());
   llvm::sys::path::append(LibDir, "lib");
+  if (Triple.isOSWin16())
+    llvm::sys::path::append(LibDir, "win16");
   SmallString<128> ModelDir(LibDir);
   llvm::sys::path::append(ModelDir, MemoryModel);
   getFilePaths().push_back(std::string(ModelDir));
@@ -131,12 +141,17 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   const auto &TC = static_cast<const toolchains::MSDOS &>(getToolChain());
   ArgStringList CmdArgs;
 
-  // The tiny model gives a .COM program, the others an MZ executable.
+  // The tiny model gives a .COM program, the others an MZ executable. For
+  // Windows, an NE program, or a DLL with -shared.
+  bool Win16 = TC.getTriple().isOSWin16();
+  bool IsDLL = Win16 && Args.hasArg(options::OPT_shared);
   CmdArgs.push_back("format");
-  CmdArgs.push_back("dos");
-  bool IsCOM = TC.getMemoryModel() == "tiny";
+  CmdArgs.push_back(Win16 ? "windows" : "dos");
+  bool IsCOM = !Win16 && TC.getMemoryModel() == "tiny";
   if (IsCOM)
     CmdArgs.push_back("com");
+  if (IsDLL)
+    CmdArgs.push_back("dll");
   CmdArgs.push_back("option");
   CmdArgs.push_back("quiet");
   // Drop code that nothing references. With COMDATs this removes unused
@@ -159,10 +174,23 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(quoteName(Args, A->getValue()));
   }
 
-  // The startup code goes first, so that its segments set the order.
+  if (Win16) {
+    // Windows grows the local heap (LocalAlloc, and malloc in the near data
+    // models) from heapsize. A DLL runs on its caller's stack.
+    CmdArgs.push_back("option");
+    CmdArgs.push_back("heapsize=4096");
+    if (!IsDLL) {
+      CmdArgs.push_back("option");
+      CmdArgs.push_back("stack=8192");
+    }
+  }
+
+  // The startup code goes first, so that its segments set the order. A DLL
+  // starts with libentry.obj.
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
     CmdArgs.push_back("file");
-    CmdArgs.push_back(quoteName(Args, TC.GetFilePath("crt0.obj")));
+    CmdArgs.push_back(
+        quoteName(Args, TC.GetFilePath(IsDLL ? "libentry.obj" : "crt0.obj")));
   }
 
   for (const InputInfo &II : Inputs) {
@@ -203,6 +231,13 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         CmdArgs.push_back("library");
         CmdArgs.push_back(quoteName(Args, *Path));
       }
+    // The Windows API: import directives for KERNEL, USER and GDI. The
+    // linker keeps only the imports that are used.
+    if (Win16) {
+      std::string Imports = TC.GetFilePath("windows.lnk");
+      if (llvm::sys::fs::exists(Imports))
+        CmdArgs.push_back(Args.MakeArgString("@" + Imports));
+    }
   }
 
   std::string Linker = getWatcomLinkerPath(TC, Args);

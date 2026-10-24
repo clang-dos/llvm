@@ -89,6 +89,7 @@ TRIPLE_OS(QURT, "qurt", "Generic")
 TRIPLE_OS(H2, "h2", "Generic")
 TRIPLE_OS(MSDOS, "msdos", "DOS")
 TRIPLE_OS_ALIAS(MSDOS, "dos")
+TRIPLE_OS(Win16, "win16", "Windows16")
 
 #undef TRIPLE_OS
 #undef TRIPLE_OS_ALIAS

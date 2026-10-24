@@ -34675,8 +34675,8 @@ static SDValue LowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) {
 
   // i8086 near (16-bit offset) and far (32-bit segment:offset) pointers.
   // A far pointer becomes near by dropping its segment. A near pointer
-  // becomes far with the segment it is relative to: CS for code, DS (which
-  // is also SS) for data.
+  // becomes far with the segment it is relative to: CS for code, SS for the
+  // stack and DS for other data.
   if (DAG.getSubtarget<X86Subtarget>().isTarget16BitABI()) {
     EVT SrcVT = Src.getValueType();
     if (DstVT == MVT::i16)
@@ -34685,7 +34685,9 @@ static SDValue LowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) {
     assert(DstVT == MVT::i32 && "unexpected i8086 pointer type");
     if (SrcVT == MVT::i32)
       return Src;
-    unsigned SegReg = SrcAS == X86AS::NEAR_CODE ? X86::CS : X86::DS;
+    unsigned SegReg = SrcAS == X86AS::NEAR_CODE    ? X86::CS
+                      : SrcAS == X86AS::NEAR_STACK ? X86::SS
+                                                   : X86::DS;
     SDValue Seg =
         DAG.getCopyFromReg(DAG.getEntryNode(), dl, SegReg, MVT::i16);
     return DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i32, Src, Seg);
@@ -64350,7 +64352,8 @@ static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
     // segment.
     if (auto *C = dyn_cast<AddrSpaceCastSDNode>(Ptr))
       if (C->getOperand(0).getValueType() == MVT::i16 &&
-          C->getSrcAddressSpace() != X86AS::NEAR_CODE)
+          C->getSrcAddressSpace() != X86AS::NEAR_CODE &&
+          C->getSrcAddressSpace() != X86AS::NEAR_STACK)
         return C->getOperand(0);
     if (Ptr.getOpcode() == ISD::BUILD_PAIR &&
         Ptr.getOperand(1).getOpcode() == ISD::CopyFromReg &&
@@ -64414,7 +64417,8 @@ static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
     // through it, and store the pointer advanced past the 2-byte aligned
     // argument slot.
     SDValue Chain = N->getOperand(0), Ptr = N->getOperand(1);
-    if (Ptr.getValueType() != MVT::i32)
+    if (Ptr.getValueType() != MVT::i32 &&
+        !DAG.getTarget().getTargetTriple().isOSWin16())
       return SDValue();
     EVT VT = N->getValueType(0);
     const Value *SV = cast<SrcValueSDNode>(N->getOperand(2))->getValue();
@@ -64454,9 +64458,11 @@ static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
       return SDValue();
     return N->getOperand(0);
   case ISD::VACOPY: {
-    // va_copy(dst, src) with far va_lists: copy the far pointer.
+    // va_copy(dst, src) with far va_lists: copy the far pointer. A va_list
+    // is far in the far-data models, and in every model on 16-bit Windows.
     SDValue Dst = N->getOperand(1), Src = N->getOperand(2);
-    if (Dst.getValueType() != MVT::i32 && Src.getValueType() != MVT::i32)
+    if (Dst.getValueType() != MVT::i32 && Src.getValueType() != MVT::i32 &&
+        !DAG.getTarget().getTargetTriple().isOSWin16())
       return SDValue();
     const Value *DstSV = cast<SrcValueSDNode>(N->getOperand(3))->getValue();
     const Value *SrcSV = cast<SrcValueSDNode>(N->getOperand(4))->getValue();
@@ -64467,14 +64473,15 @@ static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
   }
   case ISD::VASTART: {
     SDValue Ptr = N->getOperand(1);
-    if (Ptr.getValueType() != MVT::i32)
+    if (Ptr.getValueType() != MVT::i32 &&
+        !DAG.getTarget().getTargetTriple().isOSWin16())
       return SDValue();
     MachineFunction &MF = DAG.getMachineFunction();
     int FI = MF.getInfo<X86MachineFunctionInfo>()->getVarArgsFrameIndex();
-    // The arguments are on the stack, and SS is DS.
+    // The arguments are on the stack.
     SDValue Args = DAG.getNode(
         ISD::BUILD_PAIR, DL, MVT::i32, DAG.getFrameIndex(FI, MVT::i16),
-        DAG.getCopyFromReg(DAG.getEntryNode(), DL, X86::DS, MVT::i16));
+        DAG.getCopyFromReg(DAG.getEntryNode(), DL, X86::SS, MVT::i16));
     const Value *SV = cast<SrcValueSDNode>(N->getOperand(2))->getValue();
     return DAG.getStore(N->getOperand(0), DL, Args, Ptr,
                         MachinePointerInfo(SV));

@@ -474,6 +474,15 @@ public:
     return PostAllocaInsertPt;
   }
 
+  /// Whether the named return value \p D can live in the return slot. On
+  /// i8086 the slot may be far where the variable's address is near, and a
+  /// near pointer to it would lose the segment, so the variable is copied.
+  bool canPlaceNRVOVariable(const VarDecl &D) const {
+    return !CGM.getTriple().isX86_16() || !ReturnValue.isValid() ||
+           ReturnValue.getAddressSpace() ==
+               getContext().getTargetAddressSpace(D.getType().getAddressSpace());
+  }
+
   // Try to preserve the source's name to make IR more readable.
   llvm::Value *performAddrSpaceCast(llvm::Value *Src, llvm::Type *DestTy) {
     return Builder.CreateAddrSpaceCast(

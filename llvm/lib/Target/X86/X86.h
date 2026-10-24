@@ -570,6 +570,10 @@ enum : unsigned {
   HUGE_DATA = 3,
   NEAR_CODE = 4,
   FAR_CODE = 5,
+  // A near pointer to the stack, relative to SS: only as the source of a
+  // cast to far, so that the far pointer gets SS rather than DS (a 16-bit
+  // Windows DLL runs on its caller's stack, with SS not DS).
+  NEAR_STACK = 6,
   GS = 256,
   FS = 257,
   SS = 258,

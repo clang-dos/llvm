@@ -208,11 +208,11 @@ define i16 @va(i16 %n, ...) nounwind {
 ; CHECK-NEXT:    pushw %bp
 ; CHECK-NEXT:    movw %sp, %bp
 ; CHECK-NEXT:    subw $4, %sp
-; CHECK-NEXT:    movw %ds, %cx
+; CHECK-NEXT:    movw %ss, %cx
 ; CHECK-NEXT:    movw %cx, -2(%bp)
 ; CHECK-NEXT:    leaw 6(%bp), %ax
 ; CHECK-NEXT:    movw %ax, -4(%bp)
-; CHECK-NEXT:    movw %ds:6(%bp), %ax
+; CHECK-NEXT:    movw 6(%bp), %ax
 ; CHECK-NEXT:    movw %cx, -2(%bp)
 ; CHECK-NEXT:    leaw 8(%bp), %cx
 ; CHECK-NEXT:    movw %cx, -4(%bp)
@@ -225,11 +225,11 @@ define i16 @va(i16 %n, ...) nounwind {
 ; LARGE-NEXT:    pushw %bp
 ; LARGE-NEXT:    movw %sp, %bp
 ; LARGE-NEXT:    subw $4, %sp
-; LARGE-NEXT:    movw %ds, %cx
+; LARGE-NEXT:    movw %ss, %cx
 ; LARGE-NEXT:    movw %cx, -2(%bp)
 ; LARGE-NEXT:    leaw 8(%bp), %ax
 ; LARGE-NEXT:    movw %ax, -4(%bp)
-; LARGE-NEXT:    movw %ds:8(%bp), %ax
+; LARGE-NEXT:    movw 8(%bp), %ax
 ; LARGE-NEXT:    movw %cx, -2(%bp)
 ; LARGE-NEXT:    leaw 10(%bp), %cx
 ; LARGE-NEXT:    movw %cx, -4(%bp)

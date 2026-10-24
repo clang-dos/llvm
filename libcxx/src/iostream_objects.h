@@ -26,6 +26,14 @@
 #  define _LIBCPP_SEPARATE_WIDE_STREAMS 0
 #endif
 
+// cin is in cin.cpp on i8086, for the same reason: a program that only writes
+// does not link the input stream buffer or the reading it does.
+#if defined(__I86__)
+#  define _LIBCPP_SEPARATE_CIN 1
+#else
+#  define _LIBCPP_SEPARATE_CIN 0
+#endif
+
 #define ABI_NAMESPACE_STR _LIBCPP_TOSTRING(_LIBCPP_ABI_NAMESPACE)
 
 _LIBCPP_BEGIN_NAMESPACE_STD
@@ -126,6 +134,15 @@ using unsync_buffer = char;
 #if _LIBCPP_SEPARATE_WIDE_STREAMS
 // Set by wiostream.cpp when the wide streams are linked.
 extern _LIBCPP_HIDDEN void (*__sync_wide_streams_with_stdio)(bool);
+#endif
+
+#if _LIBCPP_SEPARATE_CIN
+// cin.cpp sets these when cin is linked, so that sync_with_stdio can switch
+// its buffer. They point to data, so that a program which uses cin but never
+// calls sync_with_stdio does not link the switching code and basic_filebuf.
+using cin_stream_data = stream_data<basic_istream<char>, __stdinbuf<char>, unsync_buffer<char> >;
+extern _LIBCPP_HIDDEN stream<basic_istream<char> >* __cin_for_sync;
+extern _LIBCPP_HIDDEN cin_stream_data* __cin_data_for_sync;
 #endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS

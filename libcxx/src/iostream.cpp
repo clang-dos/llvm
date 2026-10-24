@@ -11,7 +11,9 @@
 _LIBCPP_BEGIN_NAMESPACE_STD
 _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 
+#if !_LIBCPP_SEPARATE_CIN
 STREAM(basic_istream, __stdinbuf, unsync_buffer, char, cin);
+#endif
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, char, cout);
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, char, cerr);
 STREAM(basic_ostream, __stdoutbuf, unsync_buffer, char, clog);
@@ -53,12 +55,16 @@ public:
 DoIOSInit::DoIOSInit() {
   force_locale_initialization();
 
+#if !_LIBCPP_SEPARATE_CIN
   init_stream(stdin, cin, cin_data);
+#endif
   init_stream(stdout, cout, cout_data);
   init_stream(stderr, cerr, cerr_data);
   init_stream(stderr, clog, clog_data);
 
+#if !_LIBCPP_SEPARATE_CIN
   cin.value.tie(&cout.value);
+#endif
   std::unitbuf(cerr.value);
   cerr.value.tie(&cout.value);
 
@@ -93,6 +99,10 @@ ios_base::Init::~Init() {}
 #if _LIBCPP_SEPARATE_WIDE_STREAMS
 void (*__sync_wide_streams_with_stdio)(bool);
 #endif
+#if _LIBCPP_SEPARATE_CIN
+stream<basic_istream<char> >* __cin_for_sync;
+cin_stream_data* __cin_data_for_sync;
+#endif
 
 bool ios_base::sync_with_stdio(bool sync) {
   static bool previous_state = true;
@@ -101,7 +111,9 @@ bool ios_base::sync_with_stdio(bool sync) {
 #if _LIBCPP_HAS_FILESYSTEM
   if (sync != previous_state) {
     if (sync) {
+#  if !_LIBCPP_SEPARATE_CIN
       switch_to_sync_stream(stdin, cin, cin_data);
+#  endif
       switch_to_sync_stream(stdout, cout, cout_data);
       switch_to_sync_stream(stderr, clog, clog_data);
 #  if _LIBCPP_HAS_WIDE_CHARACTERS && !_LIBCPP_SEPARATE_WIDE_STREAMS
@@ -110,7 +122,9 @@ bool ios_base::sync_with_stdio(bool sync) {
       switch_to_sync_stream(stderr, wclog, wclog_data);
 #  endif
     } else {
+#  if !_LIBCPP_SEPARATE_CIN
       switch_to_unsync_stream(stdin, cin, cin_data, ios::in);
+#  endif
       switch_to_unsync_stream(stdout, cout, cout_data, ios::out);
       switch_to_unsync_stream(stderr, clog, clog_data, ios::out);
 #  if _LIBCPP_HAS_WIDE_CHARACTERS && !_LIBCPP_SEPARATE_WIDE_STREAMS
@@ -119,6 +133,14 @@ bool ios_base::sync_with_stdio(bool sync) {
       switch_to_unsync_stream(stderr, wclog, wclog_data, ios::out);
 #  endif
     }
+#  if _LIBCPP_SEPARATE_CIN
+    if (__cin_for_sync) {
+      if (sync)
+        switch_to_sync_stream(stdin, *__cin_for_sync, *__cin_data_for_sync);
+      else
+        switch_to_unsync_stream(stdin, *__cin_for_sync, *__cin_data_for_sync, ios::in);
+    }
+#  endif
 #  if _LIBCPP_SEPARATE_WIDE_STREAMS
     if (__sync_wide_streams_with_stdio)
       __sync_wide_streams_with_stdio(sync);

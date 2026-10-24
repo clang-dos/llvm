@@ -521,6 +521,35 @@ inline _LIBCPP_HIDE_FROM_ABI void ios_base::exceptions(iostate __iostate) {
   clear(__rdstate_);
 }
 
+#    if _LIBCPP_DOS_LEAN_AND_MEAN
+// The ctype that char streams use with DOS_LEAN_AND_MEAN: the "C" locale's
+// rules, with no facet to look up. A program that uses it doesn't link
+// ctype<char>, its virtual functions or its destructor. A ctype<char> that
+// the program imbues in a stream's locale is not consulted.
+struct __dos_lean_ctype : ctype_base {
+  _LIBCPP_HIDE_FROM_ABI static bool is(mask __m, char __c) {
+    return (ctype<char>::classic_table()[static_cast<unsigned char>(__c)] & __m) != 0;
+  }
+  _LIBCPP_HIDE_FROM_ABI static char widen(char __c) { return __c; }
+  _LIBCPP_HIDE_FROM_ABI static char narrow(char __c, char) { return __c; }
+};
+#    endif
+
+// The ctype a stream of _CharT uses for its own conversions.
+template <class _CharT>
+struct __stream_ctype {
+  typedef const ctype<_CharT>& type;
+  _LIBCPP_HIDE_FROM_ABI static type __get(const ios_base& __s) { return std::use_facet<ctype<_CharT> >(__s.getloc()); }
+};
+
+#    if _LIBCPP_DOS_LEAN_AND_MEAN
+template <>
+struct __stream_ctype<char> {
+  typedef __dos_lean_ctype type;
+  _LIBCPP_HIDE_FROM_ABI static type __get(const ios_base&) { return type(); }
+};
+#    endif
+
 template <class _Traits>
 // Attribute 'packed' is used to keep the layout compatible with the previous
 // definition of the '__fill_' and '_set_' pair in basic_ios on AIX & z/OS.
@@ -686,12 +715,12 @@ inline _LIBCPP_HIDE_FROM_ABI locale basic_ios<_CharT, _Traits>::imbue(const loca
 
 template <class _CharT, class _Traits>
 inline _LIBCPP_HIDE_FROM_ABI char basic_ios<_CharT, _Traits>::narrow(char_type __c, char __dfault) const {
-  return std::use_facet<ctype<char_type> >(getloc()).narrow(__c, __dfault);
+  return __stream_ctype<char_type>::__get(*this).narrow(__c, __dfault);
 }
 
 template <class _CharT, class _Traits>
 inline _LIBCPP_HIDE_FROM_ABI _CharT basic_ios<_CharT, _Traits>::widen(char __c) const {
-  return std::use_facet<ctype<char_type> >(getloc()).widen(__c);
+  return __stream_ctype<char_type>::__get(*this).widen(__c);
 }
 
 template <class _CharT, class _Traits>

@@ -145,6 +145,9 @@ struct Segment {
   bool HasNext = false;
   // Bytes of COMDATs that the linker may add to a shared far segment.
   uint64_t Reserved = 0;
+  // With far code, the code that does not fit in the module's code segment
+  // goes on in more code segments; this one is the CodePart'th after it.
+  unsigned CodePart = 0;
 };
 
 /// The segments of a module: the fixed kinds first, as in SegmentKind, then
@@ -257,6 +260,13 @@ class OMFObjectWriter final : public MCObjectWriter {
   SegIdx getFarPool(FarKind Kind, uint64_t Size, Align A);
   // The current shared far segment of each kind, or 0 for none yet.
   SegIdx FarPools[FK_Count] = {};
+  /// The code segment with room for Size more bytes aligned to A: _TEXT,
+  /// or with far code, the module's current code segment.
+  SegIdx getCodePool(uint64_t Size, Align A);
+  SegIdx CodePool = SK_Text;
+  unsigned NumCodeParts = 0;
+  bool isCode(SegIdx K) const { return K == SK_Text || Segs[K].CodePart; }
+  void computeTextName();
   /// Move an offset past the end of a far data segment into the segment
   /// that holds it.
   void normalize(SegIdx &K, uint64_t &Offset) const {
@@ -285,13 +295,17 @@ class OMFObjectWriter final : public MCObjectWriter {
     };
     SmallVector<SegIdx, 16> Order = {SK_Text};
     for (SegIdx K = SK_Count, E = Segs.size(); K != E; ++K)
-      if (!IsLate(K))
+      if (Segs[K].CodePart)
+        Order.push_back(K);
+    for (SegIdx K = SK_Count, E = Segs.size(); K != E; ++K)
+      if (!Segs[K].CodePart && !IsLate(K))
         Order.push_back(K);
     for (SegIdx K = SK_Text + 1; K != SK_Count; ++K)
       Order.push_back(K);
     for (unsigned Late : {0, 1})
       for (SegIdx K = SK_Count, E = Segs.size(); K != E; ++K)
-        if (IsLate(K) && (Segs[K].Class == "FAR_END") == bool(Late))
+        if (!Segs[K].CodePart && IsLate(K) &&
+            (Segs[K].Class == "FAR_END") == bool(Late))
           Order.push_back(K);
     return Order;
   }
@@ -327,6 +341,8 @@ public:
     Comdats.clear();
     ComdatIndex.clear();
     std::fill(std::begin(FarPools), std::end(FarPools), 0);
+    CodePool = SK_Text;
+    NumCodeParts = 0;
     NumLNames = 0;
     DGroupIndex = 0;
     MCObjectWriter::reset();
@@ -440,8 +456,15 @@ void OMFObjectWriter::findComdats() {
     }
     if (Sym->getName().size() > 255)
       continue;
+    // A group section is any one of identical copies. So is a C++ type_info
+    // object or its name: code built without RTTI has its own copy, in a
+    // group, of one that the C++ runtime defines.
+    StringRef Name = Sym->getName();
+    Name.consume_front("_");
+    bool PickAny = Sec.getGroup() != nullptr || Name.starts_with("_ZTI") ||
+                   Name.starts_with("_ZTS");
     ComdatIndex[&Sec] = Comdats.size();
-    Comdats.push_back({&Sec, Sym, *K, Sec.getGroup() != nullptr,
+    Comdats.push_back({&Sec, Sym, *K, PickAny,
                        *K == SK_Count ? getFarKind(Sec.getName()) : -1});
   }
 }
@@ -464,6 +487,42 @@ SegIdx OMFObjectWriter::getFarPool(FarKind Kind, uint64_t Size, Align A) {
                                : "FAR_DATA";
   Seg.Combine = OMF::SC_Private;
   return K;
+}
+
+SegIdx OMFObjectWriter::getCodePool(uint64_t Size, Align A) {
+  // Near code is all in one segment, and so is the code of a module that
+  // fits in 64 KiB.
+  SegIdx &K = CodePool;
+  if (!TargetObjectWriter->hasFarCode() ||
+      alignTo(Segs[K].Size + Segs[K].Reserved, A) + Size <= 0x10000 ||
+      (Segs[K].Size == 0 && Segs[K].Reserved == 0))
+    return K;
+  // Far calls load CS, so a function can be in any code segment of the
+  // module. Each one is named after the module's code segment.
+  K = Segs.size();
+  Segment &Seg = Segs.emplace_back();
+  Seg.Present = true;
+  Seg.CodePart = ++NumCodeParts;
+  Seg.Name = TextName + "_" + std::to_string(NumCodeParts);
+  Seg.Class = "CODE";
+  Seg.Combine = OMF::SC_Public;
+  return K;
+}
+
+void OMFObjectWriter::computeTextName() {
+  std::string Name = "noname";
+  if (!getFileNames().empty())
+    Name = sys::path::filename(getFileNames().front().first).str();
+  // With far calls, each module has a code segment of its own, named after
+  // the source file as other DOS compilers do (hello.c: hello_TEXT).
+  TextName = Segments[SK_Text].Name;
+  if (TargetObjectWriter->hasFarCode()) {
+    std::string Stem = sys::path::stem(Name).str();
+    for (char &C : Stem)
+      if (!isAlnum(C) && C != '_' && C != '$')
+        C = '_';
+    TextName = Stem.substr(0, 200) + "_TEXT";
+  }
 }
 
 void OMFObjectWriter::addFarSection(const MCSectionELF &Sec) {
@@ -507,10 +566,13 @@ void OMFObjectWriter::addFarSection(const MCSectionELF &Sec) {
 
 void OMFObjectWriter::executePostLayoutBinding() {
   findComdats();
+  computeTextName();
 
   // Place sections in segments.
   Segs.resize(SK_Count);
   std::fill(std::begin(FarPools), std::end(FarPools), 0);
+  CodePool = SK_Text;
+  NumCodeParts = 0;
   for (const MCSection &S : *Asm) {
     const auto &Sec = static_cast<const MCSectionELF &>(S);
     if (ComdatIndex.count(&Sec))
@@ -522,24 +584,33 @@ void OMFObjectWriter::executePostLayoutBinding() {
       addFarSection(Sec);
       continue;
     }
-    Segment &Seg = Segs[*K];
+    SegIdx Idx = *K == SK_Text
+                     ? getCodePool(Asm->getSectionAddressSize(Sec),
+                                   Sec.getAlign())
+                     : SegIdx(*K);
+    Segment &Seg = Segs[Idx];
     Seg.Present = true;
     Seg.Size = alignTo(Seg.Size, Sec.getAlign());
     Seg.MaxAlign = std::max(Seg.MaxAlign, Sec.getAlign());
-    SectionMap[&Sec] = {*K, Seg.Size};
+    SectionMap[&Sec] = {Idx, Seg.Size};
     Seg.Sections.push_back(&Sec);
     Seg.Size += Asm->getSectionAddressSize(Sec);
   }
   // Far COMDATs are allocated in the shared far segment of their kind.
   // Room is kept for them, so that the segment stays under 64 KiB whichever
   // copies the linker keeps.
-  for (Comdat &C : Comdats)
-    if (C.FarKind >= 0) {
-      uint64_t Size = Asm->getSectionAddressSize(*C.Sec);
+  // Code COMDATs likewise, with far code.
+  for (Comdat &C : Comdats) {
+    uint64_t Size = Asm->getSectionAddressSize(*C.Sec);
+    if (C.FarKind >= 0)
       C.Base = getFarPool(FarKind(C.FarKind), Size, C.Sec->getAlign());
-      Segs[C.Base].Reserved =
-          alignTo(Segs[C.Base].Reserved, C.Sec->getAlign()) + Size;
-    }
+    else if (C.Base == SK_Text && TargetObjectWriter->hasFarCode())
+      C.Base = getCodePool(Size, C.Sec->getAlign());
+    else
+      continue;
+    Segs[C.Base].Reserved =
+        alignTo(Segs[C.Base].Reserved, C.Sec->getAlign()) + Size;
+  }
 
   // Linkers order segments by class in the order they first see them, so
   // every module defines the usual segments, even empty, in the usual order
@@ -695,6 +766,8 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
   SegIdx TargetSeg;
   uint64_t TargetOffset;
   unsigned TargetComdat;
+  // The code segment of a PC-relative target in this module.
+  std::optional<SegIdx> PCRelSeg;
   if (SegRef && Sym->isUndefined() && Sym->getName() == "DGROUP") {
     if (!DGroupIndex) {
       Ctx.reportError(Loc, "DGROUP@SEG in a module without DGROUP");
@@ -710,6 +783,7 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     R.TargetSeg = SK_Text;
     R.ExtIndex = getExternalIndex(*Comdats[TargetComdat].Sym);
     Addend += TargetOffset;
+    PCRelSeg = Comdats[TargetComdat].Base;
   } else if (!Sym->isCommon() &&
              getSymbolLocation(*Sym, TargetSeg, TargetOffset)) {
     if (SegRef) {
@@ -731,6 +805,7 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     R.IsExternal = false;
     R.TargetSeg = TargetSeg;
     R.ExtIndex = 0;
+    PCRelSeg = TargetSeg;
   } else if (Sym->isUndefined() || Sym->isCommon()) {
     R.IsExternal = true;
     R.TargetSeg = SK_Text;
@@ -739,6 +814,14 @@ void OMFObjectWriter::recordRelocation(const MCFragment &F,
     Ctx.reportError(Loc, "symbol '" + Sym->getName() +
                              "' is not in a section written to the OMF "
                              "object");
+    return;
+  }
+
+  // A near jump or call cannot reach another of the module's code segments.
+  if (PCRel && PCRelSeg && *PCRelSeg != R.Seg && isCode(*PCRelSeg) &&
+      isCode(R.Seg)) {
+    Ctx.reportError(Loc, "PC-relative reference to '" + Sym->getName() +
+                             "' in another code segment of the module");
     return;
   }
 
@@ -755,16 +838,6 @@ void OMFObjectWriter::writeHeader() {
   if (Name.size() > 255)
     Name.resize(255);
 
-  // With far calls, each module has a code segment of its own, named after
-  // the source file as other DOS compilers do (hello.c: hello_TEXT).
-  TextName = Segments[SK_Text].Name;
-  if (TargetObjectWriter->hasFarCode()) {
-    std::string Stem = sys::path::stem(Name).str();
-    for (char &C : Stem)
-      if (!isAlnum(C) && C != '_' && C != '$')
-        C = '_';
-    TextName = Stem.substr(0, 200) + "_TEXT";
-  }
   Record THeadr(OMF::THEADR);
   THeadr.name(Name);
   THeadr.write(OS);
@@ -1044,7 +1117,7 @@ void OMFObjectWriter::writeSegmentData(SegIdx K) {
       break;
     uint64_t Base = SectionMap.lookup(Sec).second;
     // Code padding between sections is NOPs.
-    if (K == SK_Text)
+    if (isCode(K))
       std::fill(Image.begin() + PrevEnd, Image.begin() + Base, 0x90);
     PrevEnd = Base + Asm->getSectionAddressSize(*Sec);
     if (Sec->isBssSection())

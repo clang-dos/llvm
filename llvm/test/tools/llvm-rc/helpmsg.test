@@ -20,5 +20,6 @@
 ; CHECK-NEXT:    /showIncludes Print cl.exe-style include information to stderr.
 ; CHECK-NEXT:    /U <value>  Undefine a symbol for the C preprocessor.
 ; CHECK-NEXT:    /V          Be verbose.
+; CHECK-NEXT:    /win16      Write a 16-bit Windows .res file, for NE programs and DLLs.
 ; CHECK-NEXT:    /X          Ignore 'include' variable.
 ; CHECK-NEXT:    /Y          Suppress warnings on duplicate resource IDs.

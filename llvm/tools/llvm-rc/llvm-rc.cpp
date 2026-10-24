@@ -411,6 +411,14 @@ RcOptions parseWindresOptions(ArrayRef<const char *> ArgsArr,
     Opts.Triple = Prefix;
   else
     Opts.Triple = getMingwTriple();
+  // --target=i8086-pc-win16 writes a 16-bit Windows .res file, which has
+  // no COFF form.
+  if (Triple(Opts.Triple).isOSWin16()) {
+    Opts.Params.Win16 = true;
+    if (Opts.OutputFormat == Coff)
+      fatalError("16-bit Windows resources have no COFF form; write a .res "
+                 "file");
+  }
 
   for (const auto *Arg :
        InputArgs.filtered(WINDRES_include_dir, WINDRES_define, WINDRES_undef,
@@ -539,6 +547,10 @@ RcOptions parseRcOptions(ArrayRef<const char *> ArgsArr,
       fatalError("Invalid code page: " +
                  InputArgs.getLastArgValue(OPT_codepage));
   }
+  if (InputArgs.hasArg(OPT_win16)) {
+    Opts.Params.Win16 = true;
+    Opts.Triple = "i8086-pc-win16";
+  }
   Opts.IsDryRun = InputArgs.hasArg(OPT_dry_run);
   auto OutArgsInfo = InputArgs.getAllArgValues(OPT_fileout);
   if (OutArgsInfo.empty()) {
@@ -642,7 +654,10 @@ void doRc(std::string Src, std::string Dest, RcOptions &Opts,
     Visitor = std::make_unique<ResourceFileWriter>(Params, std::move(FOut));
     Visitor->AppendNull = Opts.AppendNull;
 
-    ExitOnErr(NullResource().visit(Visitor.get()));
+    // A 32-bit .res file starts with an empty resource; a 16-bit one does
+    // not.
+    if (!Params.Win16)
+      ExitOnErr(NullResource().visit(Visitor.get()));
 
     unsigned PrimaryLangId = Opts.LangId & 0x3ff;
     unsigned SubLangId = Opts.LangId >> 10;

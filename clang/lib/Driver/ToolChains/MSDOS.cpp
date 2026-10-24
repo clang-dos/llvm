@@ -54,6 +54,15 @@ MSDOS::MSDOS(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
     llvm::sys::path::append(EHDir, "eh");
     getFilePaths().push_back(std::string(EHDir));
   }
+  // A Windows DLL in the small or medium model links the libraries built
+  // with -mwindows-dll, from <model>/dll.
+  if (Triple.isOSWin16() &&
+      (MemoryModel == "small" || MemoryModel == "medium") &&
+      Args.hasArg(options::OPT_shared, options::OPT_mwindows_dll)) {
+    SmallString<128> DLLDir(ModelDir);
+    llvm::sys::path::append(DLLDir, "dll");
+    getFilePaths().push_back(std::string(DLLDir));
+  }
   getFilePaths().push_back(std::string(ModelDir));
   getFilePaths().push_back(std::string(LibDir));
 }
@@ -204,10 +213,23 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         quoteName(Args, TC.GetFilePath(IsDLL ? "libentry.obj" : "crt0.obj")));
   }
 
+  bool HaveResources = false;
   for (const InputInfo &II : Inputs) {
     if (II.isFilename()) {
       // Watcom linkers take libraries only with the library directive.
       StringRef Ext = llvm::sys::path::extension(II.getFilename());
+      // A Windows program or DLL takes its resources from one .res file
+      // (llvm-rc -win16).
+      if (Win16 && Ext.equals_insensitive(".res")) {
+        if (HaveResources)
+          TC.getDriver().Diag(diag::err_drv_msdos_one_res_file);
+        HaveResources = true;
+        CmdArgs.push_back("option");
+        CmdArgs.push_back(
+            Args.MakeArgString(Twine("resource=") +
+                               quoteName(Args, II.getFilename())));
+        continue;
+      }
       bool IsLib =
           Ext.equals_insensitive(".a") || Ext.equals_insensitive(".lib");
       CmdArgs.push_back(IsLib ? "library" : "file");

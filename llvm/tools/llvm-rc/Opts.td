@@ -38,6 +38,9 @@ def codepage : JS<"C", "Set the codepage used for input strings.">;
 
 // llvm-rc specific options:
 
+def win16 : F<"win16", "Write a 16-bit Windows .res file, for NE "
+                      "programs and DLLs.">;
+
 def dry_run : F<"dry-run", "Don't compile the input; only try to parse it.">;
 
 def no_preprocess : F<"no-preprocess", "Don't try to preprocess the input file.">;

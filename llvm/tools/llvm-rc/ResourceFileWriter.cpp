@@ -11,6 +11,7 @@
 //===---------------------------------------------------------------------===//
 
 #include "ResourceFileWriter.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Object/WindowsResource.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Endian.h"
@@ -122,6 +123,10 @@ static UTF16 cp1252ToUnicode(unsigned char C) {
   return C;
 }
 
+// 16-bit Windows strings are bytes in the ANSI code page: the input is taken
+// as it is.
+static constexpr int CpRaw = -1;
+
 // Describes a way to handle '\0' characters when processing the string.
 // rc.exe tool sometimes behaves in a weird way in postprocessing.
 // If the string to be output is equivalent to a C-string (e.g. in MENU
@@ -156,6 +161,9 @@ static Error processString(StringRef Str, NullHandlingMethod NullHandler,
   } else if (CodePage == CpWin1252) {
     for (char C : Str)
       Chars.push_back(cp1252ToUnicode((unsigned char)C));
+  } else if (CodePage == CpRaw) {
+    for (char C : Str)
+      Chars.push_back((unsigned char)C);
   } else {
     // For other, unknown codepages, only allow plain ASCII input.
     for (char C : Str) {
@@ -205,6 +213,7 @@ static Error processString(StringRef Str, NullHandlingMethod NullHandler,
                              ") as UTF-8");
       } else if (CodePage == CpWin1252) {
         Char = cp1252ToUnicode(Char);
+      } else if (CodePage == CpRaw) {
       } else {
         // Unknown/unsupported codepage, only allow ASCII input.
         if (Char > 0x7F)
@@ -372,7 +381,18 @@ Error ResourceFileWriter::writeCString(StringRef Str, bool WriteTerminator) {
   bool IsLongString;
   RETURN_IF_ERROR(processString(Str, NullHandlingMethod::CutAtNull,
                                 IsLongString, ProcessedString,
-                                Params.CodePage));
+                                Params.Win16 ? CpRaw : Params.CodePage));
+  // 16-bit Windows strings are 8-bit.
+  if (Params.Win16) {
+    for (auto Ch : ProcessedString) {
+      RETURN_IF_ERROR(checkNumberFits<uint8_t>(
+          Ch, "Character in a 16-bit Windows string"));
+      writeInt<uint8_t>(Ch);
+    }
+    if (WriteTerminator)
+      writeInt<uint8_t>(0);
+    return Error::success();
+  }
   for (auto Ch : ProcessedString)
     writeInt<uint16_t>(Ch);
   if (WriteTerminator)
@@ -388,7 +408,12 @@ Error ResourceFileWriter::writeIntOrString(const IntOrString &Value) {
   if (!Value.isInt())
     return writeCString(Value.getString());
 
-  writeInt<uint16_t>(0xFFFF);
+  // An ordinal: 0xFF and a WORD in the 16-bit format, 0xFFFF and a WORD
+  // otherwise.
+  if (Params.Win16)
+    writeInt<uint8_t>(0xFF);
+  else
+    writeInt<uint16_t>(0xFFFF);
   writeInt<uint16_t>(Value.getInt());
   return Error::success();
 }
@@ -414,7 +439,7 @@ Error ResourceFileWriter::appendFile(StringRef Filename) {
 
 void ResourceFileWriter::padStream(uint64_t Length) {
   assert(Length > 0);
-  uint64_t Location = tell();
+  uint64_t Location = tell() - PadBase;
   Location %= Length;
   uint64_t Pad = (Length - Location) % Length;
   for (uint64_t i = 0; i < Pad; ++i)
@@ -559,6 +584,29 @@ Error ResourceFileWriter::visitMenuStmt(const MenuStmt *Stmt) {
 Error ResourceFileWriter::writeResource(
     const RCResource *Res,
     Error (ResourceFileWriter::*BodyWriter)(const RCResource *)) {
+  // A 16-bit Windows resource: its type, its name, WORD memory flags and the
+  // DWORD size of the data. Nothing is aligned, and there is no language
+  // or version.
+  if (Params.Win16) {
+    auto ResType = Res->getResourceType();
+    RETURN_IF_ERROR(checkIntOrString(ResType, "Resource type"));
+    RETURN_IF_ERROR(checkIntOrString(Res->ResName, "Resource ID"));
+    RETURN_IF_ERROR(handleError(writeIdentifier(ResType), Res));
+    RETURN_IF_ERROR(handleError(writeIdentifier(Res->ResName), Res));
+    ContextKeeper RAII(this);
+    RETURN_IF_ERROR(handleError(Res->applyStmts(this), Res));
+    writeInt<uint16_t>(Res->MemoryFlags);
+    uint64_t SizeLoc = writeInt<uint32_t>(0);
+    uint64_t DataLoc = tell();
+    PadBase = DataLoc;
+    Error BodyErr = handleError((this->*BodyWriter)(Res), Res);
+    PadBase = 0;
+    if (BodyErr)
+      return BodyErr;
+    writeObjectAt(ulittle32_t(tell() - DataLoc), SizeLoc);
+    return Error::success();
+  }
+
   // We don't know the sizes yet.
   object::WinResHeaderPrefix HeaderPrefix{ulittle32_t(0U), ulittle32_t(0U)};
   uint64_t HeaderLoc = writeObject(HeaderPrefix);
@@ -613,6 +661,15 @@ Error ResourceFileWriter::writeSingleAccelerator(
     ulittle16_t Id;
     uint16_t Padding;
   } Entry{ulittle16_t(0), ulittle16_t(0), ulittle16_t(0), 0};
+  // A 16-bit Windows entry is a BYTE of flags, the key and the ID.
+  auto writeObject = [&](const AccelTableEntry &E) {
+    if (!Params.Win16)
+      return this->writeObject(E);
+    uint64_t Loc = writeInt<uint8_t>(E.Flags);
+    writeInt<uint16_t>(E.ANSICode);
+    writeInt<uint16_t>(E.Id);
+    return Loc;
+  };
 
   bool IsASCII = Obj.Flags & Opt::ASCII, IsVirtKey = Obj.Flags & Opt::VIRTKEY;
 
@@ -1062,6 +1119,8 @@ Error ResourceFileWriter::writeSingleDialogControl(const Control &Ctl,
 }
 
 Error ResourceFileWriter::writeDialogBody(const RCResource *Base) {
+  if (Params.Win16)
+    return writeDialogBody16(Base);
   auto *Res = cast<DialogResource>(Base);
 
   // Default style: WS_POPUP | WS_BORDER | WS_SYSMENU.
@@ -1175,6 +1234,113 @@ Error ResourceFileWriter::writeDialogBody(const RCResource *Base) {
   return Error::success();
 }
 
+// The 16-bit Windows DLGTEMPLATE: DWORD style, BYTE number of controls,
+// x, y, width and height, then the menu, class and caption as 8-bit strings
+// or ordinals, and the font if DS_SETFONT. Each control has x, y, width,
+// height, ID, DWORD style, its class (a byte 0x80-0x85 for the predefined
+// ones), its text and a BYTE of creation data size. Nothing is aligned.
+Error ResourceFileWriter::writeDialogBody16(const RCResource *Base) {
+  auto *Res = cast<DialogResource>(Base);
+  if (Res->IsExtended)
+    return createError("DIALOGEX is not in 16-bit Windows");
+
+  // Default style: WS_POPUP | WS_BORDER | WS_SYSMENU.
+  const uint32_t DefaultStyle = 0x80880000;
+  const uint32_t StyleFontFlag = 0x40;
+  const uint32_t StyleCaptionFlag = 0x00C00000;
+  uint32_t UsedStyle = ObjectData.Style.value_or(DefaultStyle);
+  if (ObjectData.Font)
+    UsedStyle |= StyleFontFlag;
+  else
+    UsedStyle &= ~StyleFontFlag;
+  if (ObjectData.Caption != "")
+    UsedStyle |= StyleCaptionFlag;
+
+  RETURN_IF_ERROR(checkNumberFits<uint8_t>(Res->Controls.size(),
+                                           "Number of dialog controls"));
+  RETURN_IF_ERROR(
+      checkSignedNumberFits<int16_t>(Res->X, "Dialog x-coordinate", true));
+  RETURN_IF_ERROR(
+      checkSignedNumberFits<int16_t>(Res->Y, "Dialog y-coordinate", true));
+  RETURN_IF_ERROR(
+      checkSignedNumberFits<int16_t>(Res->Width, "Dialog width", false));
+  RETURN_IF_ERROR(
+      checkSignedNumberFits<int16_t>(Res->Height, "Dialog height", false));
+  writeInt<uint32_t>(UsedStyle);
+  writeInt<uint8_t>(Res->Controls.size());
+  writeInt<uint16_t>(Res->X);
+  writeInt<uint16_t>(Res->Y);
+  writeInt<uint16_t>(Res->Width);
+  writeInt<uint16_t>(Res->Height);
+  RETURN_IF_ERROR(writeIntOrString(ObjectData.Menu));
+  RETURN_IF_ERROR(writeIntOrString(ObjectData.Class));
+  RETURN_IF_ERROR(writeCString(ObjectData.Caption));
+  if (auto &Font = ObjectData.Font) {
+    writeInt<uint16_t>(Font->Size);
+    RETURN_IF_ERROR(writeCString(Font->Typeface));
+  }
+
+  for (auto &Ctl : Res->Controls) {
+    auto handleCtlError = [&](Error &&Err) -> Error {
+      if (!Err)
+        return Error::success();
+      return joinErrors(createError("Error in " + Twine(Ctl.Type) +
+                                    " control  (ID " + Twine(Ctl.ID) + "):"),
+                        std::move(Err));
+    };
+    auto TypeInfo = Control::SupportedCtls.lookup(Ctl.Type);
+    IntWithNotMask CtlStyle(TypeInfo.Style);
+    CtlStyle |= Ctl.Style.value_or(RCInt(0));
+    RETURN_IF_ERROR(handleCtlError(checkSignedNumberFits<int16_t>(
+        Ctl.X, "Dialog control x-coordinate", true)));
+    RETURN_IF_ERROR(handleCtlError(checkSignedNumberFits<int16_t>(
+        Ctl.Y, "Dialog control y-coordinate", true)));
+    RETURN_IF_ERROR(handleCtlError(checkSignedNumberFits<int16_t>(
+        Ctl.Width, "Dialog control width", false)));
+    RETURN_IF_ERROR(handleCtlError(checkSignedNumberFits<int16_t>(
+        Ctl.Height, "Dialog control height", false)));
+    if (Ctl.ID != static_cast<uint32_t>(-1))
+      RETURN_IF_ERROR(handleCtlError(
+          checkNumberFits<uint16_t>(Ctl.ID, "Control ID")));
+    writeInt<uint16_t>(Ctl.X);
+    writeInt<uint16_t>(Ctl.Y);
+    writeInt<uint16_t>(Ctl.Width);
+    writeInt<uint16_t>(Ctl.Height);
+    writeInt<uint16_t>(Ctl.ID);
+    writeInt<uint32_t>(CtlStyle.getValue());
+
+    // The predefined classes are a byte, by number or by name.
+    std::optional<uint8_t> ClassByte;
+    if (Ctl.Class.isInt()) {
+      RETURN_IF_ERROR(handleCtlError(
+          checkNumberFits<uint8_t>(Ctl.Class.getInt(), "Control class")));
+      ClassByte = Ctl.Class.getInt() | 0x80;
+    } else {
+      StringRef Name = Ctl.Class.getString();
+      bool IsLong;
+      stripQuotes(Name, IsLong);
+      ClassByte = StringSwitch<std::optional<uint8_t>>(Name.upper())
+                      .Case("BUTTON", 0x80)
+                      .Case("EDIT", 0x81)
+                      .Case("STATIC", 0x82)
+                      .Case("LISTBOX", 0x83)
+                      .Case("SCROLLBAR", 0x84)
+                      .Case("COMBOBOX", 0x85)
+                      .Default(std::nullopt);
+    }
+    if (ClassByte)
+      writeInt<uint8_t>(*ClassByte);
+    else
+      RETURN_IF_ERROR(handleCtlError(writeCString(Ctl.Class.getString())));
+
+    RETURN_IF_ERROR(
+        handleCtlError(checkIntOrString(Ctl.Title, "Control reference ID")));
+    RETURN_IF_ERROR(handleCtlError(writeIntOrString(Ctl.Title)));
+    writeInt<uint8_t>(0);
+  }
+  return Error::success();
+}
+
 // --- HTMLResource helpers. --- //
 
 Error ResourceFileWriter::writeHTMLBody(const RCResource *Base) {
@@ -1208,6 +1374,29 @@ Error ResourceFileWriter::writeMenuDefinition(
 
   auto *PopupPtr = cast<PopupItem>(DefPtr);
   writeInt<uint16_t>(Flags);
+  RETURN_IF_ERROR(writeCString(PopupPtr->Name));
+  return writeMenuDefinitionList(PopupPtr->SubItems);
+}
+
+// A 16-bit Windows menu item: WORD flags, WORD ID (not for popups) and
+// an 8-bit string.
+Error ResourceFileWriter::writeMenuDefinition16(
+    const std::unique_ptr<MenuDefinition> &Def, uint16_t Flags) {
+  const MenuDefinition *DefPtr = Def.get();
+  writeInt<uint16_t>(Flags);
+  if (auto *MenuItemPtr = dyn_cast<MenuItem>(DefPtr)) {
+    if (MenuItemPtr->Id != static_cast<uint32_t>(-1))
+      RETURN_IF_ERROR(
+          checkNumberFits<uint16_t>(MenuItemPtr->Id, "MENUITEM action ID"));
+    writeInt<uint16_t>(MenuItemPtr->Id);
+    return writeCString(MenuItemPtr->Name);
+  }
+  if (isa<MenuSeparator>(DefPtr)) {
+    writeInt<uint16_t>(0);
+    writeInt<uint8_t>(0);
+    return Error::success();
+  }
+  auto *PopupPtr = cast<PopupItem>(DefPtr);
   RETURN_IF_ERROR(writeCString(PopupPtr->Name));
   return writeMenuDefinitionList(PopupPtr->SubItems);
 }
@@ -1249,7 +1438,8 @@ Error ResourceFileWriter::writeMenuDefinitionList(
     if (&Def == &List.Definitions.back())
       Flags |= LastElementFlag;
 
-    RETURN_IF_ERROR(writeMenuDefinition(Def, Flags));
+    RETURN_IF_ERROR(Params.Win16 ? writeMenuDefinition16(Def, Flags)
+                                 : writeMenuDefinition(Def, Flags));
   }
   return Error::success();
 }
@@ -1277,6 +1467,8 @@ Error ResourceFileWriter::writeMenuBody(const RCResource *Base) {
 }
 
 Error ResourceFileWriter::writeMenuExBody(const RCResource *Base) {
+  if (Params.Win16)
+    return createError("MENUEX is not in 16-bit Windows");
   // At first, MENUEX_TEMPLATE_HEADER structure.
   // Ref:
   // https://learn.microsoft.com/en-us/windows/win32/menurc/menuex-template-header
@@ -1331,9 +1523,22 @@ Error ResourceFileWriter::writeStringTableBundleBody(const RCResource *Base) {
       bool IsLongString;
       for (StringRef S : *Res->Bundle.Data[ID])
         RETURN_IF_ERROR(processString(S, NullHandlingMethod::CutAtDoubleNull,
-                                      IsLongString, Data, Params.CodePage));
+                                      IsLongString, Data,
+                                      Params.Win16 ? CpRaw : Params.CodePage));
       if (AppendNull)
         Data.push_back('\0');
+    }
+    // 16-bit Windows: a BYTE length and 8-bit characters.
+    if (Params.Win16) {
+      RETURN_IF_ERROR(
+          checkNumberFits<uint8_t>(Data.size(), "STRINGTABLE string size"));
+      writeInt<uint8_t>(Data.size());
+      for (auto Char : Data) {
+        RETURN_IF_ERROR(checkNumberFits<uint8_t>(
+            Char, "Character in a 16-bit Windows string"));
+        writeInt<uint8_t>(Char);
+      }
+      continue;
     }
     RETURN_IF_ERROR(
         checkNumberFits<uint16_t>(Data.size(), "STRINGTABLE string size"));
@@ -1381,7 +1586,8 @@ Error ResourceFileWriter::writeUserDefinedBody(const RCResource *Base) {
     bool IsLongString;
     RETURN_IF_ERROR(
         processString(Elem.getString(), NullHandlingMethod::UserResource,
-                      IsLongString, ProcessedString, Params.CodePage));
+                      IsLongString, ProcessedString,
+                      Params.Win16 ? CpRaw : Params.CodePage));
 
     for (auto Ch : ProcessedString) {
       if (IsLongString) {
@@ -1409,7 +1615,8 @@ Error ResourceFileWriter::writeVersionInfoBlock(const VersionInfoBlock &Blk) {
   if (OutputHeader) {
     LengthLoc = writeInt<uint16_t>(0);
     writeInt<uint16_t>(0);
-    writeInt<uint16_t>(1); // true
+    if (!Params.Win16) // The 16-bit format has no type field.
+      writeInt<uint16_t>(1); // true
     RETURN_IF_ERROR(writeCString(Blk.Name));
     padStream(sizeof(uint32_t));
   }
@@ -1463,7 +1670,8 @@ Error ResourceFileWriter::writeVersionInfoValue(const VersionInfoValue &Val) {
   padStream(sizeof(uint32_t));
   auto LengthLoc = writeInt<uint16_t>(0);
   auto ValLengthLoc = writeInt<uint16_t>(0);
-  writeInt<uint16_t>(HasStrings);
+  if (!Params.Win16)
+    writeInt<uint16_t>(HasStrings);
   RETURN_IF_ERROR(writeCString(Val.Key));
   padStream(sizeof(uint32_t));
 
@@ -1484,7 +1692,8 @@ Error ResourceFileWriter::writeVersionInfoValue(const VersionInfoValue &Val) {
 
   auto CurLoc = tell();
   auto ValueLength = CurLoc - DataLoc;
-  if (HasStrings) {
+  // Strings are counted in characters, which are bytes in 16-bit Windows.
+  if (HasStrings && !Params.Win16) {
     assert(ValueLength % 2 == 0);
     ValueLength /= 2;
   }
@@ -1520,7 +1729,8 @@ Error ResourceFileWriter::writeVersionInfoBody(const RCResource *Base) {
   // First, VS_VERSIONINFO.
   auto LengthLoc = writeInt<uint16_t>(0);
   writeInt<uint16_t>(sizeof(FixedInfo));
-  writeInt<uint16_t>(0);
+  if (!Params.Win16)
+    writeInt<uint16_t>(0);
   cantFail(writeCString("VS_VERSION_INFO"));
   padStream(sizeof(uint32_t));
 

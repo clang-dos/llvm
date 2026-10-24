@@ -42,6 +42,7 @@ struct WriterParams {
   StringRef InputFilePath;            // The full path of the input file.
   int CodePage = CpAcp;               // The codepage for interpreting characters.
   bool ShowIncludes = false;          // Report resource-file dependencies.
+  bool Win16 = false;                 // Write the 16-bit Windows format.
 };
 
 class ResourceFileWriter : public Visitor {
@@ -214,6 +215,14 @@ private:
   Error appendFile(StringRef Filename);
 
   void padStream(uint64_t Length);
+  // Where padStream counts from: the start of the resource data in the
+  // 16-bit format, whose headers are not aligned.
+  uint64_t PadBase = 0;
+
+  // The 16-bit forms of the resources that differ.
+  Error writeDialogBody16(const RCResource *);
+  Error writeMenuDefinition16(const std::unique_ptr<MenuDefinition> &,
+                              uint16_t Flags);
 
   Expected<std::unique_ptr<MemoryBuffer>> loadFile(StringRef File) const;
 

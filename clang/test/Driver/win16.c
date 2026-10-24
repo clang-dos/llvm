@@ -43,3 +43,30 @@
 // CXX: "-cc1"
 // CXX-NOT: "-fcxx-exceptions"
 // CXX-SAME: "-fno-rtti"
+
+// DLL code in the small and medium models (-shared, or -mwindows-dll with
+// -c) keeps escaping locals in DGROUP, and links the libraries in
+// <model>/dll.
+// RUN: %clang --target=i8086-pc-win16 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -shared -### %s -o MYLIB.DLL 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NEARDLL
+// NEARDLL:      "-cc1" {{.*}}"-mwindows-dll"
+// NEARDLL:      "{{.*}}wlink"
+// NEARDLL-SAME: "library" "{{.*}}win16{{/|\\\\}}small{{/|\\\\}}dll{{/|\\\\}}libc.lib"
+// RUN: %clang --target=i8086-pc-win16 -mwindows-dll -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=MDLL
+// MDLL: "-mwindows-dll"
+// RUN: %clang --target=i8086-pc-win16 -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NOMDLL
+// NOMDLL-NOT: "-mwindows-dll"
+
+// A .res file gives the program its resources.
+// RUN: %clang --target=i8086-pc-win16 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -### %s %S/Inputs/win16_res/app.res 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=RES
+// RES: "{{.*}}wlink" {{.*}}"option" "resource={{.*}}app.res"
+// RES-NOT: "file" "{{.*}}app.res"
+// RUN: not %clang --target=i8086-pc-win16 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -### %s %S/Inputs/win16_res/app.res \
+// RUN:   %S/Inputs/win16_res/more.res 2>&1 | FileCheck %s --check-prefix=TWORES
+// TWORES: error: a 16-bit Windows program or DLL takes one .res file

@@ -147,7 +147,7 @@ private:
   static constexpr bool check_range() {
     // This kinda sucks, but it's what happens when we don't have __int128_t.
     if (sizeof(TimeT) == sizeof(rep)) {
-      typedef duration<long long, ratio<3600 * 24 * 365> > Years;
+      typedef duration<long long, ratio<3600L * 24 * 365> > Years;
       return duration_cast<Years>(fs_seconds(max_seconds)) > Years(250) &&
              duration_cast<Years>(fs_seconds(min_seconds)) < Years(-250);
     }

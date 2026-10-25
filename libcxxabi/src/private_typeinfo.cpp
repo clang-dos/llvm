@@ -834,6 +834,7 @@ __dynamic_cast(const void* static_ptr,
                const __class_type_info* static_type,
                const __class_type_info* dst_type,
                std::ptrdiff_t src2dst_offset) {
+  _LIBCXXABI_LINK_TYPE_INFO_VTABLES();
   // Get (dynamic_ptr, dynamic_type) from static_ptr
   derived_object_info derived_info = dyn_cast_get_derived_info(static_ptr);
 
@@ -1347,5 +1348,28 @@ void __base_class_type_info::search_below_dst(
       (__offset_flags & __public_mask) ? path_below : not_public_path,
       use_strcmp);
 }
+
+
+#if defined(__I86__)
+// The vtables of the type_info classes, which type_info objects refer to
+// weakly on i8086 (see private_typeinfo.h).
+#  define _LIBCXXABI_STR2(x) #x
+#  define _LIBCXXABI_STR(x) _LIBCXXABI_STR2(x)
+#  define _LIBCXXABI_TYPE_INFO_VTABLE(var, name)                                                                       \
+    extern const char var[] __asm__(_LIBCXXABI_STR(__USER_LABEL_PREFIX__) "_ZTVN10__cxxabiv1" name "E")
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_fundamental, "23__fundamental_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_array, "17__array_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_function, "20__function_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_enum, "16__enum_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_class, "17__class_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_si_class, "20__si_class_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_vmi_class, "21__vmi_class_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_pointer, "19__pointer_type_info");
+_LIBCXXABI_TYPE_INFO_VTABLE(__vt_pointer_to_member, "29__pointer_to_member_type_info");
+extern "C" _LIBCXXABI_HIDDEN const void* const __cxa_type_info_vtables[] = {
+    __vt_fundamental, __vt_array,     __vt_function, __vt_enum,
+    __vt_class,       __vt_si_class, __vt_vmi_class, __vt_pointer,
+    __vt_pointer_to_member};
+#endif
 
 } // namespace __cxxabiv1

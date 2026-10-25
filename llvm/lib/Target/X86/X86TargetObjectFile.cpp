@@ -121,6 +121,14 @@ MCSection *X86OMFTargetObjectFile::SelectSectionForGlobal(
     const GlobalObject *GO, SectionKind Kind, const TargetMachine &TM) const {
   if (MCSection *S = getFarDataSection(getContext(), GO, Kind, TM))
     return S;
+  // OMF linkers do not merge strings and constants, so the mergeable
+  // sections would keep every string of a module once one is used. With
+  // data sections each gets a section of its own, which the OMF writer makes
+  // a COMDAT that the linker drops when nothing uses it.
+  if (TM.getDataSections() && !GO->hasComdat() &&
+      (Kind.isMergeableCString() || Kind.isMergeableConst()))
+    return getContext().getELFSection(".rodata." + TM.getSymbol(GO)->getName(),
+                                      ELF::SHT_PROGBITS, ELF::SHF_ALLOC);
   return X86ELFTargetObjectFile::SelectSectionForGlobal(GO, Kind, TM);
 }
 

@@ -42,6 +42,13 @@ _LIBCPP_PUSH_MACROS
 
 #if _LIBCPP_STD_VER >= 17
 
+// Windows and 16-bit DOS paths have drive letters and either separator.
+#  if defined(_WIN32) || defined(__I86__)
+#    define _LIBCPP_FILESYSTEM_DRIVE_PATHS 1
+#  else
+#    define _LIBCPP_FILESYSTEM_DRIVE_PATHS 0
+#  endif
+
 _LIBCPP_BEGIN_NAMESPACE_FILESYSTEM
 _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 
@@ -81,7 +88,7 @@ struct __can_convert_char<char32_t> {
 
 template <class _ECharT, __enable_if_t<__can_convert_char<_ECharT>::value, int> = 0>
 _LIBCPP_HIDE_FROM_ABI bool __is_separator(_ECharT __e) {
-#  ifdef _WIN32
+#  if _LIBCPP_FILESYSTEM_DRIVE_PATHS
   return __e == _ECharT('/') || __e == _ECharT('\\');
 #  else
   return __e == _ECharT('/');
@@ -386,6 +393,9 @@ public:
 #  ifdef _WIN32
   typedef wchar_t value_type;
   static constexpr value_type preferred_separator = L'\\';
+#  elif _LIBCPP_FILESYSTEM_DRIVE_PATHS
+  typedef char value_type;
+  static constexpr value_type preferred_separator = '\\';
 #  else
   typedef char value_type;
   static constexpr value_type preferred_separator = '/';
@@ -469,7 +479,7 @@ public:
 
 public:
   // appends
-#  ifdef _WIN32
+#  if _LIBCPP_FILESYSTEM_DRIVE_PATHS
   _LIBCPP_HIDE_FROM_ABI path& operator/=(const path& __p) {
     auto __p_root_name      = __p.__root_name();
     auto __p_root_name_size = __p_root_name.size();
@@ -603,8 +613,8 @@ public:
   _LIBCPP_HIDE_FROM_ABI void clear() noexcept { __pn_.clear(); }
 
   _LIBCPP_HIDE_FROM_ABI path& make_preferred() _LIBCPP_LIFETIMEBOUND {
-#  ifdef _WIN32
-    std::replace(__pn_.begin(), __pn_.end(), L'/', L'\\');
+#  if _LIBCPP_FILESYSTEM_DRIVE_PATHS
+    std::replace(__pn_.begin(), __pn_.end(), value_type('/'), value_type('\\'));
 #  endif
     return *this;
   }
@@ -754,27 +764,52 @@ public:
 #    endif // _LIBCPP_HAS_LOCALIZATION
 
   // generic format observers
+#    if _LIBCPP_FILESYSTEM_DRIVE_PATHS
+  // DOS paths use either separator; the generic format has slashes.
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::string generic_string() const {
+    std::string __s = __pn_;
+    std::replace(__s.begin(), __s.end(), '\\', '/');
+    return __s;
+  }
+#      if _LIBCPP_HAS_CHAR8_T
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::u8string generic_u8string() const {
+    std::u8string __s(__pn_.begin(), __pn_.end());
+    std::replace(__s.begin(), __s.end(), u8'\\', u8'/');
+    return __s;
+  }
+#      else
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::string generic_u8string() const { return generic_string(); }
+#      endif
+#    else
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::string generic_string() const { return __pn_; }
-#    if _LIBCPP_HAS_CHAR8_T
+#      if _LIBCPP_HAS_CHAR8_T
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::u8string generic_u8string() const {
     return std::u8string(__pn_.begin(), __pn_.end());
   }
-#    else
+#      else
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::string generic_u8string() const { return __pn_; }
+#      endif
 #    endif
 
 #    if _LIBCPP_HAS_LOCALIZATION
   template <class _ECharT, class _Traits = char_traits<_ECharT>, class _Allocator = allocator<_ECharT> >
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI basic_string<_ECharT, _Traits, _Allocator>
   generic_string(const _Allocator& __a = _Allocator()) const {
+#      if _LIBCPP_FILESYSTEM_DRIVE_PATHS
+    using _Str = basic_string<_ECharT, _Traits, _Allocator>;
+    _Str __s   = string<_ECharT, _Traits, _Allocator>(__a);
+    std::replace(__s.begin(), __s.end(), static_cast<_ECharT>('\\'), static_cast<_ECharT>('/'));
+    return __s;
+#      else
     return string<_ECharT, _Traits, _Allocator>(__a);
+#      endif
   }
 
 #      if _LIBCPP_HAS_WIDE_CHARACTERS
-  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::wstring generic_wstring() const { return string<wchar_t>(); }
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::wstring generic_wstring() const { return generic_string<wchar_t>(); }
 #      endif
-  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::u16string generic_u16string() const { return string<char16_t>(); }
-  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::u32string generic_u32string() const { return string<char32_t>(); }
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::u16string generic_u16string() const { return generic_string<char16_t>(); }
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI std::u32string generic_u32string() const { return generic_string<char32_t>(); }
 #    endif // _LIBCPP_HAS_LOCALIZATION
 #  endif   // _WIN32
 
@@ -800,7 +835,7 @@ public:
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI path root_name() const { return string_type(__root_name()); }
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI path root_directory() const { return string_type(__root_directory()); }
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI path root_path() const {
-#  ifdef _WIN32
+#  if _LIBCPP_FILESYSTEM_DRIVE_PATHS
     return string_type(__root_path_raw());
 #  else
     return root_name().append(string_type(__root_directory()));
@@ -825,7 +860,7 @@ public:
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI bool has_extension() const { return !__extension().empty(); }
 
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI bool is_absolute() const {
-#  ifdef _WIN32
+#  if _LIBCPP_FILESYSTEM_DRIVE_PATHS
     __string_view __root_name_str = __root_name();
     __string_view __root_dir      = __root_directory();
     if (__root_name_str.size() == 2 && __root_name_str[1] == ':') {

@@ -36,7 +36,9 @@ enum RecordType : uint8_t {
   FIXUPP = 0x9C,
   LEDATA = 0xA0,
   COMDEF = 0xB0,
+  LEXTDEF = 0xB4,
   COMDAT = 0xC2,
+  ALIAS = 0xC6,
 };
 
 /// Comment classes for COMENT records.

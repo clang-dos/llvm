@@ -459,10 +459,21 @@ protected:
     return __b;
   }
 
-  template <class _MaybeSigned>
-  iter_type __do_get_integral(
-      iter_type __first, iter_type __last, ios_base& __iob, ios_base::iostate& __err, _MaybeSigned& __v) const {
-    using _Unsigned = __make_unsigned_t<_MaybeSigned>;
+  // Parses an integer into __val, without the range check of the type it is
+  // for. Returns, in __state, 0 when there is no number (the value is 0), 1
+  // when it overflows _Unsigned, and 2 otherwise.
+  template <class _Unsigned>
+  iter_type __do_get_integral_digits(
+      iter_type __first,
+      iter_type __last,
+      ios_base& __iob,
+      ios_base::iostate& __err,
+      _Unsigned& __val,
+      bool& __negate,
+      int& __state) const {
+    __state  = 0;
+    __negate = false;
+    __val    = 0;
 
     // Stage 1
     int __base = this->__get_base(__iob);
@@ -484,7 +495,6 @@ protected:
 
     if (__first == __last) {
       __err |= ios_base::eofbit | ios_base::failbit;
-      __v = 0;
       return __first;
     }
 
@@ -494,7 +504,6 @@ protected:
         *__g_end++ = 0;
     }
 
-    bool __negate = false;
     // __c == '+' || __c == '-'
     if (auto __c = *__first; __c == __atoms[24] || __c == __atoms[25]) {
       __negate = __c == __atoms[25];
@@ -503,7 +512,6 @@ protected:
 
     if (__first == __last) {
       __err |= ios_base::eofbit | ios_base::failbit;
-      __v = 0;
       return __first;
     }
 
@@ -517,7 +525,6 @@ protected:
         ++__first;
         if (__first == __last) {
           __err |= ios_base::eofbit;
-          __v = 0;
           return __first;
         }
         // __c2 == 'x' || __c2 == 'X'
@@ -543,7 +550,6 @@ protected:
         ++__first;
         if (__first == __last) {
           __err |= ios_base::eofbit;
-          __v = 0;
           return __first;
         }
         // __c == 'x' || __c == 'X'
@@ -555,7 +561,6 @@ protected:
     }
 
     // Calculate the actual number
-    _Unsigned __val   = 0;
     bool __overflowed = false;
     for (; __first != __last; ++__first) {
       auto __c = *__first;
@@ -581,10 +586,45 @@ protected:
       ++__dc;
     }
 
-    if (!__parsed_num) {
+    if (!__parsed_num)
       __err |= ios_base::failbit;
+    else
+      __state = __overflowed ? 1 : 2;
+
+    if (__grouping.size() != 0 && __g_end - __g < __num_get_base::__num_get_buf_sz)
+      *__g_end++ = __dc;
+
+    // Digit grouping checked
+    __check_grouping(__grouping, __g, __g_end, __err);
+    // EOF checked
+    if (__first == __last)
+      __err |= ios_base::eofbit;
+    return __first;
+  }
+
+  // On i8086 every integer type is parsed as unsigned long long and then
+  // range checked, so that the parser is there once, not once for each type:
+  // it is a lot of code for a 64 KiB code segment.
+  template <class _MaybeSigned>
+  iter_type __do_get_integral(
+      iter_type __first, iter_type __last, ios_base& __iob, ios_base::iostate& __err, _MaybeSigned& __v) const {
+    using _Unsigned = __make_unsigned_t<_MaybeSigned>;
+#  if defined(__I86__)
+    using _Parsed = unsigned long long;
+#  else
+    using _Parsed = _Unsigned;
+#  endif
+    _Parsed __val;
+    bool __negate;
+    int __state;
+    __first = __do_get_integral_digits(__first, __last, __iob, __err, __val, __negate, __state);
+    if (__state == 2 && __val > static_cast<_Parsed>(numeric_limits<_Unsigned>::max())) {
+      __err |= ios_base::failbit;
+      __state = 1;
+    }
+    if (__state == 0) {
       __v = 0;
-    } else if (__overflowed) {
+    } else if (__state == 1) {
       __err |= ios_base::failbit;
       __v = is_signed<_MaybeSigned>::value && __negate
               ? numeric_limits<_MaybeSigned>::min()
@@ -608,15 +648,6 @@ protected:
     } else {
       __v = -__val;
     }
-
-    if (__grouping.size() != 0 && __g_end - __g < __num_get_base::__num_get_buf_sz)
-      *__g_end++ = __dc;
-
-    // Digit grouping checked
-    __check_grouping(__grouping, __g, __g_end, __err);
-    // EOF checked
-    if (__first == __last)
-      __err |= ios_base::eofbit;
     return __first;
   }
 
@@ -661,7 +692,15 @@ protected:
 
   virtual iter_type
   do_get(iter_type __b, iter_type __e, ios_base& __iob, ios_base::iostate& __err, long double& __v) const {
+#  if defined(__I86__) && __LDBL_MANT_DIG__ == __DBL_MANT_DIG__
+    // long double is double: use the same code.
+    double __d;
+    __b = this->__do_get_floating_point(__b, __e, __iob, __err, __d);
+    __v = __d;
+    return __b;
+#  else
     return this->__do_get_floating_point(__b, __e, __iob, __err, __v);
+#  endif
   }
 
   virtual iter_type do_get(iter_type __b, iter_type __e, ios_base& __iob, ios_base::iostate& __err, void*& __v) const;
@@ -899,6 +938,10 @@ protected:
   _LIBCPP_HIDE_FROM_ABI inline _OutputIterator
   __do_put_integral(iter_type __s, ios_base& __iob, char_type __fl, _Integral __v) const;
 
+  template <class _Unsigned>
+  _LIBCPP_HIDE_FROM_ABI inline _OutputIterator __do_put_integral_digits(
+      iter_type __s, ios_base& __iob, char_type __fl, _Unsigned __uval, bool __negative, bool __is_signed_type) const;
+
   template <class _Float>
   _LIBCPP_HIDE_FROM_ABI inline _OutputIterator
   __do_put_floating_point(iter_type __s, ios_base& __iob, char_type __fl, _Float __v, char const* __len) const;
@@ -918,15 +961,35 @@ num_put<_CharT, _OutputIterator>::do_put(iter_type __s, ios_base& __iob, char_ty
   return std::copy(__nm.begin(), __nm.end(), __s);
 }
 
+// On i8086 every integer type is printed as unsigned long long, so that the
+// code is there once, not once for each type: it is a lot of code for a
+// 64 KiB code segment.
 template <class _CharT, class _OutputIterator>
 template <class _Integral>
 _LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::__do_put_integral(
     iter_type __s, ios_base& __iob, char_type __fl, _Integral __v) const {
+  // Print '-' and make the argument unsigned. Octal and hex are always
+  // printed as an unsigned value.
+  auto __basefield = (__iob.flags() & ios_base::basefield);
+  auto __uval      = std::__to_unsigned_like(__v);
+  bool __negative  = __basefield != ios_base::oct && __basefield != ios_base::hex && __v < 0;
+  if (__negative)
+    __uval = std::__complement(__uval);
+#  if defined(__I86__)
+  return this->__do_put_integral_digits(
+      __s, __iob, __fl, static_cast<unsigned long long>(__uval), __negative, is_signed<_Integral>::value);
+#  else
+  return this->__do_put_integral_digits(__s, __iob, __fl, __uval, __negative, is_signed<_Integral>::value);
+#  endif
+}
+
+template <class _CharT, class _OutputIterator>
+template <class _Unsigned>
+_LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::__do_put_integral_digits(
+    iter_type __s, ios_base& __iob, char_type __fl, _Unsigned __uval, bool __negative, bool __is_signed_type) const {
   // Stage 1 - Get number in narrow char
 
-  // Worst case is octal, with showbase enabled. Note that octal is always
-  // printed as an unsigned value.
-  using _Unsigned = typename make_unsigned<_Integral>::type;
+  // Worst case is octal, with showbase enabled.
   _LIBCPP_CONSTEXPR const unsigned __buffer_size =
       (numeric_limits<_Unsigned>::digits / 3)          // 1 char per 3 bits
       + ((numeric_limits<_Unsigned>::digits % 3) != 0) // round up
@@ -939,27 +1002,16 @@ _LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::_
 
   auto __basefield = (__flags & ios_base::basefield);
 
-  // Extract base
-  int __base = 10;
-  if (__basefield == ios_base::oct)
-    __base = 8;
-  else if (__basefield == ios_base::hex)
-    __base = 16;
-
-  // Print '-' and make the argument unsigned
-  auto __uval = std::__to_unsigned_like(__v);
-  if (__basefield != ios_base::oct && __basefield != ios_base::hex && __v < 0) {
+  if (__negative)
     *__buffer_ptr++ = '-';
-    __uval          = std::__complement(__uval);
-  }
 
   // Maybe add '+' prefix
-  if (std::is_signed<_Integral>::value && (__flags & ios_base::showpos) && __basefield != ios_base::oct &&
-      __basefield != ios_base::hex && __v >= 0)
+  if (__is_signed_type && (__flags & ios_base::showpos) && __basefield != ios_base::oct && __basefield != ios_base::hex &&
+      !__negative)
     *__buffer_ptr++ = '+';
 
   // Add base prefix
-  if (__v != 0 && __flags & ios_base::showbase) {
+  if (__uval != 0 && __flags & ios_base::showbase) {
     if (__basefield == ios_base::oct) {
       *__buffer_ptr++ = '0';
     } else if (__basefield == ios_base::hex) {
@@ -968,7 +1020,11 @@ _LIBCPP_HIDE_FROM_ABI inline _OutputIterator num_put<_CharT, _OutputIterator>::_
     }
   }
 
-  auto __res = std::__to_chars_integral(__buffer_ptr, __char_buffer + __buffer_size, __uval, __base);
+  // Only bases 8, 10 and 16, not the other bases of to_chars.
+  char* __buffer_end = __char_buffer + __buffer_size;
+  auto __res         = __basefield == ios_base::oct ? std::__to_chars_integral<8>(__buffer_ptr, __buffer_end, __uval)
+                     : __basefield == ios_base::hex ? std::__to_chars_integral<16>(__buffer_ptr, __buffer_end, __uval)
+                                                    : std::__to_chars_itoa(__buffer_ptr, __buffer_end, __uval, false_type());
   _LIBCPP_ASSERT_INTERNAL(__res.__ec == std::errc(0), "to_chars: invalid maximum buffer size computed?");
 
   // Make letters uppercase
@@ -1071,7 +1127,12 @@ num_put<_CharT, _OutputIterator>::do_put(iter_type __s, ios_base& __iob, char_ty
 template <class _CharT, class _OutputIterator>
 _OutputIterator
 num_put<_CharT, _OutputIterator>::do_put(iter_type __s, ios_base& __iob, char_type __fl, long double __v) const {
+#  if defined(__I86__) && __LDBL_MANT_DIG__ == __DBL_MANT_DIG__
+  // long double is double: use the same code.
+  return this->__do_put_floating_point(__s, __iob, __fl, static_cast<double>(__v), "");
+#  else
   return this->__do_put_floating_point(__s, __iob, __fl, __v, "L");
+#  endif
 }
 
 template <class _CharT, class _OutputIterator>
@@ -1090,6 +1151,16 @@ extern template class _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS num_put<wchar_t>;
 #  endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
+// The facets of the classic locale.
+_LIBCPP_CLASSIC_FACET(numpunct<char>)
+_LIBCPP_CLASSIC_FACET(num_get<char>)
+_LIBCPP_CLASSIC_FACET(num_put<char>)
+#  if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_CLASSIC_FACET(numpunct<wchar_t>)
+_LIBCPP_CLASSIC_FACET(num_get<wchar_t>)
+_LIBCPP_CLASSIC_FACET(num_put<wchar_t>)
+#  endif
+
 _LIBCPP_END_NAMESPACE_STD
 
 _LIBCPP_POP_MACROS

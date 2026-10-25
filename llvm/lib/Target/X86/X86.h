@@ -26,6 +26,7 @@
 namespace llvm {
 
 class FunctionPass;
+class ModulePass;
 class InstructionSelector;
 class MachineFunction;
 class PassRegistry;
@@ -324,6 +325,9 @@ FunctionPass *createX86FixupAddr16LegacyPass();
 /// registers of 8086 memory operands.
 FunctionPass *createX86ProtectAddr16LegacyPass();
 
+/// Removes jumps to the next block in unoptimized 16-bit code.
+FunctionPass *createX86RemoveFallthroughJumpsLegacyPass();
+
 /// Return a Machine IR pass that reassigns instruction chains from one domain
 /// to another, when profitable.
 class X86DomainReassignmentPass
@@ -381,6 +385,9 @@ public:
 };
 
 FunctionPass *createX86PartialReductionLegacyPass();
+
+/// On i8086, call picolibc's integer printf and scanf where the format allows.
+ModulePass *createX86I8086PrintfVariantsPass();
 
 /// Lowers i8086 huge pointer arithmetic, conversions and comparisons, which
 /// work on linear addresses, to operations on segment:offset pairs.
@@ -520,6 +527,7 @@ FunctionPass *createX86ArgumentStackSlotLegacyPass();
 void initializeCompressEVEXLegacyPass(PassRegistry &);
 void initializeX86FixupAddr16LegacyPass(PassRegistry &);
 void initializeX86ProtectAddr16LegacyPass(PassRegistry &);
+void initializeX86RemoveFallthroughJumpsLegacyPass(PassRegistry &);
 void initializeX86FixupBWInstLegacyPass(PassRegistry &);
 void initializeFixupLEAsLegacyPass(PassRegistry &);
 void initializeX86ArgumentStackSlotLegacyPass(PassRegistry &);
@@ -549,6 +557,7 @@ void initializeX86LowerAMXTypeLegacyPassPass(PassRegistry &);
 void initializeX86LowerTileCopyLegacyPass(PassRegistry &);
 void initializeX86OptimizeLEAsLegacyPass(PassRegistry &);
 void initializeX86PartialReductionLegacyPass(PassRegistry &);
+void initializeX86I8086PrintfVariantsPass(PassRegistry &);
 void initializeX86HugePointersLegacyPass(PassRegistry &);
 void initializeX86PreTileConfigLegacyPass(PassRegistry &);
 void initializeX86ReturnThunksLegacyPass(PassRegistry &);

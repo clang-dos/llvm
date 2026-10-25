@@ -9,7 +9,8 @@ import sys
 NAMES = {0x80: 'THEADR', 0x88: 'COMENT', 0x8A: 'MODEND', 0x8C: 'EXTDEF',
          0x90: 'PUBDEF', 0x94: 'LINNUM', 0x96: 'LNAMES', 0x98: 'SEGDEF',
          0x9A: 'GRPDEF', 0x9C: 'FIXUPP', 0xA0: 'LEDATA', 0xA2: 'LIDATA',
-         0xB0: 'COMDEF', 0xB4: 'LEXTDEF', 0xB6: 'LPUBDEF', 0xC2: 'COMDAT'}
+         0xB0: 'COMDEF', 0xB4: 'LEXTDEF', 0xB6: 'LPUBDEF', 0xC2: 'COMDAT',
+         0xC6: 'ALIAS'}
 LOC = {0: 'lobyte', 1: 'offset16', 2: 'base16', 3: 'ptr16:16', 4: 'hibyte',
        5: 'offset16(ldr)', 9: 'offset32', 11: 'ptr16:32', 13: 'offset32(ldr)'}
 
@@ -76,10 +77,14 @@ def dump(path, out=sys.stdout):
             while r.more():
                 r.u8(); segs.append(r.idx())
             print('GRPDEF %s segs=%s' % (lnames[g], segs), file=out)
-        elif typ == 0x8C:
+        elif typ in (0x8C, 0xB4):
             while r.more():
                 n = r.name(); t = r.idx()
-                print('EXTDEF %r type=%d' % (n, t), file=out)
+                print('%s %r type=%d' % (nm, n, t), file=out)
+        elif typ == 0xC6:
+            while r.more():
+                n = r.name(); t = r.name()
+                print('ALIAS %r -> %r' % (n, t), file=out)
         elif typ in (0x90, 0xB6):
             g = r.idx(); s = r.idx()
             if s == 0:

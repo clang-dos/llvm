@@ -33,9 +33,11 @@ _a2:
 	lcallw $_b@SEG, $_b
 	.fill 0xc000, 1, 0x90
 
-	# A local function.
+	# Two global symbols again, so that it stays in the module's segments.
 	.section .text._b,"ax",@progbits
+	.globl _b, _b2
 _b:
+_b2:
 	lretw
 	.fill 0x7fff, 1, 0x90
 

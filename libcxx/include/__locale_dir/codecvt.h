@@ -569,6 +569,20 @@ _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS codecvt_byname<char32_t, char8_t, mbstate_t>; /
 #  endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
+// The facets of the classic locale.
+_LIBCPP_CLASSIC_FACET(codecvt<char, char, mbstate_t>)
+#  if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_CLASSIC_FACET(codecvt<wchar_t, char, mbstate_t>)
+#  endif
+_LIBCPP_SUPPRESS_DEPRECATED_PUSH
+_LIBCPP_CLASSIC_FACET(codecvt<char16_t, char, mbstate_t>)
+_LIBCPP_CLASSIC_FACET(codecvt<char32_t, char, mbstate_t>)
+#  if _LIBCPP_HAS_CHAR8_T
+_LIBCPP_CLASSIC_FACET(codecvt<char16_t, char8_t, mbstate_t>)
+_LIBCPP_CLASSIC_FACET(codecvt<char32_t, char8_t, mbstate_t>)
+#  endif
+_LIBCPP_SUPPRESS_DEPRECATED_POP
+
 _LIBCPP_END_NAMESPACE_STD
 
 #endif // _LIBCPP_HAS_LOCALIZATION

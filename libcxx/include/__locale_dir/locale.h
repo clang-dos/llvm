@@ -37,6 +37,15 @@
 #    pragma GCC system_header
 #  endif
 
+// On i8086 the classic locale makes its standard facets on first use, not
+// all at once, so that a program links only the facets it uses: all of
+// them are much more code than fits in a 64 KiB code segment.
+#  if defined(__I86__)
+#    define _LIBCPP_LAZY_CLASSIC_FACETS 1
+#  else
+#    define _LIBCPP_LAZY_CLASSIC_FACETS 0
+#  endif
+
 _LIBCPP_BEGIN_NAMESPACE_STD
 _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 
@@ -62,6 +71,9 @@ public:
   class _LIBCPP_EXPORTED_FROM_ABI id;
 
   typedef int category;
+#  if _LIBCPP_LAZY_CLASSIC_FACETS
+  typedef facet* (*__facet_factory)();
+#  endif
 
   static const category // values assigned here are for exposition only
       none    = 0,
@@ -132,6 +144,11 @@ private:
   static locale& __global();
   bool has_facet(id&) const;
   const facet* use_facet(id&) const;
+#  if _LIBCPP_LAZY_CLASSIC_FACETS
+  // The classic locale's facet, made by __make if it is not there yet.
+  const facet* __use_facet(id&, __facet_factory __make) const;
+  bool __has_facet(id&, __facet_factory __make) const;
+#  endif
 
   template <class _Facet>
   friend bool has_facet(const locale&) _NOEXCEPT;
@@ -188,6 +205,45 @@ inline _LIBCPP_HIDE_FROM_ABI locale::locale(const locale& __other, _Facet* __f) 
   __install_ctor(__other, __f, __f ? __f->id.__get() : 0);
 }
 
+#  if _LIBCPP_LAZY_CLASSIC_FACETS
+// True for the facets that the classic locale has. The headers that define
+// them specialize it.
+template <class _Facet>
+struct __classic_facet {
+  static const bool value = false;
+};
+
+template <class _Facet>
+_LIBCPP_HIDE_FROM_ABI locale::facet* __make_classic_facet() {
+  return new _Facet(1);
+}
+
+template <class _Facet, bool = __classic_facet<_Facet>::value>
+struct __classic_facet_factory {
+  static _LIBCPP_HIDE_FROM_ABI locale::__facet_factory __get() { return nullptr; }
+};
+
+template <class _Facet>
+struct __classic_facet_factory<_Facet, true> {
+  static _LIBCPP_HIDE_FROM_ABI locale::__facet_factory __get() { return &std::__make_classic_facet<_Facet>; }
+};
+
+template <class _Facet>
+[[__nodiscard__]] inline _LIBCPP_HIDE_FROM_ABI bool has_facet(const locale& __l) _NOEXCEPT {
+  return __l.__has_facet(_Facet::id, __classic_facet_factory<_Facet>::__get());
+}
+
+template <class _Facet>
+[[__nodiscard__]] inline _LIBCPP_HIDE_FROM_ABI const _Facet& use_facet(const locale& __l) {
+  return static_cast<const _Facet&>(*__l.__use_facet(_Facet::id, __classic_facet_factory<_Facet>::__get()));
+}
+
+#    define _LIBCPP_CLASSIC_FACET(...)                                                                                 \
+      template <>                                                                                                      \
+      struct __classic_facet<__VA_ARGS__ > {                                                                           \
+        static const bool value = true;                                                                                \
+      };
+#  else
 template <class _Facet>
 [[__nodiscard__]] inline _LIBCPP_HIDE_FROM_ABI bool has_facet(const locale& __l) _NOEXCEPT {
   return __l.has_facet(_Facet::id);
@@ -197,6 +253,9 @@ template <class _Facet>
 [[__nodiscard__]] inline _LIBCPP_HIDE_FROM_ABI const _Facet& use_facet(const locale& __l) {
   return static_cast<const _Facet&>(*__l.use_facet(_Facet::id));
 }
+
+#    define _LIBCPP_CLASSIC_FACET(...)
+#  endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
 _LIBCPP_END_NAMESPACE_STD

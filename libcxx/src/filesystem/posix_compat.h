@@ -575,7 +575,9 @@ using ::stat;
 using ::statvfs;
 using ::truncate;
 
-#  define O_BINARY 0
+#  ifndef O_BINARY // DOS has one, for untranslated reads and writes.
+#    define O_BINARY 0
+#  endif
 
 using StatVFS = struct statvfs;
 using ModeT   = ::mode_t;

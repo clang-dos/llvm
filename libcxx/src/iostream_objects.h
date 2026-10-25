@@ -78,6 +78,11 @@ void init_stream(FILE* stdstream, stream<StreamT>& stream, stream_data<StreamT, 
 
 template <class StreamT, class SyncBufT, class UnsyncBufT>
 void switch_to_sync_stream(FILE* stdstream, stream<StreamT>& stream, stream_data<StreamT, SyncBufT, UnsyncBufT>& data) {
+  // Hand what the unsynchronized buffer holds back to the C stream before
+  // dropping it: write out pending output, and seek the C stream back over
+  // input that was read ahead but not consumed (this works when the stream
+  // is seekable, such as a redirected file).
+  data.unsync_buffer.pubsync();
   data.unsync_buffer.__adopt_file(nullptr, {}); // reset the file, so that basic_filebuf doesn't close standard streams
   std::destroy_at(&data.unsync_buffer);
   data.mb = {};

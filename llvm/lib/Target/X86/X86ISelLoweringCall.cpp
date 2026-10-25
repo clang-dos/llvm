@@ -1389,11 +1389,14 @@ X86TargetLowering::LowerMemArgument(SDValue Chain, CallingConv::ID CallConv,
   bool isImmutable = !AlwaysUseMutable && !Flags.isByVal();
   EVT ValVT;
   MVT PtrVT = getPointerTy(DAG.getDataLayout());
-  // A far return address takes 4 bytes instead of 2.
-  int64_t LocMemOffset =
-      VA.getLocMemOffset() +
-      (Subtarget.isFarFunction16(DAG.getMachineFunction().getFunction()) ? 2
-                                                                         : 0);
+  // A far return address takes 4 bytes instead of 2. The parameters of an
+  // interrupt function are the registers its prologue saves, which start
+  // 24 bytes below the interrupt's IP (where a near return address would be).
+  int64_t LocMemOffset = VA.getLocMemOffset();
+  if (Subtarget.isTarget16BitABI() && CallConv == CallingConv::X86_INTR)
+    LocMemOffset -= X86FrameLowering::Interrupt16SaveSize + 2;
+  else if (Subtarget.isFarFunction16(DAG.getMachineFunction().getFunction()))
+    LocMemOffset += 2;
 
   // If value is passed by pointer we have address passed instead of the value
   // itself. No need to extend if the mask value and location share the same
@@ -1401,6 +1404,16 @@ X86TargetLowering::LowerMemArgument(SDValue Chain, CallingConv::ID CallConv,
   bool ExtendedInMem =
       VA.isExtInLoc() && VA.getValVT().getScalarType() == MVT::i1 &&
       VA.getValVT().getSizeInBits() != VA.getLocVT().getSizeInBits();
+
+  // A pointer to the registers an i8086 interrupt function saved: their
+  // address.
+  if ((Flags.isByRef() || Flags.isPointer()) && Subtarget.isTarget16BitABI() &&
+      CallConv == CallingConv::X86_INTR) {
+    int FI = MFI.CreateFixedObject(30, LocMemOffset,
+                                   /*IsImmutable=*/false,
+                                   /*isAliased=*/true);
+    return DAG.getFrameIndex(FI, PtrVT);
+  }
 
   if (VA.getLocInfo() == CCValAssign::Indirect || ExtendedInMem)
     ValVT = VA.getLocVT();
@@ -2023,7 +2036,8 @@ SDValue X86TargetLowering::LowerFormalArguments(
   if (X86::isCalleePop(CallConv, Is64Bit, IsVarArg,
                        MF.getTarget().Options.GuaranteedTailCallOpt)) {
     FuncInfo->setBytesToPopOnReturn(StackSize); // Callee pops everything.
-  } else if (CallConv == CallingConv::X86_INTR && Ins.size() == 2) {
+  } else if (CallConv == CallingConv::X86_INTR && Ins.size() == 2 &&
+             !Subtarget.isTarget16BitABI()) {
     // X86 interrupts must pop the error code (and the alignment padding) if
     // present.
     FuncInfo->setBytesToPopOnReturn(Is64Bit ? 16 : 4);
@@ -2273,8 +2287,16 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     }
   }
 
+  // An i8086 interrupt function is called as an interrupt is taken, with
+  // PUSHF and a far call, and returns with IRET.
+  bool IsIntrCall =
+      Subtarget.isTarget16BitABI() && CallConv == CallingConv::X86_INTR;
+  if (IsIntrCall && (!IsFarCall || !Outs.empty() || !Ins.empty()))
+    report_fatal_error("an i8086 interrupt function is called with no "
+                       "arguments through a far pointer");
+
   MachineFunction::CallSiteInfo CSInfo;
-  if (CallConv == CallingConv::X86_INTR)
+  if (CallConv == CallingConv::X86_INTR && !IsIntrCall)
     report_fatal_error("X86 interrupts may not be called directly");
 
   // Set type id for call site info.
@@ -2887,7 +2909,9 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // Returns a chain & a glue for retval copy to use.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
-  if (IsFarCall) {
+  if (IsIntrCall) {
+    Chain = DAG.getNode(X86ISD::FARCALL_INTR, dl, NodeTys, Ops);
+  } else if (IsFarCall) {
     Chain = DAG.getNode(X86ISD::FARCALL, dl, NodeTys, Ops);
   } else if (IsImpCall) {
     Chain = DAG.getNode(X86ISD::IMP_CALL, dl, NodeTys, Ops);

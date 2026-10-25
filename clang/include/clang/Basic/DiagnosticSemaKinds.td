@@ -447,6 +447,10 @@ def err_anyx86_interrupt_attribute : Error<
   "have %select{a 'void' return type|"
   "only a pointer parameter optionally followed by an integer parameter|"
   "a pointer as the first parameter|a %2 type as the second parameter}1">;
+def err_i8086_interrupt_prototype : Error<
+  "an '__interrupt' function must %select{return 'void'|"
+  "take a structure of the saved registers (union INTPACK) or up to 13 "
+  "16-bit register parameters}0">;
 def err_anyx86_interrupt_called : Error<
   "interrupt service routine cannot be called directly">;
 def warn_anyx86_excessive_regsave : Warning<

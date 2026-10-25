@@ -89,6 +89,11 @@ public:
   /// The i8086 (16-bit ABI) prologue and epilogue: always a BP frame.
   void emitPrologue16(MachineFunction &MF, MachineBasicBlock &MBB) const;
   void emitEpilogue16(MachineFunction &MF, MachineBasicBlock &MBB) const;
+  /// i8086: an interrupt function, which saves every register.
+  bool isInterrupt16(const MachineFunction &MF) const;
+  /// The bytes an i8086 interrupt function pushes: 8 general registers,
+  /// DS, ES and two words for the FS and GS of a 386 (Open Watcom's layout).
+  static constexpr unsigned Interrupt16SaveSize = 24;
   /// i8086: the function has the 16-bit Windows entry sequence.
   bool hasWindowsPrologue16(const MachineFunction &MF) const;
   /// i8086: the prologue saves DS below the saved BP and loads it.

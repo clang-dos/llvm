@@ -3308,7 +3308,10 @@ void Verifier::visitFunction(const Function &F) {
   case CallingConv::C:
     break;
   case CallingConv::X86_INTR: {
-    Check(F.arg_empty() || Attrs.hasParamAttr(0, Attribute::ByVal),
+    // i8086 interrupt functions can also take the saved registers as 16-bit
+    // parameters, as in Microsoft C.
+    Check(F.arg_empty() || Attrs.hasParamAttr(0, Attribute::ByVal) ||
+              F.getParent()->getTargetTriple().getArch() == Triple::i8086,
           "Calling convention parameter requires byval", &F);
     break;
   }

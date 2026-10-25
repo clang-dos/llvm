@@ -19918,10 +19918,15 @@ static SDValue lowerFarGlobalAddress16(GlobalAddressSDNode *G,
       X86ISD::Wrapper, dl, MVT::i16,
       DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16,
                                  G->getOffset()));
-  SDValue Seg = DAG.getNode(
-      X86ISD::Wrapper, dl, MVT::i16,
-      DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16, 0,
-                                 X86II::MO_SEG));
+  // A tiny-model program is one segment, and a .COM file can have no
+  // segment fixups: the segment is CS.
+  SDValue Seg =
+      DAG.getSubtarget<X86Subtarget>().getMemoryModel16() ==
+              X86::MemoryModel16::Tiny
+          ? DAG.getCopyFromReg(DAG.getEntryNode(), dl, X86::CS, MVT::i16)
+          : DAG.getNode(X86ISD::Wrapper, dl, MVT::i16,
+                        DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16,
+                                                   0, X86II::MO_SEG));
   return DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i32, Off, Seg);
 }
 

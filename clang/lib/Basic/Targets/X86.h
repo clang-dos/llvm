@@ -877,6 +877,20 @@ public:
   }
   uint64_t getPointerAlignV(LangAS) const override { return 16; }
 
+  // __interrupt, the convention of interrupt handlers, which are far.
+  CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
+    if (CC == CC_I8086Interrupt)
+      return CCCR_OK;
+    return X86_32TargetInfo::checkCallingConvention(CC);
+  }
+
+  LangAS getFunctionAddressSpaceForCallingConv(CallingConv CC) const override {
+    if (CC != CC_I8086Interrupt)
+      return LangAS::Default;
+    return getFunctionAddressSpaceForQualifier(getLangASFromTargetAS(2))
+        .value_or(LangAS::Default);
+  }
+
   // __near functions are in address space 4 and __far (or __huge) ones in
   // 5. Those of the memory model's kind need no qualifier.
   std::optional<LangAS>

@@ -330,6 +330,40 @@ static bool CC_X86_Intr(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
   return true;
 }
 
+/// The parameters of an i8086 interrupt function (__interrupt) are the
+/// registers its prologue saved, which LowerMemArgument finds below the
+/// interrupt's IP, CS and flags. A pointer (to Open Watcom's union INTPACK,
+/// which is how clang passes it, so that changes reach the interrupted
+/// program), or a structure by value or by reference, is all of them, starting
+/// with the GS and FS slots; 16-bit parameters are Microsoft C's es, ds, di,
+/// si, bp, sp, bx, dx, cx, ax, ip, cs and flags.
+static bool CC_X86_16_Intr(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
+                           CCValAssign::LocInfo &LocInfo,
+                           ISD::ArgFlagsTy &ArgFlags, CCState &State) {
+  const unsigned FrameSize = 30; // 12 saved registers, IP, CS and flags
+  unsigned Offset;
+  if (ArgFlags.isByVal() || ArgFlags.isByRef() || ArgFlags.isPointer()) {
+    unsigned Size = ArgFlags.isByVal()   ? ArgFlags.getByValSize()
+                    : ArgFlags.isByRef() ? ArgFlags.getByRefSize()
+                                         : FrameSize;
+    if (State.getStackSize() != 0 || Size > FrameSize)
+      report_fatal_error("unsupported i8086 interrupt prototype");
+    Offset = State.AllocateStack(FrameSize, Align(2));
+  } else {
+    if (ValVT.getSizeInBits() > 16)
+      report_fatal_error("unsupported i8086 interrupt prototype");
+    Offset = 4 + State.AllocateStack(2, Align(2));
+    if (Offset + 2 > FrameSize)
+      report_fatal_error("unsupported i8086 interrupt prototype");
+    if (LocVT != MVT::i16) {
+      LocVT = MVT::i16;
+      LocInfo = CCValAssign::AExt;
+    }
+  }
+  State.addLoc(CCValAssign::getMem(ValNo, ValVT, Offset, LocVT, LocInfo));
+  return true;
+}
+
 static bool CC_X86_64_Pointer(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
                               CCValAssign::LocInfo &LocInfo,
                               ISD::ArgFlagsTy &ArgFlags, CCState &State) {

@@ -21,8 +21,9 @@
 //
 // On 16-bit Windows, a DLL runs on its caller's stack, so SS is not DS. An
 // access to a local variable through BX, SI or DI (which use DS) gets an SS
-// segment override. Accesses through BP already use SS, so an SS override on
-// a frame index is removed.
+// segment override. The same holds in an interrupt function, which runs on
+// the stack of the program it interrupted. Accesses through BP already use
+// SS, so an SS override on a frame index is removed.
 //
 // After register allocation, a second pass clears the renamable flag on these
 // registers, so that later passes such as MachineCopyPropagation, which only
@@ -341,7 +342,10 @@ bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
   TII = ST.getInstrInfo();
   MRI = &MF.getRegInfo();
   bool Changed = false;
-  bool SeparateStack = ST.getTargetTriple().isOSWin16();
+  // An interrupt function runs on the stack of the program it interrupted.
+  bool SeparateStack =
+      ST.getTargetTriple().isOSWin16() ||
+      MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
 
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {

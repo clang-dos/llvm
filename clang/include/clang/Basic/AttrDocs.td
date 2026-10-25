@@ -3934,6 +3934,28 @@ See the documentation for [`__vectorcall`][__vectorcall] on MSDN for more detail
   }];
 }
 
+def I8086InterruptDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Content = [{
+On the 16-bit ``i8086`` targets, ``__interrupt`` (also ``_interrupt``) is
+``__attribute__((i8086_interrupt))``: the calling convention of an interrupt
+handler, as in Open Watcom and Microsoft C. Such a function is far. It saves
+every register, loads DGROUP into ``DS`` and returns with ``IRET``:
+
+.. code-block:: c
+
+  void __interrupt __far on_timer(void);
+  void __interrupt __far on_dos(union INTPACK r);   /* <i86.h> */
+
+Its parameter, if it has one, is Open Watcom's ``union INTPACK``: the saved
+registers, which the function can change before they are restored. Microsoft
+C's register parameters (``unsigned es, unsigned ds, unsigned di, ...``) work
+too. Calling an interrupt function, usually through a pointer to the handler
+an interrupt vector held before, pushes the flags and makes a far call, as the
+interrupt would.
+  }];
+}
+
 def M68kRTDDocs : Documentation {
   let Category = DocCatCallingConvs;
   let Content = [{

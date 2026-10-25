@@ -358,6 +358,17 @@ public:
     ABIArgInfo &Ret = FI.getReturnInfo();
     if (Ret.isIndirect() && hasI8086FarSRet(getContext().getTargetInfo()))
       Ret.setIndirectAddrSpace(2);
+    // The structure parameter of an interrupt function (union INTPACK) is
+    // the registers that its prologue saved, which the function changes for
+    // the interrupted program: a pointer to them, not a copy, which the
+    // backend takes as such (and reaches them through SS, as they are on
+    // the interrupted program's stack).
+    if (FI.getCallingConvention() == llvm::CallingConv::X86_INTR)
+      for (auto &Arg : FI.arguments())
+        if (isAggregateTypeForABI(Arg.type))
+          Arg.info = ABIArgInfo::getIndirect(
+              getContext().getTypeAlignInChars(Arg.type),
+              getDataLayout().getAllocaAddrSpace(), /*ByVal=*/false);
   }
 };
 

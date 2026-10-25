@@ -203,6 +203,34 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("option");
       CmdArgs.push_back("stack=8192");
     }
+
+    // A Windows version in the triple, as in i8086-pc-win162.03, goes in the
+    // header as the expected version; Windows refuses a program that expects
+    // a newer one. Windows 1.x, 2.x and 3.0 in real mode move segments
+    // without updating the segment addresses in other segments, so for them
+    // the code is fixed in memory, and so is the data when far pointers or
+    // code can hold its address. Windows 3.1 and later only run in protected
+    // mode, which is all the default build supports: the header says so, and
+    // Windows 3.0 then refuses to run the program in real mode.
+    VersionTuple Version = TC.getTriple().getOSVersion();
+    if (!Version.empty()) {
+      CmdArgs.push_back("option");
+      unsigned Minor = Version.getMinor().value_or(0);
+      CmdArgs.push_back(Args.MakeArgString(
+          "version=" + Twine(Version.getMajor()) + (Minor < 10 ? ".0" : ".") +
+          Twine(Minor)));
+    }
+    if (!Version.empty() && Version < VersionTuple(3, 10)) {
+      CmdArgs.append({"segment", "type", "code", "fixed"});
+      // A DLL's code loads its data segment with "mov ax, DGROUP", which
+      // Windows cannot update either, as old .DEF files had DATA FIXED.
+      StringRef Model = TC.getMemoryModel();
+      if (IsDLL || Model == "compact" || Model == "large")
+        CmdArgs.append({"segment", "type", "data", "fixed"});
+    } else {
+      CmdArgs.push_back("option");
+      CmdArgs.push_back("protmode");
+    }
   }
 
   // The startup code goes first, so that its segments set the order. A DLL

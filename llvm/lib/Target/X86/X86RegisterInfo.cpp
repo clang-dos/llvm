@@ -272,9 +272,10 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   if (MF->getFunction().hasFnAttribute("no_callee_saved_registers"))
     return CSR_NoRegs_SaveList;
 
-  // FIXME: interrupt handlers and other conventions on i8086.
+  // An i8086 interrupt function saves every register in its prologue.
   if (Subtarget.isTarget16BitABI())
-    return CSR_16_SaveList;
+    return F.getCallingConv() == CallingConv::X86_INTR ? CSR_NoRegs_SaveList
+                                                       : CSR_16_SaveList;
 
   switch (CC) {
   case CallingConv::GHC:
@@ -875,7 +876,8 @@ bool X86RegisterInfo::shouldRealignStack(const MachineFunction &MF) const {
   if (TargetRegisterInfo::shouldRealignStack(MF))
     return true;
 
-  return !Is64Bit && MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
+  return !Is64Bit && !MF.getSubtarget<X86Subtarget>().isTarget16BitABI() &&
+         MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
 }
 
 // tryOptimizeLEAtoMOV - helper function that tries to replace a LEA instruction

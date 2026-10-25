@@ -150,14 +150,27 @@
 #  define _LIBCPP_EXCEPTIONS_SIG e
 #endif
 
+// DOS_LEAN_AND_MEAN, defined by a program before it includes any header,
+// trades locale support for size on i8086: char streams then classify,
+// widen and narrow characters as the "C" locale does, without looking up
+// ctype<char> in the stream's locale.
+#if defined(__I86__) && defined(DOS_LEAN_AND_MEAN)
+#  define _LIBCPP_DOS_LEAN_AND_MEAN 1
+#  define _LIBCPP_DOS_LEAN_SIG l
+#else
+#  define _LIBCPP_DOS_LEAN_AND_MEAN 0
+#  define _LIBCPP_DOS_LEAN_SIG
+#endif
+
 // clang-format off
 #define _LIBCPP_ODR_SIGNATURE                                                                                           \
-  _LIBCPP_CONCAT(_LIBCPP_CONCAT(_LIBCPP_CONCAT(_LIBCPP_CONCAT(                                                          \
+  _LIBCPP_CONCAT(_LIBCPP_CONCAT(_LIBCPP_CONCAT(_LIBCPP_CONCAT(_LIBCPP_CONCAT(                                           \
     _LIBCPP_HARDENING_SIG,                                                                                              \
     _LIBCPP_VERSION),                                                                                                   \
     _LIBCPP_ASSERTION_SEMANTIC_SIG),                                                                                    \
     _LIBCPP_EXCEPTIONS_SIG),                                                                                            \
-    _LIBCPP_STD_VER)
+    _LIBCPP_STD_VER),                                                                                                   \
+    _LIBCPP_DOS_LEAN_SIG)
 // clang-format on
 
 // This macro marks a symbol as being hidden from libc++'s ABI. This is achieved

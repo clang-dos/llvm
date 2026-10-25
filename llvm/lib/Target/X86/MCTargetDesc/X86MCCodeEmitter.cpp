@@ -502,6 +502,26 @@ unsigned X86MCCodeEmitter::getX86RegEncoding(const MCInst &MI,
   return Ctx.getRegisterInfo()->getEncodingValue(MI.getOperand(OpNum).getReg());
 }
 
+/// Whether Seg is sym@SEG and Off is sym or sym+constant: the segment and
+/// offset of an OMF far pointer.
+static bool isFarPointerTo(const MCOperand &Off, const MCOperand &Seg) {
+  if (!Off.isExpr() || !Seg.isExpr())
+    return false;
+  const auto *SegRef = dyn_cast<MCSymbolRefExpr>(Seg.getExpr());
+  if (!SegRef || SegRef->getSpecifier() != X86::S_SEG)
+    return false;
+  const MCExpr *OffExpr = Off.getExpr();
+  if (const auto *Bin = dyn_cast<MCBinaryExpr>(OffExpr)) {
+    if (Bin->getOpcode() != MCBinaryExpr::Add ||
+        !isa<MCConstantExpr>(Bin->getRHS()))
+      return false;
+    OffExpr = Bin->getLHS();
+  }
+  const auto *OffRef = dyn_cast<MCSymbolRefExpr>(OffExpr);
+  return OffRef && !OffRef->getSpecifier() &&
+         &OffRef->getSymbol() == &SegRef->getSymbol();
+}
+
 void X86MCCodeEmitter::emitImmediate(const MCOperand &DispOp, SMLoc Loc,
                                      unsigned FixupKind, bool PCRel,
                                      uint64_t StartByte,
@@ -1615,6 +1635,16 @@ void X86MCCodeEmitter::encodeInstruction(const MCInst &MI,
     break;
   case X86II::RawFrmImm16:
     emitByte(BaseOpcode, CB);
+    // "lcall $sym@SEG, $sym" (or ljmp) is one far pointer to sym, as other
+    // 16-bit assemblers write it. Real-mode Windows needs this: it points a
+    // far pointer to code that may move at a thunk that loads the code, but
+    // cannot do that for a separate segment and offset.
+    if (isFarPointerTo(MI.getOperand(CurOp), MI.getOperand(CurOp + 1))) {
+      emitImmediate(MI.getOperand(CurOp), MI.getLoc(), FK_Data_4, false,
+                    StartByte, CB, Fixups);
+      CurOp += 2;
+      break;
+    }
     emitImmediate(MI.getOperand(CurOp++), MI.getLoc(), getImmFixupKind(TSFlags),
                   X86II::isImmPCRel(TSFlags), StartByte, CB, Fixups);
     emitImmediate(MI.getOperand(CurOp++), MI.getLoc(), FK_Data_2, false,

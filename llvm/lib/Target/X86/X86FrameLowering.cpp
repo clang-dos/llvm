@@ -3039,7 +3039,7 @@ StackOffset X86FrameLowering::getFrameIndexReference(const MachineFunction &MF,
   // do not have a standard return address. Fixed objects in the current frame,
   // such as SSE register spills, should not get this treatment.
   if (MF.getFunction().getCallingConv() == CallingConv::X86_INTR &&
-      Offset >= 0) {
+      !Is16BitABI && Offset >= 0) {
     Offset += getOffsetOfLocalArea();
   }
 
@@ -3070,6 +3070,10 @@ StackOffset X86FrameLowering::getFrameIndexReference(const MachineFunction &MF,
   if (FrameReg == TRI->getFramePtr()) {
     // Skip saved EBP/RBP
     Offset += SlotSize;
+
+    // An i8086 interrupt function sets BP below all the registers it saves.
+    if (isInterrupt16(MF))
+      Offset += Interrupt16SaveSize - SlotSize;
 
     // Account for restricted Windows prologue.
     Offset += FPDelta;
@@ -3236,6 +3240,20 @@ bool X86FrameLowering::assignCalleeSavedSpillSlots(
   }
 
   bool IsFPRemovedFromCSI = false;
+  if (hasFP(MF) && isInterrupt16(MF)) {
+    // An i8086 interrupt function saves every register in its prologue, BP
+    // among them, so it has no callee-saved registers of its own.
+    SpillSlotOffset -= Interrupt16SaveSize;
+    MFI.CreateFixedSpillStackObject(Interrupt16SaveSize, SpillSlotOffset);
+    X86FI->setCalleeSavedFrameSize(Interrupt16SaveSize - SlotSize);
+    Register FPReg = TRI->getFrameRegister(MF);
+    llvm::erase_if(CSI, [&](const CalleeSavedInfo &I) {
+      return TRI->regsOverlap(I.getReg(), FPReg);
+    });
+    assert(CSI.empty() && "i8086 interrupt functions save no registers");
+    return true;
+  }
+
   if (hasFP(MF)) {
     // emitPrologue always spills frame register the first thing.
     SpillSlotOffset -= SlotSize;
@@ -4319,7 +4337,7 @@ bool X86FrameLowering::canUseAsEpilogue(const MachineBasicBlock &MBB) const {
 bool X86FrameLowering::enableShrinkWrapping(const MachineFunction &MF) const {
   // The Windows entry sequence must start the function, and DS must be
   // loaded before the function body.
-  if (savesDS16(MF))
+  if (savesDS16(MF) || isInterrupt16(MF))
     return false;
   // If we may need to emit frameless compact unwind information, give
   // up as this is currently broken: PR25614.
@@ -5083,6 +5101,35 @@ void X86FrameLowering::spillFPBP(MachineFunction &MF) const {
 // "mov ax, DGROUP" already. "i8086-loadds" alone saves DS the same way and
 // loads DGROUP into it after "mov bp, sp". In the tiny model DGROUP is CS.
 
+//
+// An interrupt function (CallingConv::X86_INTR, clang's __interrupt) saves
+// every register as Open Watcom does, loads DGROUP into DS and returns with
+// IRET:
+//
+//   push ax / push cx / push dx / push bx
+//   push sp / push bp / push si / push di
+//   push ds / push es
+//   push ax / push ax  ; the FS and GS slots of a 386
+//   mov  bp, sp        ; [bp+0] = the saved registers, as union INTPACK
+//   cld
+//   mov  ax, DGROUP    ; (mov ax, cs in tiny)
+//   mov  ds, ax
+//   sub  sp, N
+//   ...
+//   mov  sp, bp
+//   pop  ax / pop ax / pop es / pop ds
+//   pop  di / pop si / pop bp / pop bx (SP) / pop bx / pop dx / pop cx / pop ax
+//   iret
+//
+// The function's registers come back from the saved copies, so a change to
+// them (through its INTPACK or Microsoft-style register parameters) is what
+// the interrupted program gets. It has no callee-saved registers.
+
+bool X86FrameLowering::isInterrupt16(const MachineFunction &MF) const {
+  return Is16BitABI &&
+         MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
+}
+
 bool X86FrameLowering::hasWindowsPrologue16(const MachineFunction &MF) const {
   return Is16BitABI && STI.isFarFunction16(MF.getFunction()) &&
          MF.getFunction().hasFnAttribute("i8086-windows-prologue");
@@ -5123,6 +5170,38 @@ void X86FrameLowering::emitPrologue16(MachineFunction &MF,
   uint64_t StackSize = MFI.getStackSize();
   // The saved BP is part of StackSize; so are the callee-saved pushes.
   uint64_t NumBytes = StackSize - SlotSize - X86FI->getCalleeSavedFrameSize();
+
+  if (isInterrupt16(MF)) {
+    NumBytes = StackSize - Interrupt16SaveSize;
+    auto Push = [&](unsigned Opc, Register Reg) {
+      auto MIB = BuildMI(MBB, MBBI, DL, TII.get(Opc));
+      if (Reg)
+        MIB.addReg(Reg);
+      MIB.setMIFlag(MachineInstr::FrameSetup);
+    };
+    for (Register Reg : {X86::AX, X86::CX, X86::DX, X86::BX, X86::SP, X86::BP,
+                         X86::SI, X86::DI})
+      Push(X86::PUSH16r, Reg);
+    Push(X86::PUSHDS16, Register());
+    Push(X86::PUSHES16, Register());
+    Push(X86::PUSH16r, X86::AX);
+    Push(X86::PUSH16r, X86::AX);
+    BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16rr), FramePtr)
+        .addReg(StackPtr)
+        .setMIFlag(MachineInstr::FrameSetup);
+    BuildMI(MBB, MBBI, DL, TII.get(X86::CLD))
+        .setMIFlag(MachineInstr::FrameSetup);
+    emitLoadDGROUP16(STI, TII, MBB, MBBI, DL);
+    BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16sr), X86::DS)
+        .addReg(X86::AX, RegState::Kill)
+        .setMIFlag(MachineInstr::FrameSetup);
+    for (MachineBasicBlock &EveryMBB : MF)
+      EveryMBB.addLiveIn(FramePtr);
+    MBB.sortUniqueLiveIns();
+    if (NumBytes)
+      emitSPUpdate(MBB, MBBI, DL, -(int64_t)NumBytes, /*InEpilogue=*/false);
+    return;
+  }
 
   bool Windows = hasWindowsPrologue16(MF);
   bool LoadDS = MF.getFunction().hasFnAttribute("i8086-loadds");
@@ -5181,6 +5260,27 @@ void X86FrameLowering::emitEpilogue16(MachineFunction &MF,
   Register FramePtr = TRI->getFrameRegister(MF);
   unsigned CSSize = X86FI->getCalleeSavedFrameSize();
   uint64_t NumBytes = MFI.getStackSize() - SlotSize - CSSize;
+
+  if (isInterrupt16(MF)) {
+    if (NumBytes || MFI.hasVarSizedObjects())
+      BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16rr), StackPtr)
+          .addReg(FramePtr)
+          .setMIFlag(MachineInstr::FrameDestroy);
+    auto Pop = [&](unsigned Opc, Register Reg) {
+      auto MIB = BuildMI(MBB, MBBI, DL, TII.get(Opc));
+      if (Reg)
+        MIB.addReg(Reg, RegState::Define);
+      MIB.setMIFlag(MachineInstr::FrameDestroy);
+    };
+    Pop(X86::POP16r, X86::AX);
+    Pop(X86::POP16r, X86::AX);
+    Pop(X86::POPES16, Register());
+    Pop(X86::POPDS16, Register());
+    for (Register Reg : {X86::DI, X86::SI, X86::BP, X86::BX, X86::BX, X86::DX,
+                         X86::CX, X86::AX})
+      Pop(X86::POP16r, Reg);
+    return;
+  }
 
   // Step back over the callee-saved register pops.
   while (MBBI != MBB.begin()) {

@@ -260,7 +260,7 @@ struct __parsed_specifications {
 static_assert(sizeof(__parsed_specifications<char>) == (__SIZEOF_INT__ < 4 ? 14 : 16));
 static_assert(is_trivially_copyable_v<__parsed_specifications<char>>);
 #  if _LIBCPP_HAS_WIDE_CHARACTERS
-static_assert(sizeof(__parsed_specifications<wchar_t>) == 16);
+static_assert(sizeof(__parsed_specifications<wchar_t>) == (__SIZEOF_INT__ < 4 && __SIZEOF_WCHAR_T__ < 4 ? 14 : 16));
 static_assert(is_trivially_copyable_v<__parsed_specifications<wchar_t>>);
 #  endif
 

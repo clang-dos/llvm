@@ -231,10 +231,16 @@ class OMFObjectWriter final : public MCObjectWriter {
     const MCSymbol *Sym; // Its name, at offset 0.
     SegIdx Base;
     bool PickAny; // From a COMDAT group: keep any one copy.
+    bool Local;   // Named by a local symbol: a COMDAT of this module only.
     int FarKind;  // For far data, its FarKind; the base is set later.
   };
   SmallVector<Comdat, 0> Comdats;
   DenseMap<const MCSection *, unsigned> ComdatIndex;
+  // Global aliases of a COMDAT's start (C++ complete-object constructors and
+  // destructors), written as ALIAS records naming the COMDAT.
+  SmallVector<const MCSymbol *, 0> ComdatAliases;
+  // The names of local COMDATs, which LEXTDEF records reference.
+  DenseSet<const MCSymbol *> LocalComdatSyms;
   unsigned NumLNames = 0;
   // The code segment's name: _TEXT, or <module>_TEXT with far code.
   std::string TextName;
@@ -249,6 +255,8 @@ class OMFObjectWriter final : public MCObjectWriter {
   void addFarSection(const MCSectionELF &Sec);
   /// The kinds of far data, each with its shared segment.
   enum FarKind { FK_Data, FK_Const, FK_Bss, FK_End, FK_Count };
+  // The size from which a far variable has a segment of its own.
+  static constexpr uint64_t MinOwnFarSegment = 0x1000;
   static FarKind getFarKind(StringRef Name) {
     return Name.starts_with(".farbss")      ? FK_Bss
            : Name.starts_with(".farrodata") ? FK_Const
@@ -322,6 +330,7 @@ class OMFObjectWriter final : public MCObjectWriter {
   void writeNamesAndSegments();
   void writeExternals();
   void writePublics();
+  void writeAliases();
   void writeSegmentData(SegIdx K);
   void writeFixups(SegIdx K, uint64_t Start, uint64_t End,
                    ArrayRef<const OMFFixup *> SegFixups);
@@ -399,22 +408,40 @@ OMFObjectWriter::classifySection(const MCSectionELF &Sec) const {
 }
 
 void OMFObjectWriter::findComdats() {
-  // The global symbols defined in each section. A section that an alias
-  // points into is not a COMDAT, since OMF cannot export the alias.
+  // The global symbols defined in each section. A section that a global
+  // alias points into is not a COMDAT, since OMF cannot export the alias,
+  // unless the alias is of the section's start: an ALIAS record names it.
   DenseMap<const MCSection *, SmallVector<const MCSymbol *, 1>> Globals;
+  DenseMap<const MCSection *, SmallVector<const MCSymbol *, 1>> Locals;
+  DenseMap<const MCSection *, SmallVector<const MCSymbol *, 1>> Aliases;
   DenseSet<const MCSection *> Excluded;
   std::map<std::pair<const MCSymbol *, StringRef>, unsigned> GroupParts;
   for (const MCSymbol &S : Asm->symbols()) {
     const auto &Sym = static_cast<const MCSymbolELF &>(S);
     if (Sym.isVariable()) {
       const MCSymbol *Base = Asm->getBaseSymbol(Sym);
-      if (Base && Base->isInSection())
+      if (!Base || !Base->isInSection())
+        continue;
+      uint64_t Offset;
+      if (Sym.isTemporary() || !Sym.isBindingSet() ||
+          Sym.getBinding() == ELF::STB_LOCAL)
+        continue; // Not exported: references reach it in the COMDAT.
+      if (Sym.getName().size() <= 255 && Asm->getSymbolOffset(Sym, Offset) &&
+          Offset == 0)
+        Aliases[&Base->getSection()].push_back(&Sym);
+      else
         Excluded.insert(&Base->getSection());
       continue;
     }
-    if (!Sym.isInSection() || Sym.isTemporary() || !Sym.isBindingSet() ||
-        Sym.getBinding() == ELF::STB_LOCAL)
+    if (!Sym.isInSection() || Sym.isTemporary())
       continue;
+    if (!Sym.isBindingSet() || Sym.getBinding() == ELF::STB_LOCAL) {
+      // Section symbols and the like have no name of their own.
+      if (Sym.getType() != ELF::STT_SECTION && Sym.getType() != ELF::STT_FILE &&
+          !Sym.getName().empty() && Sym.getSection().getBeginSymbol() != &Sym)
+        Locals[&Sym.getSection()].push_back(&Sym);
+      continue;
+    }
     Globals[&Sym.getSection()].push_back(&Sym);
   }
 
@@ -424,16 +451,36 @@ void OMFObjectWriter::findComdats() {
     if (!K || (*K != SK_Text && *K != SK_Const && *K != SK_Data &&
                *K != SK_Bss && *K != SK_Count))
       continue;
-    // Only a section of its own: in a group, or named like .text.foo. Far
-    // data only in a group: other far variables can be over 64 KiB.
-    if (!Sec.getGroup() &&
-        (*K == SK_Count || Sec.getName().find('.', 1) == StringRef::npos))
+    // Only a section of its own: in a group, or named like .text.foo.
+    if (!Sec.getGroup() && Sec.getName().find('.', 1) == StringRef::npos)
       continue;
-    if (Excluded.count(&Sec) || Asm->getSectionAddressSize(Sec) == 0)
+    uint64_t Size = Asm->getSectionAddressSize(Sec);
+    if (Excluded.count(&Sec) || Size == 0)
+      continue;
+    // A far variable of its own is a COMDAT only when it is small enough
+    // for the shared far segment: a larger one has a segment of its own.
+    if (*K == SK_Count &&
+        (getFarKind(Sec.getName()) == FK_End || Size > 0x10000 ||
+         (!Sec.getGroup() && Size >= MinOwnFarSegment)))
       continue;
     auto It = Globals.find(&Sec);
     const MCSymbol *Sym = nullptr;
-    if (It == Globals.end()) {
+    bool Local = false;
+    if (It == Globals.end() && !Sec.getGroup()) {
+      // A section of its own with no global symbol, such as a static
+      // function or variable, or a function's jump table, is a local
+      // COMDAT, which the linker drops when nothing in the module uses it.
+      // It has the name of a local symbol at its start, or one of its own.
+      auto LIt = Locals.find(&Sec);
+      uint64_t LOffset;
+      if (LIt != Locals.end() && LIt->second.size() == 1 &&
+          Asm->getSymbolOffset(*LIt->second.front(), LOffset) && LOffset == 0)
+        Sym = LIt->second.front();
+      else
+        Sym = getContext().getOrCreateSymbol("$" + Sec.getName() + "$" +
+                                             Twine(Comdats.size()));
+      Local = true;
+    } else if (It == Globals.end()) {
       // A group section with no global symbol, such as a function's jump
       // table, is named after its group and section, so that it is kept
       // with the function and its copies in other modules merge.
@@ -461,10 +508,15 @@ void OMFObjectWriter::findComdats() {
     // group, of one that the C++ runtime defines.
     StringRef Name = Sym->getName();
     Name.consume_front("_");
-    bool PickAny = Sec.getGroup() != nullptr || Name.starts_with("_ZTI") ||
-                   Name.starts_with("_ZTS");
+    bool PickAny = !Local && (Sec.getGroup() != nullptr ||
+                              Name.starts_with("_ZTI") ||
+                              Name.starts_with("_ZTS"));
+    if (Local)
+      LocalComdatSyms.insert(Sym);
     ComdatIndex[&Sec] = Comdats.size();
-    Comdats.push_back({&Sec, Sym, *K, PickAny,
+    if (auto A = Aliases.find(&Sec); A != Aliases.end())
+      ComdatAliases.append(A->second.begin(), A->second.end());
+    Comdats.push_back({&Sec, Sym, *K, PickAny, Local,
                        *K == SK_Count ? getFarKind(Sec.getName()) : -1});
   }
 }
@@ -531,8 +583,7 @@ void OMFObjectWriter::addFarSection(const MCSectionELF &Sec) {
   StringRef Var = Name.split('.').second.split('.').second;
   uint64_t Size = Asm->getSectionAddressSize(Sec);
   // Small far variables share a segment.
-  constexpr uint64_t MinOwnSegment = 0x1000;
-  if (Var.empty() || Size < MinOwnSegment || Kind == FK_End) {
+  if (Var.empty() || Size < MinOwnFarSegment || Kind == FK_End) {
     SegIdx K = getFarPool(Kind, Size, Sec.getAlign());
     Segment &Seg = Segs[K];
     Seg.Size = alignTo(Seg.Size, Sec.getAlign());
@@ -929,7 +980,7 @@ void OMFObjectWriter::writeExternals() {
   // Externals are numbered in the order of the COMDEF and EXTDEF records.
   // Communal variables were numbered first, so their COMDEF records come
   // first too.
-  Record ComDef(OMF::COMDEF), ExtDef(OMF::EXTDEF);
+  Record ComDef(OMF::COMDEF), ExtDef(OMF::EXTDEF), LExtDef(OMF::LEXTDEF);
   auto Flush = [&](Record &R) {
     if (!R.empty())
       R.write(OS);
@@ -960,16 +1011,21 @@ void OMFObjectWriter::writeExternals() {
         ComDef.byte(Size >> 16);
       }
     } else {
-      // Keep the numbering in order: a COMDEF never follows an EXTDEF.
+      // Keep the numbering in order: a COMDEF never follows an EXTDEF, and
+      // EXTDEF and LEXTDEF records alternate as their names do.
       Flush(ComDef);
-      if (ExtDef.size() + Name.size() + 2 > OMF::MaxRecordData)
-        Flush(ExtDef);
-      ExtDef.name(Name);
-      ExtDef.index(0); // Type index.
+      bool IsLocal = LocalComdatSyms.count(Sym);
+      Record &R = IsLocal ? LExtDef : ExtDef;
+      Flush(IsLocal ? ExtDef : LExtDef);
+      if (R.size() + Name.size() + 2 > OMF::MaxRecordData)
+        Flush(R);
+      R.name(Name);
+      R.index(0); // Type index.
     }
   }
   Flush(ComDef);
   Flush(ExtDef);
+  Flush(LExtDef);
 
   if (Weak.empty())
     return;
@@ -1236,7 +1292,8 @@ void OMFObjectWriter::writeComdats() {
         if (R->Offset < End && R->Offset + R->size() > End)
           End = R->Offset;
       Record Cd(OMF::COMDAT);
-      Cd.byte(I == 0 ? 0x00 : 0x01); // Continuation flag.
+      // Continuation and local flags.
+      Cd.byte((I == 0 ? 0x00 : 0x01) | (C.Local ? 0x04 : 0x00));
       // Selection in the high nibble; allocation 0 is the explicit base.
       Cd.byte(C.PickAny ? 0x10 : 0x00);
       Cd.byte(AlignCode);
@@ -1311,12 +1368,35 @@ void OMFObjectWriter::writeModuleEnd() {
   ModEnd.write(OS);
 }
 
+void OMFObjectWriter::writeAliases() {
+  Record Alias(OMF::ALIAS);
+  for (const MCSymbol *Sym : ComdatAliases) {
+    unsigned Idx;
+    uint64_t Offset;
+    if (!getComdatLocation(*Sym, Idx, Offset))
+      continue;
+    StringRef Target = Comdats[Idx].Sym->getName();
+    if (Target == Sym->getName())
+      continue;
+    if (Alias.size() + Sym->getName().size() + Target.size() + 2 >
+        OMF::MaxRecordData) {
+      Alias.write(OS);
+      Alias.clear();
+    }
+    Alias.name(Sym->getName());
+    Alias.name(Target);
+  }
+  if (Alias.size())
+    Alias.write(OS);
+}
+
 uint64_t OMFObjectWriter::writeObject() {
   uint64_t StartOffset = OS.tell();
   writeHeader();
   writeNamesAndSegments();
   writeExternals();
   writePublics();
+  writeAliases();
   writeExports();
   for (SegIdx K : segmentOrder())
     writeSegmentData(K);

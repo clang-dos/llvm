@@ -1372,7 +1372,12 @@ std::string Triple::normalize(StringRef Str, CanonicalForm Form) {
 
   if (OS == Triple::Win32) {
     Components.resize(4);
-    Components[2] = "windows";
+    // Keep a Windows version, as in i586-pc-windows4.0-gnu.
+    StringRef WindowsVersion;
+    if (Components[2].starts_with("windows"))
+      WindowsVersion = Components[2].drop_front(strlen("windows"));
+    if (WindowsVersion.empty() || !isDigit(WindowsVersion.front()))
+      Components[2] = "windows";
     if (Environment == UnknownEnvironment) {
       if (ObjectFormat == UnknownObjectFormat || ObjectFormat == Triple::COFF)
         Components[3] = "msvc";

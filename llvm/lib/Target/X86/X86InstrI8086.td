@@ -100,6 +100,23 @@ def JCC_8086 : PseudoI<(outs), (ins brtarget16:$dst, ccode:$cond), []>;
 let isCall = 1, Uses = [SP, SSP], isCodeGenOnly = 1 in
 def FARCALL16sym : PseudoI<(outs), (ins i16imm:$dst), []>,
                    Sched<[WriteJump]>;
+// A call to an interrupt function: PUSHF, then the far call.
+let isCall = 1, Uses = [SP, SSP], isCodeGenOnly = 1 in {
+def FARCALL16sym_INTR : PseudoI<(outs), (ins i16imm:$dst), []>,
+                        Sched<[WriteJump]>;
+let mayLoad = 1 in
+def FARCALL16m_INTR : PseudoI<(outs), (ins opaquemem:$dst), []>,
+                      Sched<[WriteJumpLd]>;
+}
+let Predicates = [In16BitABIMode] in {
+let AddedComplexity = 20 in {
+def : Pat<(X86farcall_intr (i16 tglobaladdr:$dst)),
+          (FARCALL16sym_INTR tglobaladdr:$dst)>;
+def : Pat<(X86farcall_intr (i16 texternalsym:$dst)),
+          (FARCALL16sym_INTR texternalsym:$dst)>;
+}
+def : Pat<(X86farcall_intr addr:$dst), (FARCALL16m_INTR addr:$dst)>;
+}
 let Predicates = [In16BitABIMode] in {
 let AddedComplexity = 20 in {
 def : Pat<(X86farcall (i16 tglobaladdr:$dst)), (FARCALL16sym tglobaladdr:$dst)>;

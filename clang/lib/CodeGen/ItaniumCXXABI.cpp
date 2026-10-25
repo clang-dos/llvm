@@ -623,6 +623,15 @@ static llvm::IntegerType *getMemFnPtrTy(CodeGenModule &CGM) {
   return CGM.PtrDiffTy;
 }
 
+/// The address space of a VTT, which is a C++ runtime global: they can have
+/// an address space of their own (i8086 far data).
+static LangAS getVTTAddressSpace(CodeGenModule &CGM) {
+  if (std::optional<unsigned> AS =
+          CGM.getTarget().getCXXRuntimeGlobalsAddressSpace())
+    return getLangASFromTargetAS(*AS);
+  return CGM.GetGlobalVarAddressSpace(nullptr);
+}
+
 /// The pointer type of functions loaded from vtables and member function
 /// pointers.
 static llvm::PointerType *getVirtualFnPtrTy(CodeGenModule &CGM) {
@@ -1937,7 +1946,7 @@ ItaniumCXXABI::buildStructorSignature(GlobalDecl GD,
   if ((isa<CXXConstructorDecl>(GD.getDecl()) ? GD.getCtorType() == Ctor_Base
                                              : GD.getDtorType() == Dtor_Base) &&
       cast<CXXMethodDecl>(GD.getDecl())->getParent()->getNumVBases() != 0) {
-    LangAS AS = CGM.GetGlobalVarAddressSpace(nullptr);
+    LangAS AS = getVTTAddressSpace(CGM);
     QualType Q = Context.getAddrSpaceQualType(Context.VoidPtrTy, AS);
     ArgTys.insert(ArgTys.begin() + 1,
                   Context.getPointerType(CanQualType::CreateUnsafe(Q)));
@@ -1973,7 +1982,7 @@ void ItaniumCXXABI::addImplicitStructorParams(CodeGenFunction &CGF,
     ASTContext &Context = getContext();
 
     // FIXME: avoid the fake decl
-    LangAS AS = CGM.GetGlobalVarAddressSpace(nullptr);
+    LangAS AS = getVTTAddressSpace(CGM);
     QualType Q = Context.getAddrSpaceQualType(Context.VoidPtrTy, AS);
     QualType T = Context.getPointerType(Q);
     auto *VTTDecl = ImplicitParamDecl::Create(
@@ -2022,7 +2031,7 @@ CGCXXABI::AddedStructorArgs ItaniumCXXABI::getImplicitConstructorArgs(
   // some targets.
   llvm::Value *VTT =
       CGF.GetVTTParameter(GlobalDecl(D, Type), ForVirtualBase, Delegating);
-  LangAS AS = CGM.GetGlobalVarAddressSpace(nullptr);
+  LangAS AS = getVTTAddressSpace(CGM);
   QualType Q = getContext().getAddrSpaceQualType(getContext().VoidPtrTy, AS);
   QualType VTTTy = getContext().getPointerType(Q);
   return AddedStructorArgs::prefix({{VTT, VTTTy}});
@@ -2732,8 +2741,12 @@ namespace {
     CallGuardAbort(llvm::GlobalVariable *Guard) : Guard(Guard) {}
 
     void Emit(CodeGenFunction &CGF, Flags flags) override {
-      CGF.EmitNounwindRuntimeCall(getGuardAbortFn(CGF.CGM, Guard->getType()),
-                                  Guard);
+      llvm::Value *Arg = Guard;
+      if (CGF.CGM.getTriple().getArch() == llvm::Triple::i8086)
+        Arg = CGF.Builder.CreateAddrSpaceCast(Guard, CGF.CGM.DefaultPtrTy);
+      CGF.EmitNounwindRuntimeCall(
+          getGuardAbortFn(CGF.CGM, cast<llvm::PointerType>(Arg->getType())),
+          Arg);
     }
   };
 }
@@ -2783,6 +2796,10 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
   llvm::PointerType *guardPtrTy = llvm::PointerType::get(
       CGF.CGM.getLLVMContext(),
       CGF.CGM.getDataLayout().getDefaultGlobalsAddressSpace());
+  // On i8086 the runtime takes the guard as a default pointer, which is far
+  // with far data, and the guard is near, in DGROUP.
+  if (CGM.getTriple().getArch() == llvm::Triple::i8086)
+    guardPtrTy = CGM.DefaultPtrTy;
 
   // Create the guard variable if we don't already have it (as we
   // might if we're double-emitting this function body).
@@ -2917,7 +2934,8 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
   if (threadsafe) {
     // Call __cxa_guard_acquire.
     llvm::Value *V
-      = CGF.EmitNounwindRuntimeCall(getGuardAcquireFn(CGM, guardPtrTy), guard);
+      = CGF.EmitNounwindRuntimeCall(getGuardAcquireFn(CGM, guardPtrTy),
+                                    Builder.CreateAddrSpaceCast(guard, guardPtrTy));
 
     llvm::BasicBlock *InitBlock = CGF.createBasicBlock("init");
 
@@ -2944,8 +2962,9 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
     CGF.PopCleanupBlock();
 
     // Call __cxa_guard_release.  This cannot throw.
-    CGF.EmitNounwindRuntimeCall(getGuardReleaseFn(CGM, guardPtrTy),
-                                guardAddr.emitRawPointer(CGF));
+    CGF.EmitNounwindRuntimeCall(
+        getGuardReleaseFn(CGM, guardPtrTy),
+        Builder.CreateAddrSpaceCast(guardAddr.emitRawPointer(CGF), guardPtrTy));
   } else if (D.isLocalVarDecl()) {
     // For local variables, store 1 into the first byte of the guard variable
     // after the object initialization completes so that initialization is
@@ -3892,6 +3911,16 @@ void ItaniumRTTIBuilder::BuildVTablePointer(const Type *Ty,
   }
 
   CGM.setDSOLocal(cast<llvm::GlobalValue>(VTable->stripPointerCasts()));
+
+  // On 16-bit DOS, where code is limited to 64 KiB, a type_info object refers
+  // to its class's vtable weakly. Only dynamic_cast and the exception catch
+  // code call type_info's virtual functions, and they refer to the vtables
+  // themselves, so a program that only has type_info objects (every C++
+  // program has some, from std::exception) does not link those functions.
+  if (CGM.getTriple().getArch() == llvm::Triple::i8086)
+    if (auto *GV = dyn_cast<llvm::GlobalVariable>(VTable->stripPointerCasts()))
+      if (GV->isDeclaration())
+        GV->setLinkage(llvm::GlobalValue::ExternalWeakLinkage);
 
   llvm::Type *PtrDiffTy =
       CGM.getTypes().ConvertType(CGM.getContext().getPointerDiffType());

@@ -34,6 +34,29 @@ public:
   bool unlock() { return true; }
 };
 
+#elif defined(_WIN32) && defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0600
+
+// Windows 2000 and XP have no SRW locks. The lock is held only briefly, and
+// a CRITICAL_SECTION would need a constructor for the global locks, so this
+// is a spin lock, shared or not.
+class _LIBUNWIND_HIDDEN RWMutex {
+public:
+  bool lock_shared() { return lock(); }
+  bool unlock_shared() { return unlock(); }
+  bool lock() {
+    for (unsigned spins = 0; InterlockedExchange(&_lock, 1) != 0; ++spins)
+      Sleep(spins < 16 ? 0 : 1); // 1 lets a lower-priority owner run
+    return true;
+  }
+  bool unlock() {
+    InterlockedExchange(&_lock, 0);
+    return true;
+  }
+
+private:
+  LONG volatile _lock = 0;
+};
+
 #elif defined(_WIN32)
 
 class _LIBUNWIND_HIDDEN RWMutex {

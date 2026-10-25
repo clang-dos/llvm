@@ -731,6 +731,7 @@ CXCallingConv clang_getFunctionTypeCallingConv(CXType X) {
       TCALLINGCONV(RISCVVLSCall_32768);
       TCALLINGCONV(RISCVVLSCall_65536);
     case CC_DeviceKernel:
+    case CC_I8086Interrupt:
       return CXCallingConv_Unexposed;
       break;
     }

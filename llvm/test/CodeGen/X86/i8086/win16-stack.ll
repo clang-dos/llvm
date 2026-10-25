@@ -1,9 +1,12 @@
 ; A 16-bit Windows DLL runs on its caller's stack, so SS is not DS. On
 ; win16, locals reached through BX, SI or DI get an SS override, far
 ; pointers to locals take SS as their segment, and a memcpy or memset of
-; the stack is a loop through a far pointer. On DOS, SS is DS.
+; the stack is a loop that addresses the locals through BP. On DOS, SS is
+; DS.
 ; RUN: llc -mtriple=i8086-pc-win16 -target-abi=small < %s | FileCheck %s --check-prefixes=CHECK,WIN
 ; RUN: llc -mtriple=i8086-pc-msdos -target-abi=small < %s | FileCheck %s --check-prefixes=CHECK,DOS
+; RUN: llc -mtriple=i8086-pc-win16 -target-abi=small -no-x86-call-frame-opt < %s | FileCheck %s --check-prefixes=NOPUSH,NOPUSH-WIN
+; RUN: llc -mtriple=i8086-pc-msdos -target-abi=small -no-x86-call-frame-opt < %s | FileCheck %s --check-prefixes=NOPUSH,NOPUSH-DOS
 
 declare void @use_far(ptr addrspace(2))
 declare void @use(ptr)
@@ -57,8 +60,8 @@ define void @farlocal() {
 
 ; CHECK-LABEL: _copy:
 ; WIN-NOT:     _memcpy
-; WIN:         movw %ss,
-; WIN:         movb %es:
+; WIN:         movb {{-?[0-9]+}}(%bp,
+; WIN:         movb %{{.*}}, {{-?[0-9]+}}(%bp,
 ; WIN-NOT:     _memcpy
 ; DOS:         callw _memcpy
 ; CHECK:       retw
@@ -86,7 +89,7 @@ define void @copy4(i1 %c) {
 
 ; CHECK-LABEL: _clear:
 ; WIN-NOT:     _memset
-; WIN:         movw %ss,
+; WIN:         movb $0, {{-?[0-9]+}}(%bp,
 ; DOS:         callw _memset
 ; CHECK:       retw
 define void @clear() {
@@ -121,15 +124,21 @@ define void @move(ptr %p) {
   ret void
 }
 
-; A struct passed by value is copied to the stack with SS.
+; A struct passed by value is pushed, or, when the arguments are not
+; pushed, copied to the stack with SS.
 %pair = type { ptr addrspace(2), i16 }
 declare void @takepair(ptr byval(%pair) align 2)
 
 ; CHECK-LABEL: _byval_copy:
-; CHECK:      movw %sp, %bx
-; WIN-NEXT:   movw %ax, %ss:4(%bx)
-; DOS-NEXT:   movw %ax, 4(%bx)
-; CHECK:      callw _takepair
+; CHECK:      pushw %ax
+; CHECK-NEXT: pushw %dx
+; CHECK-NEXT: pushw %cx
+; CHECK-NEXT: callw _takepair
+; NOPUSH-LABEL: _byval_copy:
+; NOPUSH:          movw %sp, %bx
+; NOPUSH-WIN-NEXT: movw %ax, %ss:4(%bx)
+; NOPUSH-DOS-NEXT: movw %ax, 4(%bx)
+; NOPUSH:          callw _takepair
 define void @byval_copy() noinline optnone {
   %p = alloca %pair, align 2
   %q = getelementptr inbounds %pair, ptr %p, i16 0, i32 1

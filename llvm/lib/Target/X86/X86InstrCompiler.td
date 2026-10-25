@@ -2155,6 +2155,8 @@ multiclass OneBitPats<RegisterClass rc, ValueType vt, Instruction btr,
                 (INSERT_SUBREG (vt (IMPLICIT_DEF)), GR8:$src2, sub_8bit))>;
 }
 
+// The 8086 and 286 have no BT instructions.
+let Predicates = [Has386] in
 defm : OneBitPats<GR16, i16, BTR16rr, BTS16rr, BTC16rr, shiftMask16>;
 defm : OneBitPats<GR32, i32, BTR32rr, BTS32rr, BTC32rr, shiftMask32>;
 defm : OneBitPats<GR64, i64, BTR64rr, BTS64rr, BTC64rr, shiftMask64>;

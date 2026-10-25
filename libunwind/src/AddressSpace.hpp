@@ -112,7 +112,9 @@ extern char __exidx_end;
 #elif defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND) && defined(_WIN32)
 
 #include <windows.h>
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT >= 0x0601
 #include <psapi.h>
+#endif
 
 #elif defined(_LIBUNWIND_USE_DL_ITERATE_PHDR) ||                               \
       defined(_LIBUNWIND_USE_DL_UNWIND_FIND_EXIDX)
@@ -557,6 +559,18 @@ inline bool LocalAddressSpace::findUnwindSections(
   if (info.arm_section && info.arm_section_length)
     return true;
 #elif defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND) && defined(_WIN32)
+#if defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0601
+  // Before Windows 7, EnumProcessModules is in psapi.dll, which Windows NT
+  // 4.0 and 9x do not ship. The module that holds the address is the
+  // allocation it is in.
+  HMODULE mods[1];
+  MEMORY_BASIC_INFORMATION mbi;
+  if (!VirtualQuery((LPCVOID)targetAddr, &mbi, sizeof(mbi)) ||
+      mbi.Type != MEM_IMAGE || !mbi.AllocationBase)
+    return false;
+  mods[0] = (HMODULE)mbi.AllocationBase;
+  DWORD needed = sizeof(mods);
+#else
   HMODULE mods[1024];
   HANDLE process = GetCurrentProcess();
   DWORD needed;
@@ -568,6 +582,7 @@ inline bool LocalAddressSpace::findUnwindSections(
     (void)err;
     return false;
   }
+#endif
 
   for (unsigned i = 0; i < (needed / sizeof(HMODULE)); i++) {
     PIMAGE_DOS_HEADER pidh = (PIMAGE_DOS_HEADER)mods[i];

@@ -668,7 +668,11 @@ FunctionPass *llvm::createX86CallFrameOptimizationLegacyPass() {
 }
 
 bool X86CallFrameOptimizationLegacy::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(MF.getFunction()))
+  // The 8086 cannot address through SP, so without pushes each outgoing
+  // argument is stored through a copy of SP. Push them in optnone functions
+  // (all of them at -O0) too.
+  if (!MF.getTarget().getTargetTriple().isX86_16() &&
+      skipFunction(MF.getFunction()))
     return false;
   X86CallFrameOptimizationImpl Impl;
   return Impl.runOnMachineFunction(MF);

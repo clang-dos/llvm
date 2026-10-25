@@ -131,3 +131,14 @@ int main(void) { return 0; }
 // RUN: not %clang --target=x86_64-linux-gnu -mwindows-prologue=all -### -c %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=WINPRO-X64
 // WINPRO-X64: error: unsupported option '-mwindows-prologue=' for target 'x86_64-linux-gnu'
+
+// Each function and variable goes in its own section, so that the linker's
+// option eliminate can drop the unused ones.
+// RUN: %clang --target=i8086-pc-msdos -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=SECTIONS
+// RUN: %clang --target=i8086-pc-msdos -fno-function-sections \
+// RUN:   -fno-data-sections -### -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NOSECTIONS
+// SECTIONS: "-ffunction-sections" "-fdata-sections"
+// NOSECTIONS-NOT: "-ffunction-sections"
+// NOSECTIONS-NOT: "-fdata-sections"

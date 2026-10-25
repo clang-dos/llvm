@@ -10,7 +10,7 @@
 // module is parsed when the file is opened.
 //
 // Supported records: THEADR, LHEADR, LNAMES, LLNAMES, SEGDEF, GRPDEF,
-// EXTDEF, LEXTDEF, CEXTDEF, COMDEF, LCOMDEF, PUBDEF, LPUBDEF, LEDATA,
+// EXTDEF, LEXTDEF, CEXTDEF, COMDEF, LCOMDEF, PUBDEF, LPUBDEF, ALIAS, LEDATA,
 // LIDATA, FIXUPP (with threads), COMDAT and MODEND. COMDATs define symbols
 // but their data and fixups are not kept. Others (COMENT, LINNUM, ...) are
 // skipped.
@@ -158,6 +158,7 @@ Error OMFObjectFile::parse() {
   SmallVector<StringRef, 32> Names = {StringRef()}; // Indices start at 1.
   SmallVector<StringRef, 4> Groups = {StringRef()};
   SmallVector<int32_t, 32> Externals = {-1}; // External index to symbol.
+  SmallVector<std::pair<StringRef, StringRef>, 4> Aliases;
   int32_t LastDataSeg = -1;
   uint32_t LastDataOffset = 0;
   // Fixups after a COMDAT record apply to its data, which this reader does
@@ -424,6 +425,15 @@ Error OMFObjectFile::parse() {
       }
       break;
 
+    case OMF::ALIAS:
+      // An alias defines its name as another symbol, here or elsewhere.
+      while (R.more()) {
+        StringRef Name = R.name();
+        StringRef Target = R.name();
+        Aliases.push_back({Name, Target});
+      }
+      break;
+
     case OMF::MODEND:
       SeenEnd = true;
       break;
@@ -438,6 +448,23 @@ Error OMFObjectFile::parse() {
   }
   if (!SeenEnd)
     return malformed("no MODEND record");
+
+  // An alias of a symbol this module defines is defined where it is, and
+  // an alias of another an absolute symbol, which a linker resolves by
+  // name.
+  for (auto [Name, Target] : Aliases) {
+    Symbol A = {Name, SK_Absolute, false, -1, 0, 0};
+    for (const Symbol &T : Symbols)
+      if (T.Name == Target && !T.Local &&
+          (T.Kind == SK_Defined || T.Kind == SK_Absolute)) {
+        A.Kind = T.Kind;
+        A.Segment = T.Segment;
+        A.Value = T.Value;
+        A.FromComdat = T.FromComdat;
+        break;
+      }
+    Symbols.push_back(A);
+  }
 
   StringSet<> ComdatNames;
   for (const Symbol &Sym : Symbols)

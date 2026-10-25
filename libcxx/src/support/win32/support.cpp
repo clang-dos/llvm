@@ -77,6 +77,29 @@ size_t mbsnrtowcs(wchar_t* __restrict dst,
 // dst_size_bytes bytes in size.
 // Returns >= 0: the number of bytes in the sequence
 // converted from *src, excluding the null terminator.
+#if defined(__MINGW32__) && __MSVCRT_VERSION__ < 0x0800 && _WIN32_WINNT < 0x0600
+// msvcrt.dll has wcrtomb_s only from Vista: convert into a buffer and copy
+// what fits, as wcrtomb_s does.
+#  include <cerrno>
+#  include <climits>
+static errno_t __libcpp_wcrtomb_s(size_t* size, char* dst, size_t dst_size, wchar_t c, mbstate_t* ps) {
+  char buf[MB_LEN_MAX];
+  size_t n = std::wcrtomb(buf, c, ps);
+  if (n == static_cast<size_t>(-1)) {
+    *size = static_cast<size_t>(-1);
+    return EILSEQ;
+  }
+  if (dst) {
+    if (n > dst_size)
+      return ERANGE;
+    std::memcpy(dst, buf, n);
+  }
+  *size = n;
+  return 0;
+}
+#  define wcrtomb_s __libcpp_wcrtomb_s
+#endif
+
 // Returns size_t(-1) if an error occurs, also sets errno.
 // If dst is NULL dst_size_bytes is ignored and no bytes are copied to dst
 // and no "out" parameters are updated.

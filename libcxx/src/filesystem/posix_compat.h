@@ -123,6 +123,94 @@ namespace detail {
 
 #  define O_NONBLOCK 0
 
+#  if _WIN32_WINNT < 0x0600
+// Windows 2000 and XP have no GetFileInformationByHandleEx,
+// SetFileInformationByHandle, CreateSymbolicLinkW or
+// GetFinalPathNameByHandleW. The first two are NtQueryInformationFile and
+// NtSetInformationFile in ntdll, with the same structures, as in Microsoft's
+// FileExtd library for XP. Symbolic links to files came with Vista, so
+// creating one fails there, and realpath resolves only the path's text.
+typedef struct {
+  LARGE_INTEGER CreationTime;
+  LARGE_INTEGER LastAccessTime;
+  LARGE_INTEGER LastWriteTime;
+  LARGE_INTEGER ChangeTime;
+  DWORD FileAttributes;
+} FILE_BASIC_INFO;
+typedef struct {
+  LARGE_INTEGER AllocationSize;
+  LARGE_INTEGER EndOfFile;
+  DWORD NumberOfLinks;
+  BOOLEAN DeletePending;
+  BOOLEAN Directory;
+} FILE_STANDARD_INFO;
+typedef struct {
+  DWORD FileAttributes;
+  DWORD ReparseTag;
+} FILE_ATTRIBUTE_TAG_INFO;
+typedef struct {
+  BOOLEAN DeleteFile;
+} FILE_DISPOSITION_INFO;
+
+// The NT information class of each FILE_INFO_BY_HANDLE_CLASS used here.
+enum : int {
+  FileBasicInfo        = 4,
+  FileStandardInfo     = 5,
+  FileDispositionInfo  = 13,
+  FileAttributeTagInfo = 35,
+};
+
+#    define SYMBOLIC_LINK_FLAG_DIRECTORY 0x1
+#    define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
+#    define FILE_NAME_NORMALIZED 0x0
+#    define VOLUME_NAME_DOS 0x0
+
+inline FARPROC nt_function(const char* name) { return GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name); }
+
+inline BOOL nt_file_information(bool set, HANDLE h, int cls, void* buf, DWORD size) {
+  struct {
+    union {
+      LONG Status;
+      PVOID Pointer;
+    };
+    ULONG_PTR Information;
+  } iosb;
+  using info_t       = LONG(WINAPI*)(HANDLE, void*, PVOID, ULONG, int);
+  using to_dos_t     = ULONG(WINAPI*)(LONG);
+  static auto query  = reinterpret_cast<info_t>(nt_function("NtQueryInformationFile"));
+  static auto update = reinterpret_cast<info_t>(nt_function("NtSetInformationFile"));
+  static auto to_dos = reinterpret_cast<to_dos_t>(nt_function("RtlNtStatusToDosError"));
+  info_t f           = set ? update : query;
+  if (!f || !to_dos) {
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+  }
+  LONG status = f(h, &iosb, buf, size, cls);
+  if (status < 0) {
+    SetLastError(to_dos(status));
+    return FALSE;
+  }
+  return TRUE;
+}
+
+inline BOOL GetFileInformationByHandleEx(HANDLE h, int cls, void* buf, DWORD size) {
+  return nt_file_information(false, h, cls, buf, size);
+}
+
+inline BOOL SetFileInformationByHandle(HANDLE h, int cls, void* buf, DWORD size) {
+  return nt_file_information(true, h, cls, buf, size);
+}
+
+inline BOOLEAN CreateSymbolicLinkW(const wchar_t* link, const wchar_t* target, DWORD flags) {
+  using create_t = BOOLEAN(WINAPI*)(const wchar_t*, const wchar_t*, DWORD);
+  static auto f  = reinterpret_cast<create_t>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateSymbolicLinkW"));
+  if (f)
+    return f(link, target, flags);
+  SetLastError(ERROR_NOT_SUPPORTED);
+  return FALSE;
+}
+#  endif // _WIN32_WINNT < 0x0600
+
 class WinHandle {
 public:
   WinHandle(const wchar_t* p, DWORD access, DWORD flags) {
@@ -341,6 +429,18 @@ inline wchar_t* realpath(const wchar_t* path, [[maybe_unused]] wchar_t* resolved
   }
   size_t buff_size = MAX_PATH + 10;
   std::unique_ptr<wchar_t, decltype(&::free)> buff(static_cast<wchar_t*>(malloc(buff_size * sizeof(wchar_t))), &::free);
+#  if _WIN32_WINNT < 0x0600
+  // GetFinalPathNameByHandleW is from Vista; before it, the full path of the
+  // name stands in (the file exists: it was opened above).
+  using final_path_t = DWORD(WINAPI*)(HANDLE, LPWSTR, DWORD, DWORD);
+  static auto final_path =
+      reinterpret_cast<final_path_t>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetFinalPathNameByHandleW"));
+  auto GetFinalPathNameByHandleW = [&](HANDLE handle, LPWSTR out, DWORD size, DWORD flags) -> DWORD {
+    if (final_path)
+      return final_path(handle, out, size, flags);
+    return GetFullPathNameW(path, size, out, nullptr);
+  };
+#  endif
   DWORD retval = GetFinalPathNameByHandleW(h, buff.get(), buff_size, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
   if (retval > buff_size) {
     buff_size = retval;
@@ -475,7 +575,9 @@ using ::stat;
 using ::statvfs;
 using ::truncate;
 
-#  define O_BINARY 0
+#  ifndef O_BINARY // DOS has one, for untranslated reads and writes.
+#    define O_BINARY 0
+#  endif
 
 using StatVFS = struct statvfs;
 using ModeT   = ::mode_t;

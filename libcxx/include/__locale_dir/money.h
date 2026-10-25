@@ -867,6 +867,18 @@ extern template class _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS money_put<wchar_t>;
 #  endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
+// The facets of the classic locale.
+_LIBCPP_CLASSIC_FACET(moneypunct<char, false>)
+_LIBCPP_CLASSIC_FACET(moneypunct<char, true>)
+_LIBCPP_CLASSIC_FACET(money_get<char>)
+_LIBCPP_CLASSIC_FACET(money_put<char>)
+#  if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_CLASSIC_FACET(moneypunct<wchar_t, false>)
+_LIBCPP_CLASSIC_FACET(moneypunct<wchar_t, true>)
+_LIBCPP_CLASSIC_FACET(money_get<wchar_t>)
+_LIBCPP_CLASSIC_FACET(money_put<wchar_t>)
+#  endif
+
 _LIBCPP_END_NAMESPACE_STD
 
 _LIBCPP_POP_MACROS

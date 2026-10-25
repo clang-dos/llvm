@@ -16689,6 +16689,29 @@ Decl *Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Decl *D,
     CheckParmsForFunctionDef(FD->parameters(),
                              /*CheckParameterNames=*/true);
 
+  // An i8086 interrupt function's parameters are the registers it saved: a
+  // structure of all of them (Open Watcom's union INTPACK, 30 bytes), or
+  // Microsoft C's es, ds, di, si, bp, sp, bx, dx, cx, ax, ip, cs and flags.
+  if (const auto *FT = FD->getType()->getAs<FunctionType>();
+      FT && FT->getCallConv() == CC_I8086Interrupt) {
+    if (!FD->getReturnType()->isVoidType())
+      Diag(FD->getLocation(), diag::err_i8086_interrupt_prototype) << 0;
+    bool Valid = true;
+    unsigned NumParams = FD->getNumParams();
+    for (const ParmVarDecl *P : FD->parameters()) {
+      QualType T = P->getType();
+      if (T->isDependentType() || T->isIncompleteType())
+        continue;
+      uint64_t Size = Context.getTypeSize(T);
+      if (T->isRecordType())
+        Valid &= NumParams == 1 && Size <= 30 * 8;
+      else
+        Valid &= T->isIntegralOrEnumerationType() && Size <= 16;
+    }
+    if (!Valid || NumParams > 13)
+      Diag(FD->getLocation(), diag::err_i8086_interrupt_prototype) << 1;
+  }
+
   // Add non-parameter declarations already in the function to the current
   // scope.
   if (FnBodyScope) {

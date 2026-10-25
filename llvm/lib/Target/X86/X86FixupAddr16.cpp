@@ -21,8 +21,9 @@
 //
 // On 16-bit Windows, a DLL runs on its caller's stack, so SS is not DS. An
 // access to a local variable through BX, SI or DI (which use DS) gets an SS
-// segment override. Accesses through BP already use SS, so an SS override on
-// a frame index is removed.
+// segment override. The same holds in an interrupt function, which runs on
+// the stack of the program it interrupted. Accesses through BP already use
+// SS, so an SS override on a frame index is removed.
 //
 // After register allocation, a second pass clears the renamable flag on these
 // registers, so that later passes such as MachineCopyPropagation, which only
@@ -106,6 +107,65 @@ INITIALIZE_PASS(X86ProtectAddr16Legacy, "x86-protect-addr16",
 
 FunctionPass *llvm::createX86ProtectAddr16LegacyPass() {
   return new X86ProtectAddr16Legacy();
+}
+
+/// Removes jumps to the next block, which -O0 leaves after every block, as
+/// no branch folding or block placement runs. Code is limited to 64 KiB.
+static bool removeFallthroughJumps(MachineFunction &MF) {
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  bool Changed = false;
+  for (MachineBasicBlock &MBB : MF) {
+    MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
+    SmallVector<MachineOperand, 4> Cond;
+    if (TII->analyzeBranch(MBB, TBB, FBB, Cond) || !TBB)
+      continue;
+    if (Cond.empty()) {
+      // An unconditional jump.
+      if (!MBB.isLayoutSuccessor(TBB))
+        continue;
+      TII->removeBranch(MBB);
+    } else if (FBB && MBB.isLayoutSuccessor(FBB)) {
+      // A conditional jump and a jump to the next block.
+      TII->removeBranch(MBB);
+      TII->insertBranch(MBB, TBB, nullptr, Cond, DebugLoc());
+    } else if (FBB && MBB.isLayoutSuccessor(TBB) &&
+               !TII->reverseBranchCondition(Cond)) {
+      // A conditional jump to the next block and a jump elsewhere.
+      TII->removeBranch(MBB);
+      TII->insertBranch(MBB, FBB, nullptr, Cond, DebugLoc());
+    } else {
+      continue;
+    }
+    Changed = true;
+  }
+  return Changed;
+}
+
+namespace {
+class X86RemoveFallthroughJumpsLegacy : public MachineFunctionPass {
+public:
+  static char ID;
+  X86RemoveFallthroughJumpsLegacy() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    if (!MF.getSubtarget<X86Subtarget>().isTarget16BitABI())
+      return false;
+    return removeFallthroughJumps(MF);
+  }
+
+  StringRef getPassName() const override {
+    return "X86 16-bit Fallthrough Jump Removal";
+  }
+};
+} // end anonymous namespace
+
+char X86RemoveFallthroughJumpsLegacy::ID = 0;
+
+INITIALIZE_PASS(X86RemoveFallthroughJumpsLegacy, "x86-remove-fallthrough-jumps",
+                "X86 16-bit Fallthrough Jump Removal", false, false)
+
+FunctionPass *llvm::createX86RemoveFallthroughJumpsLegacyPass() {
+  return new X86RemoveFallthroughJumpsLegacy();
 }
 
 bool X86ProtectAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
@@ -282,7 +342,10 @@ bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
   TII = ST.getInstrInfo();
   MRI = &MF.getRegInfo();
   bool Changed = false;
-  bool SeparateStack = ST.getTargetTriple().isOSWin16();
+  // An interrupt function runs on the stack of the program it interrupted.
+  bool SeparateStack =
+      ST.getTargetTriple().isOSWin16() ||
+      MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
 
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
@@ -298,5 +361,27 @@ bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
         Changed |= addStackSegment(MI, MemOp);
     }
   }
+
+  // A far pointer to a local copies SS into ES, which is left unused once
+  // removeStackSegment has its loads and stores go through BP. Without
+  // optimization nothing else removes these copies.
+  bool Removed;
+  do {
+    Removed = false;
+    for (MachineBasicBlock &MBB : MF)
+      for (MachineInstr &MI : llvm::make_early_inc_range(llvm::reverse(MBB)))
+        if (MI.isCopy() && MI.getOperand(0).getReg().isVirtual() &&
+            MRI->use_nodbg_empty(MI.getOperand(0).getReg())) {
+          Register Src = MI.getOperand(1).getReg();
+          if (Src.isPhysical() && !X86::SEGMENT_REGRegClass.contains(Src))
+            continue;
+          for (MachineOperand &MO : llvm::make_early_inc_range(
+                   MRI->reg_operands(MI.getOperand(0).getReg())))
+            if (MO.isDebug())
+              MO.setReg(Register());
+          MI.eraseFromParent();
+          Removed = Changed = true;
+        }
+  } while (Removed);
   return Changed;
 }

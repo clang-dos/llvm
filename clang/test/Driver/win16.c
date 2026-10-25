@@ -70,3 +70,41 @@
 // RUN:   -fuse-ld=wlink -### %s %S/Inputs/win16_res/app.res \
 // RUN:   %S/Inputs/win16_res/more.res 2>&1 | FileCheck %s --check-prefix=TWORES
 // TWORES: error: a 16-bit Windows program or DLL takes one .res file
+
+// Without a Windows version, the program is for protected mode, as Windows
+// 3.1 and later run it: Windows 3.0 refuses to run it in real mode.
+// RUN: %clang --target=i8086-pc-win16 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -### %s 2>&1 | FileCheck %s --check-prefix=PROT
+// PROT:     "{{.*}}wlink" "format" "windows"
+// PROT-NOT: "version=
+// PROT-NOT: "segment"
+// PROT-SAME: "option" "protmode"
+
+// Windows 3.1 and later: the expected version in the header.
+// RUN: %clang --target=i8086-pc-win163.10 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -### %s 2>&1 | FileCheck %s --check-prefix=WIN31
+// WIN31:      "-cc1" "-triple" "i8086-pc-win163.10"
+// WIN31:      "{{.*}}wlink" "format" "windows"
+// WIN31-SAME: "option" "version=3.10"
+// WIN31-NOT:  "segment"
+// WIN31-SAME: "option" "protmode"
+
+// Windows 1.x, 2.x and 3.0 in real mode move segments in memory: the code is
+// fixed, and so is the data in the far data models and DLLs.
+// RUN: %clang --target=i8086-pc-win162.03 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -### %s 2>&1 | FileCheck %s --check-prefix=WIN2
+// WIN2:      "{{.*}}wlink" "format" "windows"
+// WIN2-SAME: "option" "version=2.03" "segment" "type" "code" "fixed"
+// WIN2-NOT:  "data"
+// WIN2-NOT:  "protmode"
+// RUN: %clang --target=i8086-pc-win163.0 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -mcmodel=large -### %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WIN30
+// WIN30:      "{{.*}}wlink" "format" "windows"
+// WIN30-SAME: "option" "version=3.00" "segment" "type" "code" "fixed" "segment" "type" "data" "fixed"
+// WIN30-NOT:  "protmode"
+// RUN: %clang --target=i8086-pc-win161.01 --sysroot=%S/Inputs/msdos_tree \
+// RUN:   -fuse-ld=wlink -shared -mcmodel=medium -### %s -o MYLIB.DLL 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WIN1
+// WIN1:      "format" "windows" "dll"
+// WIN1-SAME: "option" "version=1.01" "segment" "type" "code" "fixed" "segment" "type" "data" "fixed"

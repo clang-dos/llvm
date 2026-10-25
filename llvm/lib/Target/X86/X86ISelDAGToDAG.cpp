@@ -3276,6 +3276,7 @@ bool X86DAGToDAGISel::selectAddr(SDNode *Parent, SDValue N, SDValue &Base,
       Parent->getOpcode() != ISD::INTRINSIC_VOID && // nontemporal stores
       Parent->getOpcode() != X86ISD::TLSCALL && // Fixme
       Parent->getOpcode() != X86ISD::FARCALL && // through a far pointer
+      Parent->getOpcode() != X86ISD::FARCALL_INTR &&
       Parent->getOpcode() != X86ISD::ENQCMD && // Fixme
       Parent->getOpcode() != X86ISD::ENQCMDS && // Fixme
       Parent->getOpcode() != X86ISD::EH_SJLJ_SETJMP && // setjmp
@@ -6201,10 +6202,19 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     unsigned Opc, MOpc;
     unsigned LoReg, HiReg;
     bool IsSigned = Opcode == ISD::SMUL_LOHI;
-    bool UseMULX = !IsSigned && Subtarget->hasBMI2() && NVT != MVT::i16;
+    bool UseMULX = !IsSigned && Subtarget->hasBMI2() && NVT != MVT::i16 &&
+                   NVT != MVT::i8;
     bool UseMULXHi = UseMULX && SDValue(Node, 0).use_empty();
     switch (NVT.SimpleTy) {
     default: llvm_unreachable("Unsupported VT!");
+    case MVT::i8:
+      // Before the 80386 there is no 16-bit multiply by an immediate, so a
+      // byte divided by a constant multiplies AL into AX.
+      Opc = IsSigned ? X86::IMUL8r : X86::MUL8r;
+      MOpc = IsSigned ? X86::IMUL8m : X86::MUL8m;
+      LoReg = X86::AL;
+      HiReg = X86::AH;
+      break;
     case MVT::i16:
       // Before the 80386 this is the only 16-bit multiply.
       Opc = IsSigned ? X86::IMUL16r : X86::MUL16r;

@@ -309,6 +309,18 @@ template <class _CharT>
 }
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
+// The facets of the classic locale.
+_LIBCPP_CLASSIC_FACET(ctype<char>)
+#  if _LIBCPP_HAS_WIDE_CHARACTERS
+_LIBCPP_CLASSIC_FACET(ctype<wchar_t>)
+#  endif
+#  if _LIBCPP_LAZY_CLASSIC_FACETS
+template <>
+inline _LIBCPP_HIDE_FROM_ABI locale::facet* __make_classic_facet<ctype<char> >() {
+  return new ctype<char>(nullptr, false, 1);
+}
+#  endif
+
 _LIBCPP_END_NAMESPACE_STD
 
 #endif // _LIBCPP_HAS_LOCALIZATION

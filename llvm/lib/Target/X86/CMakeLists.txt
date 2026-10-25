@@ -86,6 +86,8 @@ set(sources
   X86OptimizeLEAs.cpp
   X86PadShortFunction.cpp
   X86PartialReduction.cpp
+  X86I8086PrintfVariants.cpp
+  X86I8086InterruptArgs.cpp
   X86HugePointers.cpp
   X86RegisterInfo.cpp
   X86ReturnThunks.cpp

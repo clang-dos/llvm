@@ -261,7 +261,9 @@ void* __aligned_malloc_with_fallback(size_t size) {
 #if defined(_WIN32)
   if (void* dest = std::__libcpp_aligned_alloc(alignof(__aligned_type), size))
     return dest;
-#elif !_LIBCPP_HAS_ALIGNED_ALLOCATION
+#elif !_LIBCPP_HAS_ALIGNED_ALLOCATION || defined(__I86__)
+  // The 8086 has no alignment requirements, so malloc serves here: aligned
+  // allocation would link memalign and its bookkeeping for nothing.
   if (void* dest = ::malloc(size))
     return dest;
 #else

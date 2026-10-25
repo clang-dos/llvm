@@ -3525,6 +3525,17 @@ TEST(TripleTest, NormalizeWindows) {
   EXPECT_EQ("i686-pc-windows-cygnus", Triple::normalize("i686-pc-msys"));
   EXPECT_EQ("i686-unknown-windows-cygnus", Triple::normalize("i686-msys"));
 
+  // A Windows version stays.
+  EXPECT_EQ("i586-pc-windows4.0-gnu",
+            Triple::normalize("i586-pc-windows4.0-gnu"));
+  EXPECT_EQ("i486-pc-windows4.10-msvc",
+            Triple::normalize("i486-pc-windows4.10"));
+  EXPECT_EQ("i386-unknown-windows4.0-gnu",
+            Triple::normalize("i386-windows4.0-gnu"));
+  EXPECT_EQ(VersionTuple(4, 90),
+            Triple("i586-pc-windows4.90-gnu").getOSVersion());
+  EXPECT_EQ(VersionTuple(), Triple("i686-pc-windows-gnu").getOSVersion());
+
   EXPECT_EQ("x86_64-pc-windows-msvc", Triple::normalize("x86_64-pc-win32"));
   EXPECT_EQ("x86_64-unknown-windows-msvc", Triple::normalize("x86_64-win32"));
   EXPECT_EQ("x86_64-pc-windows-gnu", Triple::normalize("x86_64-pc-mingw32"));

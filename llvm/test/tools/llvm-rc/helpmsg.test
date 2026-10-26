@@ -20,6 +20,7 @@
 ; CHECK-NEXT:    /showIncludes Print cl.exe-style include information to stderr.
 ; CHECK-NEXT:    /U <value>  Undefine a symbol for the C preprocessor.
 ; CHECK-NEXT:    /V          Be verbose.
+; CHECK-NEXT:    /win16-version <value> The oldest Windows the 16-bit .res file is for, such as 2.03 or 3.0 (default 3.10). Implies -win16.
 ; CHECK-NEXT:    /win16      Write a 16-bit Windows .res file, for NE programs and DLLs.
 ; CHECK-NEXT:    /X          Ignore 'include' variable.
 ; CHECK-NEXT:    /Y          Suppress warnings on duplicate resource IDs.

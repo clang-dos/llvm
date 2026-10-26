@@ -1,7 +1,9 @@
 // RUN: %clang_cc1 -triple i8086-unknown-unknown -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,SMALL --implicit-check-not=__i386__ --implicit-check-not=__MSDOS__
 // RUN: %clang_cc1 -triple i8086-unknown-msdos -target-abi tiny -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,TINY,DOS --implicit-check-not=__i386__
 // RUN: %clang_cc1 -triple i8086-unknown-msdos -target-cpu i286 -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,I286
-// RUN: %clang_cc1 -triple i8086-pc-win16 -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,SMALL,WIN16 --implicit-check-not=__MSDOS__ --implicit-check-not=__DOS__
+// RUN: %clang_cc1 -triple i8086-pc-win16 -E -dM < /dev/null | FileCheck %s --check-prefixes=CHECK,SMALL,WIN16,WIN31 --implicit-check-not=__MSDOS__ --implicit-check-not=__DOS__
+// RUN: %clang_cc1 -triple i8086-pc-win162.03 -E -dM < /dev/null | FileCheck %s --check-prefixes=WIN2
+// RUN: %clang_cc1 -triple i8086-pc-win163.0 -E -dM < /dev/null | FileCheck %s --check-prefixes=WIN30
 
 // CHECK-DAG: #define _M_I86 1
 // I286-DAG: #define _M_I286 1
@@ -15,6 +17,9 @@
 // DOS-DAG: #define __MSDOS__ 1
 // WIN16-DAG: #define __WINDOWS__ 1
 // WIN16-DAG: #define _WINDOWS 1
+// WIN31-DAG: #define __WIN16_VERSION__ 0x030A
+// WIN2: #define __WIN16_VERSION__ 0x0203
+// WIN30: #define __WIN16_VERSION__ 0x0300
 // SMALL-DAG: #define __SMALL__ 1
 // CHECK-DAG: #define __SIZEOF_POINTER__ 2
 // TINY-DAG: #define __TINY__ 1

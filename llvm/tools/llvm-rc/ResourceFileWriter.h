@@ -43,6 +43,10 @@ struct WriterParams {
   int CodePage = CpAcp;               // The codepage for interpreting characters.
   bool ShowIncludes = false;          // Report resource-file dependencies.
   bool Win16 = false;                 // Write the 16-bit Windows format.
+  // The oldest Windows a 16-bit .res file is for, as 0xMMmm (0x0300 for
+  // Windows 3.0). Windows 1.x and 2.x take an older menu format and have
+  // no 3.x-format icons, cursors or bitmaps.
+  unsigned Win16Version = 0x030A;
 };
 
 class ResourceFileWriter : public Visitor {
@@ -140,6 +144,8 @@ private:
   // BitmapResource
   Error visitBitmapResource(const RCResource *) override;
   Error writeBitmapBody(const RCResource *);
+  Error writeOldPictureBody(const RCResource *);
+  bool isOldPictureFormat() const;
 
   // CursorResource and IconResource
   Error visitIconOrCursorResource(const RCResource *);

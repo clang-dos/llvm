@@ -14,6 +14,7 @@
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/TargetBuiltins.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/TargetParser/X86TargetParser.h"
@@ -2016,5 +2017,13 @@ void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
   if (getTriple().isOSWin16()) {
     Builder.defineMacro("__WINDOWS__");
     Builder.defineMacro("_WINDOWS");
+    // The oldest Windows the program is for, from the triple
+    // (i8086-pc-win162.03 is 0x0203), as WINVER spells it. Windows 3.1 by
+    // default.
+    VersionTuple V = getTriple().getOSVersion();
+    unsigned Ver =
+        V.getMajor() ? (V.getMajor() << 8) | V.getMinor().value_or(0) : 0x030A;
+    Builder.defineMacro("__WIN16_VERSION__",
+                        "0x" + llvm::utohexstr(Ver, false, 4));
   }
 }

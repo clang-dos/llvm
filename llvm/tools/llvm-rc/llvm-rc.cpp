@@ -415,6 +415,9 @@ RcOptions parseWindresOptions(ArrayRef<const char *> ArgsArr,
   // no COFF form.
   if (Triple(Opts.Triple).isOSWin16()) {
     Opts.Params.Win16 = true;
+    VersionTuple V = Triple(Opts.Triple).getOSVersion();
+    if (V.getMajor())
+      Opts.Params.Win16Version = (V.getMajor() << 8) | V.getMinor().value_or(0);
     if (Opts.OutputFormat == Coff)
       fatalError("16-bit Windows resources have no COFF form; write a .res "
                  "file");
@@ -547,9 +550,18 @@ RcOptions parseRcOptions(ArrayRef<const char *> ArgsArr,
       fatalError("Invalid code page: " +
                  InputArgs.getLastArgValue(OPT_codepage));
   }
-  if (InputArgs.hasArg(OPT_win16)) {
+  if (InputArgs.hasArg(OPT_win16) || InputArgs.hasArg(OPT_win16_version)) {
     Opts.Params.Win16 = true;
     Opts.Triple = "i8086-pc-win16";
+  }
+  if (InputArgs.hasArg(OPT_win16_version)) {
+    StringRef Value = InputArgs.getLastArgValue(OPT_win16_version);
+    VersionTuple V;
+    if (V.tryParse(Value) || V.getMajor() < 1 || V.getMajor() > 3 ||
+        V.getMinor().value_or(0) > 99 || V.getSubminor())
+      fatalError("Invalid 16-bit Windows version: " + Value);
+    Opts.Params.Win16Version = (V.getMajor() << 8) | V.getMinor().value_or(0);
+    Opts.Triple += Value.str();
   }
   Opts.IsDryRun = InputArgs.hasArg(OPT_dry_run);
   auto OutArgsInfo = InputArgs.getAllArgValues(OPT_fileout);

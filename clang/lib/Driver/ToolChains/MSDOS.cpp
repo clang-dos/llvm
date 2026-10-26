@@ -293,9 +293,22 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         CmdArgs.push_back(quoteName(Args, *Path));
       }
     // The Windows API: import directives for KERNEL, USER and GDI. The
-    // linker keeps only the imports that are used.
+    // linker keeps only the imports that are used. A program for Windows
+    // 1.x, 2.x or 3.0 gets the functions that version has, so that it
+    // cannot call one that came later (it would then fail to load), and
+    // gets them where that version has them.
     if (Win16) {
-      std::string Imports = TC.GetFilePath("windows.lnk");
+      VersionTuple Version = TC.getTriple().getOSVersion();
+      const char *List = "windows.lnk";
+      if (!Version.empty() && Version < VersionTuple(2))
+        List = "windows100.lnk";
+      else if (!Version.empty() && Version < VersionTuple(3))
+        List = "windows200.lnk";
+      else if (!Version.empty() && Version < VersionTuple(3, 10))
+        List = "windows300.lnk";
+      std::string Imports = TC.GetFilePath(List);
+      if (!llvm::sys::fs::exists(Imports))
+        Imports = TC.GetFilePath("windows.lnk");
       if (llvm::sys::fs::exists(Imports))
         CmdArgs.push_back(Args.MakeArgString("@" + Imports));
     }

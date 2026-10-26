@@ -40,6 +40,9 @@ def codepage : JS<"C", "Set the codepage used for input strings.">;
 
 def win16 : F<"win16", "Write a 16-bit Windows .res file, for NE "
                       "programs and DLLs.">;
+def win16_version : S<"win16-version", "The oldest Windows the 16-bit .res "
+                      "file is for, such as 2.03 or 3.0 (default 3.10). "
+                      "Implies -win16.">;
 
 def dry_run : F<"dry-run", "Don't compile the input; only try to parse it.">;
 

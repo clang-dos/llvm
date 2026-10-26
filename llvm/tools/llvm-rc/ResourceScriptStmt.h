@@ -428,6 +428,9 @@ public:
   raw_ostream &log(raw_ostream &) const override;
 
   Twine getResourceTypeName() const override { return "CURSOR"; }
+  // As one resource, which Windows 1.x and 2.x take; Windows 3.x and later
+  // take a group (SingleIconCursorResource and IconCursorGroupResource).
+  IntOrString getResourceType() const override { return RkSingleCursor; }
   static uint16_t getDefaultMemoryFlags() { return MfDiscardable | MfMoveable; }
   Error visit(Visitor *V) const override {
     return V->visitCursorResource(this);
@@ -450,6 +453,8 @@ public:
   raw_ostream &log(raw_ostream &) const override;
 
   Twine getResourceTypeName() const override { return "ICON"; }
+  // As one resource, as for CursorResource.
+  IntOrString getResourceType() const override { return RkSingleIcon; }
   static uint16_t getDefaultMemoryFlags() { return MfDiscardable | MfMoveable; }
   Error visit(Visitor *V) const override { return V->visitIconResource(this); }
   ResourceKind getKind() const override { return RkIcon; }

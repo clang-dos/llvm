@@ -1,0 +1,9 @@
+1 MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Open", 101
+    MENUITEM SEPARATOR
+    MENUITEM "E&xit", 102
+  END
+END

@@ -41,14 +41,16 @@ EnablePEVectorSpills("ppc-enable-pe-vector-spills",
                      cl::init(false), cl::Hidden);
 
 static unsigned computeReturnSaveOffset(const PPCSubtarget &STI) {
-  if (STI.isAIXABI())
+  // 32-bit Darwin uses the same 24-byte linkage area as 32-bit AIX.
+  if (STI.isAIXABI() || STI.isDarwinABI())
     return STI.isPPC64() ? 16 : 8;
   // SVR4 ABI:
   return STI.isPPC64() ? 16 : 4;
 }
 
 static unsigned computeTOCSaveOffset(const PPCSubtarget &STI) {
-  if (STI.isAIXABI())
+  // Darwin has no TOC, but the linkage area still has the slot.
+  if (STI.isAIXABI() || STI.isDarwinABI())
     return STI.isPPC64() ? 40 : 20;
   return STI.isELFv2ABI() ? 24 : 40;
 }
@@ -59,7 +61,7 @@ static unsigned computeFramePointerSaveOffset(const PPCSubtarget &STI) {
 }
 
 static unsigned computeLinkageSize(const PPCSubtarget &STI) {
-  if (STI.isAIXABI() || STI.isPPC64())
+  if (STI.isAIXABI() || STI.isDarwinABI() || STI.isPPC64())
     return (STI.isELFv2ABI() ? 4 : 6) * (STI.isPPC64() ? 8 : 4);
 
   // 32-bit SVR4 ABI:
@@ -76,7 +78,7 @@ static unsigned computeBasePointerSaveOffset(const PPCSubtarget &STI) {
 }
 
 static unsigned computeCRSaveOffset(const PPCSubtarget &STI) {
-  return (STI.isAIXABI() && !STI.isPPC64()) ? 4 : 8;
+  return ((STI.isAIXABI() || STI.isDarwinABI()) && !STI.isPPC64()) ? 4 : 8;
 }
 
 PPCFrameLowering::PPCFrameLowering(const PPCSubtarget &STI)
@@ -236,6 +238,12 @@ const PPCFrameLowering::SpillSlot *PPCFrameLowering::getCalleeSavedSpillSlots(
   if (Subtarget.is32BitELFABI()) {
     NumEntries = std::size(ELFOffsets32);
     return ELFOffsets32;
+  }
+
+  // 32-bit Darwin saves the same registers as 32-bit AIX, r13 included.
+  if (Subtarget.isDarwinABI()) {
+    NumEntries = std::size(AIXOffsets32);
+    return AIXOffsets32;
   }
 
   assert(Subtarget.isAIXABI() && "Unexpected ABI.");
@@ -624,7 +632,8 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF,
   // Get the ABI.
   bool isSVR4ABI = Subtarget.isSVR4ABI();
   bool isELFv2ABI = Subtarget.isELFv2ABI();
-  assert((isSVR4ABI || Subtarget.isAIXABI()) && "Unsupported PPC ABI.");
+  assert((isSVR4ABI || Subtarget.isAIXABI() || Subtarget.isDarwinABI()) &&
+         "Unsupported PPC ABI.");
 
   // Work out frame sizes.
   uint64_t FrameSize = determineFrameLayoutAndUpdate(MF);
@@ -2075,7 +2084,9 @@ void PPCFrameLowering::determineCalleeSaves(MachineFunction &MF,
        SavedRegs.test(PPC::CR4))) {
     const uint64_t SpillSize = 4; // Condition register is always 4 bytes.
     const int64_t SpillOffset =
-        Subtarget.isPPC64() ? 8 : Subtarget.isAIXABI() ? 4 : -4;
+        Subtarget.isPPC64()                                 ? 8
+        : (Subtarget.isAIXABI() || Subtarget.isDarwinABI()) ? 4
+                                                            : -4;
     int FrameIdx =
         MFI.CreateFixedObject(SpillSize, SpillOffset,
                               /* IsImmutable */ true, /* IsAliased */ false);

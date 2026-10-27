@@ -31,6 +31,7 @@ class MachineOperand;
 class AsmPrinter;
 class MCInst;
 class MCOperand;
+class MCSymbol;
 class ModulePass;
 
 #ifndef NDEBUG
@@ -55,6 +56,10 @@ class ModulePass;
   ModulePass *createPPCPrepareIFuncsOnAIXPass();
   void LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                     AsmPrinter &AP);
+  /// Darwin: return the "L<sym>$stub" lazy call stub for \p Target, and
+  /// record it so the asm printer emits the stub at the end of the file.
+  /// \p AP must be a PowerPC asm printer.
+  MCSymbol *getPPCDarwinCallStub(AsmPrinter &AP, MCSymbol *Target);
   bool LowerPPCMachineOperandToMCOperand(unsigned MIOpcode,
                                          const MachineOperand &MO,
                                          MCOperand &OutMO, AsmPrinter &AP);
@@ -81,6 +86,7 @@ class ModulePass;
   void initializePPCPrepareIFuncsOnAIXPass(PassRegistry &);
   void initializePPCLinuxAsmPrinterPass(PassRegistry &);
   void initializePPCAIXAsmPrinterPass(PassRegistry &);
+  void initializePPCDarwinAsmPrinterPass(PassRegistry &);
 
   extern char &PPCVSXFMAMutateID;
 
@@ -212,6 +218,17 @@ class ModulePass;
 
     /// MO_GOT_PCREL_FLAG = MO_PCREL_FLAG | MO_GOT_FLAG
     MO_GOT_PCREL_FLAG,
+
+    /// Darwin only: ha16/lo16 of the symbol's "L<sym>$non_lazy_ptr" slot
+    /// instead of the symbol itself. The PIC forms also subtract the PIC base.
+    MO_NLP_HA_FLAG,
+    MO_NLP_LO_FLAG,
+    MO_NLP_PIC_HA_FLAG,
+    MO_NLP_PIC_LO_FLAG,
+
+    /// Darwin only: a call that goes through a compiler-emitted
+    /// "L<sym>$stub" lazy binding stub.
+    MO_DARWIN_STUB_FLAG,
   };
   } // end namespace PPCII
 

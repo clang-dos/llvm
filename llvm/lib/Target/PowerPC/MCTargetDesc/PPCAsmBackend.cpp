@@ -263,6 +263,20 @@ public:
   std::optional<MCFixupKind> getFixupKind(StringRef Name) const override;
 };
 
+class DarwinPPCAsmBackend : public PPCAsmBackend {
+public:
+  DarwinPPCAsmBackend(const Target &T, const Triple &TT)
+      : PPCAsmBackend(T, TT) {}
+
+  std::unique_ptr<MCObjectTargetWriter>
+  createObjectTargetWriter() const override {
+    bool Is64 = TT.isPPC64();
+    return createPPCMachObjectWriter(
+        Is64, Is64 ? MachO::CPU_TYPE_POWERPC64 : MachO::CPU_TYPE_POWERPC,
+        MachO::CPU_SUBTYPE_POWERPC_ALL);
+  }
+};
+
 class XCOFFPPCAsmBackend : public PPCAsmBackend {
 public:
   XCOFFPPCAsmBackend(const Target &T, const Triple &TT)
@@ -311,6 +325,9 @@ MCAsmBackend *llvm::createPPCAsmBackend(const Target &T,
                                         const MCRegisterInfo &MRI,
                                         const MCTargetOptions &Options) {
   const Triple &TT = STI.getTargetTriple();
+  if (TT.isOSBinFormatMachO())
+    return new DarwinPPCAsmBackend(T, TT);
+
   if (TT.isOSBinFormatXCOFF())
     return new XCOFFPPCAsmBackend(T, TT);
 

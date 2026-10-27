@@ -63,6 +63,10 @@ MCAsmBackend *createPPCAsmBackend(const Target &T, const MCSubtargetInfo &STI,
 std::unique_ptr<MCObjectTargetWriter> createPPCELFObjectWriter(bool Is64Bit,
                                                                uint8_t OSABI);
 
+/// Construct a PPC Mach-O object writer.
+std::unique_ptr<MCObjectTargetWriter>
+createPPCMachObjectWriter(bool Is64Bit, uint32_t CPUType, uint32_t CPUSubtype);
+
 /// Construct a PPC XCOFF object writer.
 std::unique_ptr<MCObjectTargetWriter> createPPCXCOFFObjectWriter(bool Is64Bit);
 

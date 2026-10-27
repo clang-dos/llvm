@@ -370,6 +370,8 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
     }
 
   case llvm::Triple::ppc:
+    if (Triple.isOSDarwin())
+      return std::make_unique<DarwinPPC32TargetInfo>(Triple, Opts);
     switch (os) {
     case llvm::Triple::Linux:
       return std::make_unique<LinuxTargetInfo<PPC32TargetInfo>>(Triple, Opts);

@@ -33,6 +33,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -55,6 +56,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCSectionELF.h"
+#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCSectionXCOFF.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
@@ -222,6 +224,31 @@ public:
     emitXRayTable();
     return Changed;
   }
+
+  /// Darwin lazy call stubs: "L<sym>$stub" -> "<sym>", in first-use order.
+  MapVector<MCSymbol *, MCSymbol *> DarwinFnStubs;
+};
+
+/// PPCDarwinAsmPrinter - PowerPC assembly printer for 32-bit Mac OS X.
+class PPCDarwinAsmPrinter : public PPCAsmPrinter {
+public:
+  static char ID;
+
+  explicit PPCDarwinAsmPrinter(TargetMachine &TM,
+                               std::unique_ptr<MCStreamer> Streamer)
+      : PPCAsmPrinter(TM, std::move(Streamer), ID) {}
+
+  StringRef getPassName() const override {
+    return "Darwin PPC Assembly Printer";
+  }
+
+  void emitStartOfAsmFile(Module &M) override;
+  void emitEndOfAsmFile(Module &M) override;
+
+private:
+  MCSection *getStubSection() const;
+  void emitFnStubs();
+  void emitNonLazyPointers();
 };
 
 /// PPCLinuxAsmPrinter - PowerPC assembly printer, customized for Linux
@@ -3389,6 +3416,179 @@ void PPCAIXAsmPrinter::emitRefMetadata(const GlobalObject *GO) {
   }
 }
 
+MCSymbol *llvm::getPPCDarwinCallStub(AsmPrinter &AP, MCSymbol *Target) {
+  auto &PPCAP = static_cast<PPCAsmPrinter &>(AP);
+  MCSymbol *Stub = AP.OutContext.getOrCreateSymbol(
+      Twine(AP.MAI.getInternalSymbolPrefix()) + Target->getName() + "$stub");
+  PPCAP.DarwinFnStubs.insert({Stub, Target});
+  return Stub;
+}
+
+MCSection *PPCDarwinAsmPrinter::getStubSection() const {
+  // These are the sections and stub sizes Apple's gcc uses: 32-byte stubs
+  // that find their lazy pointer PC-relatively for PIC code, and 16-byte
+  // stubs with absolute addressing for -mdynamic-no-pic.
+  if (TM.getRelocationModel() == Reloc::PIC_)
+    return OutContext.getMachOSection("__TEXT", "__picsymbolstub1",
+                                      MachO::S_SYMBOL_STUBS |
+                                          MachO::S_ATTR_PURE_INSTRUCTIONS,
+                                      32, SectionKind::getText());
+  return OutContext.getMachOSection("__TEXT", "__symbol_stub1",
+                                    MachO::S_SYMBOL_STUBS |
+                                        MachO::S_ATTR_PURE_INSTRUCTIONS,
+                                    16, SectionKind::getText());
+}
+
+void PPCDarwinAsmPrinter::emitStartOfAsmFile(Module &M) {
+  if (TM.getTargetTriple().isPPC64())
+    report_fatal_error("64-bit PowerPC Darwin is not supported");
+
+  // Prime the text sections so they stay next to each other. This keeps
+  // large data sections from pushing calls past the 16MB branch range.
+  const auto &TLOFMacho =
+      static_cast<const TargetLoweringObjectFileMachO &>(getObjFileLowering());
+  OutStreamer->switchSection(TLOFMacho.getTextCoalSection());
+  if (TM.getRelocationModel() != Reloc::Static)
+    OutStreamer->switchSection(getStubSection());
+  OutStreamer->switchSection(getObjFileLowering().getTextSection());
+}
+
+void PPCDarwinAsmPrinter::emitFnStubs() {
+  if (DarwinFnStubs.empty())
+    return;
+
+  MCSection *StubSection = getStubSection();
+  MCSection *LazySection = getObjFileLowering().getLazySymbolPointerSection();
+  MCSymbol *Binder = OutContext.getOrCreateSymbol("dyld_stub_binding_helper");
+  bool IsPIC = TM.getRelocationModel() == Reloc::PIC_;
+  StringRef Prefix = MAI.getInternalSymbolPrefix();
+  // There is no MachineFunction at the end of the file, so use the
+  // module-level subtarget.
+  const MCSubtargetInfo &STI = TM.getMCSubtargetInfo();
+  auto EmitInst = [&](const MCInst &Inst) {
+    OutStreamer->emitInstruction(Inst, STI);
+  };
+
+  auto getLazyPtr = [&](MCSymbol *Target) {
+    return OutContext.getOrCreateSymbol(Twine(Prefix) + Target->getName() +
+                                        "$lazy_ptr");
+  };
+
+  OutStreamer->switchSection(StubSection);
+  emitAlignment(Align(4));
+  for (auto &[Stub, Target] : DarwinFnStubs) {
+    const MCExpr *LazyRef =
+        MCSymbolRefExpr::create(getLazyPtr(Target), OutContext);
+
+    // L_foo$stub:
+    //   .indirect_symbol _foo
+    OutStreamer->emitLabel(Stub);
+    OutStreamer->emitSymbolAttribute(Target, MCSA_IndirectSymbol);
+
+    if (IsPIC) {
+      //   mflr r0
+      //   bcl 20,31,L0$_foo
+      // L0$_foo:
+      //   mflr r11
+      //   addis r11,r11,ha16(L_foo$lazy_ptr-L0$_foo)
+      //   mtlr r0
+      //   lwzu r12,lo16(L_foo$lazy_ptr-L0$_foo)(r11)
+      //   mtctr r12
+      //   bctr
+      MCSymbol *Base = OutContext.getOrCreateSymbol(Twine(Prefix) + "0$" +
+                                                    Target->getName());
+      const MCExpr *Diff = MCBinaryExpr::createSub(
+          LazyRef, MCSymbolRefExpr::create(Base, OutContext), OutContext);
+      EmitInst(MCInstBuilder(PPC::MFLR).addReg(PPC::R0));
+      EmitInst(MCInstBuilder(PPC::BCLalways)
+                   .addExpr(MCSymbolRefExpr::create(Base, OutContext)));
+      OutStreamer->emitLabel(Base);
+      EmitInst(MCInstBuilder(PPC::MFLR).addReg(PPC::R11));
+      EmitInst(
+          MCInstBuilder(PPC::ADDIS)
+              .addReg(PPC::R11)
+              .addReg(PPC::R11)
+              .addExpr(MCSpecifierExpr::create(Diff, PPC::S_HA, OutContext)));
+      EmitInst(MCInstBuilder(PPC::MTLR).addReg(PPC::R0));
+      EmitInst(
+          MCInstBuilder(PPC::LWZU)
+              .addReg(PPC::R12)
+              .addReg(PPC::R11)
+              .addExpr(MCSpecifierExpr::create(Diff, PPC::S_LO, OutContext))
+              .addReg(PPC::R11));
+    } else {
+      //   lis r11,ha16(L_foo$lazy_ptr)
+      //   lwzu r12,lo16(L_foo$lazy_ptr)(r11)
+      EmitInst(MCInstBuilder(PPC::LIS).addReg(PPC::R11).addExpr(
+          MCSpecifierExpr::create(LazyRef, PPC::S_HA, OutContext)));
+      EmitInst(
+          MCInstBuilder(PPC::LWZU)
+              .addReg(PPC::R12)
+              .addReg(PPC::R11)
+              .addExpr(MCSpecifierExpr::create(LazyRef, PPC::S_LO, OutContext))
+              .addReg(PPC::R11));
+    }
+    EmitInst(MCInstBuilder(PPC::MTCTR).addReg(PPC::R12));
+    EmitInst(MCInstBuilder(PPC::BCTR));
+  }
+
+  // The indirect symbol entries of each section have to be contiguous, so
+  // the lazy pointers go after all the stubs.
+  OutStreamer->switchSection(LazySection);
+  emitAlignment(Align(4));
+  for (auto &[Stub, Target] : DarwinFnStubs) {
+    // L_foo$lazy_ptr:
+    //   .indirect_symbol _foo
+    //   .long dyld_stub_binding_helper
+    OutStreamer->emitLabel(getLazyPtr(Target));
+    OutStreamer->emitSymbolAttribute(Target, MCSA_IndirectSymbol);
+    OutStreamer->emitValue(MCSymbolRefExpr::create(Binder, OutContext), 4);
+  }
+  DarwinFnStubs.clear();
+  OutStreamer->addBlankLine();
+}
+
+void PPCDarwinAsmPrinter::emitNonLazyPointers() {
+  MachineModuleInfoMachO &MMIMacho =
+      MMI->getObjFileInfo<MachineModuleInfoMachO>();
+  MachineModuleInfoMachO::SymbolListTy Stubs = MMIMacho.GetGVStubList();
+  if (Stubs.empty())
+    return;
+
+  OutStreamer->switchSection(
+      getObjFileLowering().getNonLazySymbolPointerSection());
+  emitAlignment(Align(4));
+  for (auto &[Label, Sym] : Stubs) {
+    // L_foo$non_lazy_ptr:
+    //   .indirect_symbol _foo
+    //   .long 0
+    OutStreamer->emitLabel(Label);
+    OutStreamer->emitSymbolAttribute(Sym.getPointer(), MCSA_IndirectSymbol);
+    if (Sym.getInt())
+      // Defined outside this file: dyld fills the pointer in.
+      OutStreamer->emitIntValue(0, 4);
+    else
+      // Local to this file: the pointer is filled in statically.
+      OutStreamer->emitValue(
+          MCSymbolRefExpr::create(Sym.getPointer(), OutContext), 4);
+  }
+  OutStreamer->addBlankLine();
+}
+
+void PPCDarwinAsmPrinter::emitEndOfAsmFile(Module &M) {
+  emitFnStubs();
+  emitNonLazyPointers();
+
+  // No global symbol has code that falls through into another one, so the
+  // linker may split sections at symbols and dead-strip them.
+  OutStreamer->emitSubsectionsViaSymbols();
+}
+
+char PPCDarwinAsmPrinter::ID = 0;
+
+INITIALIZE_PASS(PPCDarwinAsmPrinter, "ppc-darwin-asm-printer",
+                "Darwin PPC Assembly Printer", false, false)
+
 // Return a pass that prints the PPC assembly code for a MachineFunction to the
 // given output stream.
 static AsmPrinter *
@@ -3396,6 +3596,8 @@ createPPCAsmPrinterPass(TargetMachine &tm,
                         std::unique_ptr<MCStreamer> &&Streamer) {
   if (tm.getTargetTriple().isOSAIX())
     return new PPCAIXAsmPrinter(tm, std::move(Streamer));
+  if (tm.getTargetTriple().isOSBinFormatMachO())
+    return new PPCDarwinAsmPrinter(tm, std::move(Streamer));
 
   return new PPCLinuxAsmPrinter(tm, std::move(Streamer));
 }

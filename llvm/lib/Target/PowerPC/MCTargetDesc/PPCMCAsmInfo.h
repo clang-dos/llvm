@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_POWERPC_MCTARGETDESC_PPCMCASMINFO_H
 #define LLVM_LIB_TARGET_POWERPC_MCTARGETDESC_PPCMCASMINFO_H
 
+#include "llvm/MC/MCAsmInfoDarwin.h"
 #include "llvm/MC/MCAsmInfoELF.h"
 #include "llvm/MC/MCAsmInfoXCOFF.h"
 #include "llvm/MC/MCExpr.h"
@@ -27,6 +28,18 @@ class PPCELFMCAsmInfo : public MCAsmInfoELF {
 public:
   explicit PPCELFMCAsmInfo(bool is64Bit, const Triple &,
                            const MCTargetOptions &Options);
+  void printSpecifierExpr(raw_ostream &OS,
+                          const MCSpecifierExpr &Expr) const override;
+  bool evaluateAsRelocatableImpl(const MCSpecifierExpr &Expr, MCValue &Res,
+                                 const MCAssembler *Asm) const override;
+};
+
+/// Mac OS X on PowerPC: Mach-O objects and the Apple assembler syntax, where
+/// relocation specifiers are written as functions (ha16(sym), lo16(sym)).
+class PPCMCAsmInfoDarwin : public MCAsmInfoDarwin {
+public:
+  explicit PPCMCAsmInfoDarwin(bool is64Bit, const Triple &,
+                              const MCTargetOptions &Options);
   void printSpecifierExpr(raw_ostream &OS,
                           const MCSpecifierExpr &Expr) const override;
   bool evaluateAsRelocatableImpl(const MCSpecifierExpr &Expr, MCValue &Res,

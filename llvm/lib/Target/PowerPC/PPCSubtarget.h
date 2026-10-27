@@ -192,6 +192,10 @@ public:
       // 288 bytes = 18*8 (FPRs) + 18*8 (GPRs, GPR13 reserved)
       return 288;
 
+    // Darwin PPC32: 224 bytes = 18*8 (FPRs) + 19*4 (GPRs) + 4 (CR).
+    if (isDarwinABI())
+      return 224;
+
     // AIX PPC32: 220 bytes = 18*8 (FPRs) + 19*4 (GPRs);
     // PPC32 SVR4ABI has no redzone.
     return isAIXABI() ? 220 : 0;
@@ -208,7 +212,12 @@ public:
   bool isTargetLinux() const { return getTargetTriple().isOSLinux(); }
 
   bool isAIXABI() const { return getTargetTriple().isOSAIX(); }
-  bool isSVR4ABI() const { return !isAIXABI(); }
+  /// The 32-bit PowerPC Mac OS X ABI. Like AIX it has a 24-byte linkage area
+  /// and a parameter save area, but there is no TOC and no descriptors.
+  bool isDarwinABI() const {
+    return !isAIXABI() && (isTargetMachO() || getTargetTriple().isOSDarwin());
+  }
+  bool isSVR4ABI() const { return !isAIXABI() && !isDarwinABI(); }
   bool isELFv2ABI() const;
 
   /// Returns true when the AIX extended Altivec ABI ("vec-extabi") is in
@@ -216,6 +225,10 @@ public:
   bool isAIXExtendedAltivecABI() const {
     return TargetABI == PPC_ABI_AIX_EXTABI;
   }
+
+  /// True for Darwin globals that must be reached through a non-lazy pointer
+  /// because they may be defined in another image.
+  bool hasLazyResolverStub(const GlobalValue *GV) const;
 
   bool is64BitELFABI() const { return isSVR4ABI() && isPPC64(); }
   bool is32BitELFABI() const { return isSVR4ABI() && !isPPC64(); }

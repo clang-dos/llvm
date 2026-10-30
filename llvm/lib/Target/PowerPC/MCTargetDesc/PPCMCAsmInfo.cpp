@@ -13,6 +13,7 @@
 #include "MCTargetDesc/PPCMCAsmInfo.h"
 #include "llvm/ADT/Enum.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -221,6 +222,59 @@ void PPCELFMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
 bool PPCELFMCAsmInfo::evaluateAsRelocatableImpl(const MCSpecifierExpr &Expr,
                                                 MCValue &Res,
                                                 const MCAssembler *Asm) const {
+  return evaluateAsRelocatable(Expr, Res, Asm);
+}
+
+PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit, const Triple &T,
+                                       const MCTargetOptions &Options)
+    : MCAsmInfoDarwin(Options) {
+  if (is64Bit)
+    CodePointerSize = CalleeSaveStackSlotSize = 8;
+  IsLittleEndian = false;
+
+  // Apple's PowerPC assembler uses ';' for comments, and registers are
+  // always written with their prefix (r3, f1, cr7).
+  CommentString = ";";
+  SeparatorString = "@";
+  setFullRegisterNames(true);
+
+  ExceptionsType = ExceptionHandling::DwarfCFI;
+
+  // We can't emit a 64-bit unit in PPC32 mode.
+  if (!is64Bit)
+    Data64bitsDirective = nullptr;
+
+  AssemblerDialect = 1; // New-Style mnemonics.
+  SupportsDebugInformation = true;
+  MinInstAlignment = 4;
+
+  // The assemblers shipped before Mac OS X 10.6 lack this directive.
+  if (T.isMacOSX() && T.isMacOSXVersionLT(10, 6))
+    HasWeakDefCanBeHiddenDirective = false;
+}
+
+void PPCMCAsmInfoDarwin::printSpecifierExpr(raw_ostream &OS,
+                                            const MCSpecifierExpr &Expr) const {
+  switch (Expr.getSpecifier()) {
+  case PPC::S_LO:
+    OS << "lo16";
+    break;
+  case PPC::S_HI:
+    OS << "hi16";
+    break;
+  case PPC::S_HA:
+    OS << "ha16";
+    break;
+  default:
+    llvm_unreachable("specifier has no Mach-O spelling");
+  }
+  OS << '(';
+  printExpr(OS, *Expr.getSubExpr());
+  OS << ')';
+}
+
+bool PPCMCAsmInfoDarwin::evaluateAsRelocatableImpl(
+    const MCSpecifierExpr &Expr, MCValue &Res, const MCAssembler *Asm) const {
   return evaluateAsRelocatable(Expr, Res, Asm);
 }
 

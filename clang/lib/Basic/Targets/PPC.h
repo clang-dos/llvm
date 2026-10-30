@@ -522,6 +522,34 @@ public:
   }
 };
 
+// 32-bit PowerPC Mac OS X (Darwin), as built by Apple's gcc.
+class LLVM_LIBRARY_VISIBILITY DarwinPPC32TargetInfo
+    : public DarwinTargetInfo<PPC32TargetInfo> {
+public:
+  DarwinPPC32TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : DarwinTargetInfo<PPC32TargetInfo>(Triple, Opts) {
+    HasAlignMac68kSupport = true;
+    // bool is a 32-bit int on 32-bit PowerPC Darwin.
+    BoolWidth = BoolAlign = 32;
+    PtrDiffType = SignedInt;
+    // Record layout applies gcc's "power" alignment to double members; see
+    // ItaniumRecordLayoutBuilder::LayoutField.
+    // Mac OS X 10.4 moved to a 128-bit IBM double-double long double. Before
+    // that, long double was the same as double.
+    if (Triple.isMacOSX() && Triple.isMacOSXVersionLT(10, 4)) {
+      LongDoubleWidth = LongDoubleAlign = 64;
+      LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+    } else {
+      LongDoubleWidth = LongDoubleAlign = 128;
+      LongDoubleFormat = &llvm::APFloat::PPCDoubleDouble();
+    }
+  }
+
+  BuiltinVaListKind getBuiltinVaListKind() const override {
+    return TargetInfo::CharPtrBuiltinVaList;
+  }
+};
+
 class LLVM_LIBRARY_VISIBILITY AIXPPC64TargetInfo :
   public AIXTargetInfo<PPC64TargetInfo> {
 public:

@@ -31,8 +31,43 @@
 #include "llvm/Target/TargetLoweringObjectFile.h"
 using namespace llvm;
 
+static bool isDarwinNLPFlag(unsigned Flags) {
+  return Flags == PPCII::MO_NLP_HA_FLAG || Flags == PPCII::MO_NLP_LO_FLAG ||
+         Flags == PPCII::MO_NLP_PIC_HA_FLAG ||
+         Flags == PPCII::MO_NLP_PIC_LO_FLAG;
+}
+
 static MCSymbol *GetSymbolFromOperand(const MachineOperand &MO,
                                       AsmPrinter &AP) {
+  unsigned Flags = MO.getTargetFlags();
+
+  // Darwin: name the "L<sym>$non_lazy_ptr" slot and record it so the asm
+  // printer emits it in __nl_symbol_ptr.
+  if (isDarwinNLPFlag(Flags)) {
+    assert(MO.isGlobal() && "Only globals go through a non-lazy pointer");
+    const GlobalValue *GV = MO.getGlobal();
+    MCSymbol *NLP = AP.getSymbolWithGlobalValueBase(GV, "$non_lazy_ptr");
+    MachineModuleInfoImpl::StubValueTy &StubSym =
+        AP.MMI->getObjFileInfo<MachineModuleInfoMachO>().getGVStubEntry(NLP);
+    if (!StubSym.getPointer())
+      StubSym = MachineModuleInfoImpl::StubValueTy(AP.getSymbol(GV),
+                                                   !GV->hasLocalLinkage());
+    return NLP;
+  }
+
+  // Darwin: calls that dyld may have to bind go through "L<sym>$stub".
+  if (Flags == PPCII::MO_DARWIN_STUB_FLAG) {
+    MCSymbol *Target;
+    if (MO.isGlobal()) {
+      Target = AP.getSymbol(MO.getGlobal());
+    } else {
+      SmallString<128> Name;
+      Mangler::getNameWithPrefix(Name, MO.getSymbolName(), AP.getDataLayout());
+      Target = AP.OutContext.getOrCreateSymbol(Name);
+    }
+    return getPPCDarwinCallStub(AP, Target);
+  }
+
   if (MO.isGlobal()) {
     // Get the symbol from the global, accounting for XCOFF-specific
     // intricacies (see TargetLoweringObjectFileXCOFF::getTargetSymbol).
@@ -150,7 +185,9 @@ static MCOperand GetSymbolRef(unsigned MIOpcode, const MachineOperand &MO,
   // Subtract off the PIC base if required.
   if (MO.getTargetFlags() == PPCII::MO_PIC_FLAG ||
       MO.getTargetFlags() == PPCII::MO_PIC_HA_FLAG ||
-      MO.getTargetFlags() == PPCII::MO_PIC_LO_FLAG) {
+      MO.getTargetFlags() == PPCII::MO_PIC_LO_FLAG ||
+      MO.getTargetFlags() == PPCII::MO_NLP_PIC_HA_FLAG ||
+      MO.getTargetFlags() == PPCII::MO_NLP_PIC_LO_FLAG) {
     const MCExpr *PB = MCSymbolRefExpr::create(MF->getPICBaseSymbol(), Ctx);
     Expr = MCBinaryExpr::createSub(Expr, PB, Ctx);
   }
@@ -159,10 +196,14 @@ static MCOperand GetSymbolRef(unsigned MIOpcode, const MachineOperand &MO,
   switch (access) {
     case PPCII::MO_LO:
     case PPCII::MO_PIC_LO_FLAG:
+    case PPCII::MO_NLP_LO_FLAG:
+    case PPCII::MO_NLP_PIC_LO_FLAG:
       Expr = MCSpecifierExpr::create(Expr, PPC::S_LO, Ctx);
       break;
     case PPCII::MO_HA:
     case PPCII::MO_PIC_HA_FLAG:
+    case PPCII::MO_NLP_HA_FLAG:
+    case PPCII::MO_NLP_PIC_HA_FLAG:
       Expr = MCSpecifierExpr::create(Expr, PPC::S_HA, Ctx);
       break;
   }

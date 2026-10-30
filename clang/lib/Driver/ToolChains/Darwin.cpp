@@ -66,6 +66,10 @@ llvm::Triple::ArchType darwin::getArchTypeForMachOArchName(StringRef Str) {
       .Cases({"armv8m.base", "armv8m.main", "armv8.1m.main"}, llvm::Triple::arm)
       .Cases({"arm64", "arm64e"}, llvm::Triple::aarch64)
       .Case("arm64_32", llvm::Triple::aarch64_32)
+      .Cases({"ppc", "ppc601", "ppc603", "ppc604", "ppc604e"},
+             llvm::Triple::ppc)
+      .Cases({"ppc750", "ppc7400", "ppc7450", "ppc970"}, llvm::Triple::ppc)
+      .Case("ppc64", llvm::Triple::ppc64)
       .Cases({"amdgpu", "amdgcn"}, llvm::Triple::amdgpu)
       .Case("r600", llvm::Triple::r600)
       .Case("nvptx", llvm::Triple::nvptx)
@@ -80,7 +84,11 @@ void darwin::setTripleTypeForMachOArchName(llvm::Triple &T, StringRef Str,
   const llvm::Triple::ArchType Arch = getArchTypeForMachOArchName(Str);
   llvm::ARM::ArchKind ArchKind = llvm::ARM::parseArch(Str);
   T.setArch(Arch);
-  if (Arch != llvm::Triple::UnknownArch)
+  // The PowerPC CPU subtypes ("ppc750") are not triple arch names; the CPU
+  // comes from -arch separately.
+  if (Arch == llvm::Triple::ppc || Arch == llvm::Triple::ppc64)
+    T.setArchName(Arch == llvm::Triple::ppc ? "powerpc" : "powerpc64");
+  else if (Arch != llvm::Triple::UnknownArch)
     T.setArchName(Str);
 
   // Standalone/bare metal compiles often unintentionally come out as
@@ -3743,6 +3751,11 @@ Darwin::TranslateArgs(const DerivedArgList &Args, BoundArch BA,
 }
 
 ToolChain::UnwindTableLevel MachO::getDefaultUnwindTableLevel(const ArgList &Args) const {
+  // PowerPC Darwin only had unwind tables for code that uses exceptions, and
+  // its assembler does not accept CFI directives.
+  if (getArch() == llvm::Triple::ppc || getArch() == llvm::Triple::ppc64)
+    return UnwindTableLevel::None;
+
   // Unwind tables are not emitted if -fno-exceptions is supplied (except when
   // targeting x86_64).
   if (getArch() == llvm::Triple::x86_64 ||

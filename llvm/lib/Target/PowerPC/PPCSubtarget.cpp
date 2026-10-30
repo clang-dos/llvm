@@ -209,6 +209,20 @@ bool PPCSubtarget::isGVIndirectSymbol(const GlobalValue *GV) const {
   return true;
 }
 
+bool PPCSubtarget::hasLazyResolverStub(const GlobalValue *GV) const {
+  // In the static model (kernel code) there is no dyld to fill pointers in.
+  if (!isDarwinABI() || TM.getRelocationModel() == Reloc::Static)
+    return false;
+  if (!TM.shouldAssumeDSOLocal(GV))
+    return true;
+  // 32-bit Mach-O has no relocation for a - b when a is undefined, even if b
+  // is in the section being relocated. So even a global known to be in this
+  // image has to go through a pointer if it isn't defined in this file.
+  if (GV->isDeclarationForLinker() || GV->hasCommonLinkage())
+    return true;
+  return false;
+}
+
 CodeModel::Model PPCSubtarget::getCodeModel(const TargetMachine &TM,
                                             const GlobalValue *GV) const {
   // If there isn't an attribute to override the module code model

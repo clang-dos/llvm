@@ -78,7 +78,10 @@ void CodeGenTargetMachineImpl::initAsmInfo() {
 
   TmpAsmInfo->setPreserveAsmComments(Options.MCOptions.PreserveAsmComments);
 
-  TmpAsmInfo->setFullRegisterNames(Options.MCOptions.PPCUseFullRegisterNames);
+  // Some targets (32-bit PowerPC Darwin) always use full register names, so
+  // the option can only turn them on.
+  if (Options.MCOptions.PPCUseFullRegisterNames)
+    TmpAsmInfo->setFullRegisterNames(true);
 
   assert(TmpAsmInfo->getExceptionHandlingType() ==
              getTargetTriple().getDefaultExceptionHandling() &&

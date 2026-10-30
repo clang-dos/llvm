@@ -1960,6 +1960,23 @@ void ItaniumRecordLayoutBuilder::LayoutField(const FieldDecl *D,
     }
   }
 
+  // 32-bit PowerPC Darwin follows gcc's "power" alignment: a double member
+  // (or array of doubles) is only word aligned, unless it is the first member
+  // of the record, which then gets the double's natural 8-byte alignment.
+  if (Target.isPPC32() && Target.isOSDarwin() &&
+      AlignRequirement == AlignRequirementKind::None) {
+    QualType ET = Context.getBaseElementType(D->getType());
+    const auto *BT = ET->getAs<BuiltinType>();
+    if (BT && BT->isFloatingPoint() && Context.getTypeSize(BT) == 64) {
+      const auto *CXXRD = dyn_cast<CXXRecordDecl>(D->getParent());
+      bool IsFirstMember =
+          D->getFieldIndex() == 0 &&
+          (!CXXRD || (CXXRD->getNumBases() == 0 && !CXXRD->isDynamicClass()));
+      if (!IsFirstMember)
+        FieldAlign = std::min(FieldAlign, CharUnits::fromQuantity(4));
+    }
+  }
+
   bool FieldPacked =
       (Packed &&
        (!FieldClass || FieldClass->isPOD() ||

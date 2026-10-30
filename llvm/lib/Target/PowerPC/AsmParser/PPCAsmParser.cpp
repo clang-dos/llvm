@@ -106,6 +106,10 @@ class PPCAsmParser : public MCTargetAsmParser {
   void Warning(SMLoc L, const Twine &Msg) { getParser().Warning(L, Msg); }
 
   bool isPPC64() const { return IsPPC64; }
+  /// Apple's assembler syntax: rN register names and lo16()/ha16() specifiers.
+  bool IsDarwin;
+  bool isDarwin() const { return IsDarwin; }
+  bool parseDarwinSpecifier(uint16_t &Spec);
 
   MCRegister matchRegisterName(int64_t &IntVal);
 
@@ -145,7 +149,8 @@ class PPCAsmParser : public MCTargetAsmParser {
 public:
   PPCAsmParser(const MCSubtargetInfo &STI, MCAsmParser &,
                const MCInstrInfo &MII)
-      : MCTargetAsmParser(STI, MII), IsPPC64(STI.getTargetTriple().isPPC64()) {
+      : MCTargetAsmParser(STI, MII), IsPPC64(STI.getTargetTriple().isPPC64()),
+        IsDarwin(STI.getTargetTriple().isOSBinFormatMachO()) {
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
@@ -1451,7 +1456,43 @@ const MCExpr *PPCAsmParser::extractSpecifier(const MCExpr *E,
 
 /// This differs from the default "parseExpression" in that it handles
 /// specifiers.
+/// Darwin writes relocation specifiers as functions: lo16(x), hi16(x) and
+/// ha16(x). If the next tokens start one, eat "name(" and return its kind.
+bool PPCAsmParser::parseDarwinSpecifier(uint16_t &Spec) {
+  Spec = PPC::S_None;
+  const AsmToken &Tok = getParser().getTok();
+  if (Tok.isNot(AsmToken::Identifier))
+    return false;
+  StringRef Name = Tok.getString();
+  if (Name.equals_insensitive("lo16"))
+    Spec = PPC::S_LO;
+  else if (Name.equals_insensitive("hi16"))
+    Spec = PPC::S_HI;
+  else if (Name.equals_insensitive("ha16"))
+    Spec = PPC::S_HA;
+  else
+    return false;
+  if (getLexer().peekTok().isNot(AsmToken::LParen)) {
+    Spec = PPC::S_None;
+    return false;
+  }
+  getParser().Lex(); // Eat the specifier name.
+  getParser().Lex(); // Eat the '('.
+  return true;
+}
+
 bool PPCAsmParser::parseExpression(const MCExpr *&EVal) {
+  if (isDarwin()) {
+    uint16_t Spec;
+    if (parseDarwinSpecifier(Spec)) {
+      if (getParser().parseExpression(EVal) ||
+          parseToken(AsmToken::RParen, "expected ')'"))
+        return true;
+      EVal = MCSpecifierExpr::create(EVal, Spec, getParser().getContext());
+      return false;
+    }
+  }
+
   // (ELF Platforms)
   // Handle \code @l/@ha \endcode
   if (getParser().parseExpression(EVal))
@@ -1487,6 +1528,17 @@ bool PPCAsmParser::parseOperand(OperandVector &Operands) {
     return false;
   }
   case AsmToken::Identifier:
+    // Apple's syntax names registers without a '%' (r3, f1, cr7). Symbols
+    // from the compiler start with '_', 'L' or 'l', so try a register first.
+    if (isDarwin()) {
+      int64_t IntVal;
+      if (matchRegisterName(IntVal)) {
+        Operands.push_back(
+            PPCOperand::CreateImm(IntVal, S, E, isPPC64(), getContext()));
+        return false;
+      }
+    }
+    [[fallthrough]];
   case AsmToken::LParen:
   case AsmToken::Plus:
   case AsmToken::Minus:
@@ -1577,6 +1629,8 @@ bool PPCAsmParser::parseOperand(OperandVector &Operands) {
         return Error(S, "invalid register number");
       break;
     case AsmToken::Identifier:
+      if (isDarwin() && matchRegisterName(IntVal))
+        break;
       if (getParser().parseParenExpression(EVal, E))
         return Error(S, "identifier does not expand to register number");
       if (!EVal->evaluateAsAbsolute(IntVal) || IntVal < 0 || IntVal > 31)

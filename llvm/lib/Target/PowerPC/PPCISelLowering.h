@@ -836,6 +836,11 @@ namespace llvm {
         const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
         SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const;
 
+    SDValue LowerFormalArguments_Darwin(
+        SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+        const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+        SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const;
+
     SDValue createMemcpyOutsideCallSeq(SDValue Arg, SDValue PtrOff,
                                        SDValue CallSeqStart,
                                        ISD::ArgFlagsTy Flags, SelectionDAG &DAG,
@@ -849,6 +854,13 @@ namespace llvm {
                              SmallVectorImpl<SDValue> &InVals,
                              const CallBase *CB) const;
     SDValue LowerCall_32SVR4(SDValue Chain, SDValue Callee, CallFlags CFlags,
+                             const SmallVectorImpl<ISD::OutputArg> &Outs,
+                             const SmallVectorImpl<SDValue> &OutVals,
+                             const SmallVectorImpl<ISD::InputArg> &Ins,
+                             const SDLoc &dl, SelectionDAG &DAG,
+                             SmallVectorImpl<SDValue> &InVals,
+                             const CallBase *CB) const;
+    SDValue LowerCall_Darwin(SDValue Chain, SDValue Callee, CallFlags CFlags,
                              const SmallVectorImpl<ISD::OutputArg> &Outs,
                              const SmallVectorImpl<SDValue> &OutVals,
                              const SmallVectorImpl<ISD::InputArg> &Ins,

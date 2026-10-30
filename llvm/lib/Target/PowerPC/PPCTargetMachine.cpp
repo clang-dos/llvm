@@ -149,6 +149,7 @@ LLVMInitializePowerPCTarget() {
   initializePPCPrepareIFuncsOnAIXPass(PR);
   initializePPCLinuxAsmPrinterPass(PR);
   initializePPCAIXAsmPrinterPass(PR);
+  initializePPCDarwinAsmPrinterPass(PR);
 }
 
 static std::string computeFSAdditions(StringRef FS, CodeGenOptLevel OL,
@@ -188,6 +189,9 @@ static std::string computeFSAdditions(StringRef FS, CodeGenOptLevel OL,
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
+  if (TT.isOSBinFormatMachO() && !TT.isOSAIX())
+    return std::make_unique<TargetLoweringObjectFileMachO>();
+
   if (TT.isOSAIX())
     return std::make_unique<TargetLoweringObjectFileXCOFF>();
 
@@ -220,8 +224,15 @@ static Reloc::Model getEffectiveRelocModel(const Triple &TT,
     report_fatal_error("invalid relocation model, AIX only supports PIC",
                        false);
 
+  if (TT.isOSBinFormatMachO() && !TT.isOSAIX() && TT.isArch64Bit())
+    report_fatal_error("64-bit PowerPC Mac OS X is not supported", false);
+
   if (RM)
     return *RM;
+
+  // Darwin defaults to dynamic-no-pic, like Apple's GCC for executables.
+  if (TT.isOSBinFormatMachO() && !TT.isOSAIX())
+    return Reloc::DynamicNoPIC;
 
   // Big Endian PPC and AIX default to PIC.
   if (TT.getArch() == Triple::ppc64 || TT.isOSAIX())
@@ -250,6 +261,9 @@ getEffectivePPCCodeModel(const Triple &TT, std::optional<CodeModel::Model> CM,
       return CodeModel::Large;
     return CodeModel::Small;
   }
+
+  if (TT.isOSBinFormatMachO())
+    return CodeModel::Small;
 
   assert(TT.isOSBinFormatELF() && "All remaining PPC OSes are ELF based.");
 

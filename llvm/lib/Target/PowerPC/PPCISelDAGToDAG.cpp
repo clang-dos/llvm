@@ -491,6 +491,9 @@ SDNode *PPCDAGToDAGISel::getGlobalBaseReg() {
           MF->getInfo<PPCFunctionInfo>()->setUsesPICBase(true);
         }
       } else {
+        // The PIC base is set up in the entry block, so it has to come after
+        // the prologue that saves LR.
+        MF->getInfo<PPCFunctionInfo>()->setShrinkWrapDisabled(true);
         GlobalBaseReg =
           RegInfo->createVirtualRegister(&PPC::GPRC_and_GPRC_NOR0RegClass);
         BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MovePCtoLR));

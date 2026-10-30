@@ -232,6 +232,11 @@ PPCRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return SaveR2 ? CSR_PPC64_R2_SaveList : CSR_PPC64_SaveList;
   }
   // 32-bit targets.
+  // Darwin saves r13-r31, f14-f31, cr2-cr4 and, with Altivec, v20-v31, which
+  // is the 32-bit AIX extended Altivec set.
+  if (Subtarget.isDarwinABI())
+    return Subtarget.hasAltivec() ? CSR_AIX32_Altivec_SaveList
+                                  : CSR_AIX32_SaveList;
   if (Subtarget.isAIXABI()) {
     if (Subtarget.pairedVectorMemops())
       return Subtarget.isAIXExtendedAltivecABI() ? CSR_AIX32_VSRP_SaveList
@@ -272,6 +277,10 @@ PPCRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     }
     return CSR_64_AllRegs_RegMask;
   }
+
+  if (Subtarget.isDarwinABI())
+    return Subtarget.hasAltivec() ? CSR_AIX32_Altivec_RegMask
+                                  : CSR_AIX32_RegMask;
 
   if (Subtarget.isAIXABI()) {
     if (Subtarget.pairedVectorMemops()) {

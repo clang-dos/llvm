@@ -3108,6 +3108,11 @@ PPCInstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
       {MO_TPREL_PCREL_FLAG, "ppc-tprel-pcrel"},
       {MO_TLS_PCREL_FLAG, "ppc-tls-pcrel"},
       {MO_GOT_PCREL_FLAG, "ppc-got-pcrel"},
+      {MO_NLP_HA_FLAG, "ppc-nlp-ha"},
+      {MO_NLP_LO_FLAG, "ppc-nlp-lo"},
+      {MO_NLP_PIC_HA_FLAG, "ppc-nlp-ha-pic"},
+      {MO_NLP_PIC_LO_FLAG, "ppc-nlp-lo-pic"},
+      {MO_DARWIN_STUB_FLAG, "ppc-darwin-stub"},
   };
   return ArrayRef(TargetFlags);
 }

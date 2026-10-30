@@ -185,7 +185,9 @@ static MCAsmInfo *createPPCMCAsmInfo(const MCRegisterInfo &MRI,
   bool isPPC64 = TheTriple.isPPC64();
 
   MCAsmInfo *MAI;
-  if (TheTriple.isOSBinFormatXCOFF())
+  if (TheTriple.isOSBinFormatMachO() && !TheTriple.isOSAIX())
+    MAI = new PPCMCAsmInfoDarwin(isPPC64, TheTriple, Options);
+  else if (TheTriple.isOSBinFormatXCOFF())
     MAI = new PPCXCOFFMCAsmInfo(isPPC64, TheTriple, Options);
   else
     MAI = new PPCELFMCAsmInfo(isPPC64, TheTriple, Options);

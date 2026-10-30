@@ -1731,6 +1731,10 @@ void MCStreamer::emitVersionForTarget(
     const VersionTuple &DarwinTargetVariantSDKVersion) {
   if (!Target.isOSBinFormatMachO() || !Target.isOSDarwin())
     return;
+  // PowerPC Darwin predates the version load commands, and its tools do not
+  // know the directive.
+  if (Target.isPPC())
+    return;
   // Do we even know the version?
   if (Target.getOSMajorVersion() == 0)
     return;

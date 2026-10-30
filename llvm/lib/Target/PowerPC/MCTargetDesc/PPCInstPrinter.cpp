@@ -564,8 +564,9 @@ void PPCInstPrinter::printTLSCall(const MCInst *MI, unsigned OpNo,
 /// showRegistersWithPercentPrefix - Check if this register name should be
 /// printed with a percentage symbol as prefix.
 bool PPCInstPrinter::showRegistersWithPercentPrefix(const char *RegName) const {
+  // Apple's assembler takes bare register names (r3, f1) and no '%'.
   if ((!FullRegNamesWithPercent && !MAI.useFullRegisterNames()) ||
-      TT.getOS() == Triple::AIX)
+      TT.getOS() == Triple::AIX || TT.isOSBinFormatMachO())
     return false;
 
   switch (RegName[0]) {
@@ -615,6 +616,13 @@ void PPCInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     MCRegister Reg = Op.getReg();
     if (!ShowVSRNumsAsVR)
       Reg = PPC::getRegNumForOperand(MII.get(MI->getOpcode()), Reg, OpNo);
+
+    // Apple's assembler has no names for condition register bits, so print
+    // their number.
+    if (TT.isOSBinFormatMachO() && Reg >= PPC::CR0EQ && Reg <= PPC::CR7UN) {
+      O << MRI.getEncodingValue(Reg);
+      return;
+    }
 
     const char *RegName;
     RegName = getVerboseConditionRegName(Reg, MRI.getEncodingValue(Reg));

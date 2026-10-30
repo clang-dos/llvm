@@ -1,0 +1,64 @@
+; Windows 1.x and 2.x resources, as the resource compilers of the Windows
+; 1.04 and 2.03 SDKs write them.
+
+; Menus: no header, and a BYTE of flags per item.
+; RUN: llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-menu.rc
+; RUN: %python -c "import sys; print(open(sys.argv[1], 'rb').read().hex(' '))" %t.res | FileCheck %s --check-prefix=MENU2
+; MENU2: ff 04 00 ff 01 00 30 10 1d 00 00 00
+; MENU2-SAME: 90 26 46 69 6c 65 00 00 65 00 26 4f 70 65 6e 00 00 00 00 00 80 66 00 45 26 78 69 74 00{{$}}
+
+; The windres triple carries the version too.
+; RUN: llvm-windres --no-preprocess --target=i8086-pc-win161.01 %p/Inputs/win16-menu.rc %t.res
+; RUN: %python -c "import sys; print(open(sys.argv[1], 'rb').read().hex(' '))" %t.res | FileCheck %s --check-prefix=MENU2
+
+; Windows 3.0 has the header and WORD flags, as 3.1 does.
+; RUN: llvm-rc -no-preprocess -win16-version 3.0 /FO %t.res -- %p/Inputs/win16-menu.rc
+; RUN: %python -c "import sys; print(open(sys.argv[1], 'rb').read().hex(' '))" %t.res | FileCheck %s --check-prefix=MENU3
+; MENU3: ff 04 00 ff 01 00 30 10 25 00 00 00
+; MENU3-SAME: 00 00 00 00 90 00 26 46 69 6c 65 00
+
+; A flag that needs a WORD (HELP is 0x4000) has no 2.x form.
+; RUN: not llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-menu-help.rc 2>&1 | FileCheck %s --check-prefix=HELP
+; HELP: menu item flags 0x4080 do not fit the Windows 1.x and 2.x menu format
+
+; Icons, cursors and bitmaps in 1.x and 2.x: the file of the 2.x SDK's icon
+; editor, as one resource. The resource compiler sets the second byte of an
+; icon or cursor to 1, and gives it the flags of a 3.x icon group.
+; RUN: llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-old-pictures.rc
+; RUN: %python -c "import sys; print(open(sys.argv[1], 'rb').read().hex(' '))" %t.res | FileCheck %s --check-prefix=PICTURES
+; PICTURES: ff 03 00 ff 01 00 30 10 16 00 00 00
+; PICTURES-SAME: 01 01 00 00 00 00 08 00 02 00 02 00 00 00 ff ff 0f f0 00 00 a5 5a
+; PICTURES-SAME: ff 01 00 ff 02 00 30 10 16 00 00 00
+; PICTURES-SAME: 03 01 01 00 01 00 08 00 02 00 02 00 00 00 ff ff 0f f0 00 00 a5 5a
+; PICTURES-SAME: ff 02 00 ff 03 00 30 00 14 00 00 00
+; PICTURES-SAME: 02 00 00 00 08 00 02 00 02 00 01 01 00 00 00 00 81 00 7e 00{{$}}
+
+; A Windows 3.x file has no 1.x or 2.x form.
+; RUN: not llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-icon.rc 2>&1 | FileCheck %s --check-prefix=NEW -DWHAT=icon
+; RUN: not llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-bitmap.rc 2>&1 | FileCheck %s --check-prefix=NEW -DWHAT=bitmap
+; NEW: the [[WHAT]] file {{.*}} is in the Windows 3.x format
+; RUN: not llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-short.rc 2>&1 | FileCheck %s --check-prefix=SHORT
+; SHORT: the icon file win16-short.ico is not in the Windows 1.x and 2.x format
+; RUN: llvm-rc -no-preprocess -win16-version 3.0 /FO %t.res -- %p/Inputs/win16-icon.rc
+
+; RUN: not llvm-rc -no-preprocess -win16-version 4.0 /FO %t.res -- %p/Inputs/win16-menu.rc 2>&1 | FileCheck %s --check-prefix=BAD
+; RUN: not llvm-rc -no-preprocess -win16-version x /FO %t.res -- %p/Inputs/win16-menu.rc 2>&1 | FileCheck %s --check-prefix=BAD
+; BAD: Invalid 16-bit Windows version
+
+; Dialog fonts came with Windows 3.0.
+; RUN: not llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-dialog-font.rc 2>&1 | FileCheck %s --check-prefix=FONT
+; FONT: a dialog FONT is not in Windows 1.x and 2.x
+; RUN: llvm-rc -no-preprocess -win16-version 3.0 /FO %t.res -- %p/Inputs/win16-dialog-font.rc
+
+; Before 3.0, a LISTBOX is LBS_STANDARD (sorted, with a scroll bar), as the
+; 1.x and 2.x resource compilers make it; from 3.0, LBS_NOTIFY | WS_BORDER.
+; RUN: llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-listbox.rc
+; RUN: %python -c "import sys; print(open(sys.argv[1], 'rb').read().hex(' '))" %t.res | FileCheck %s --check-prefix=LISTBOX2
+; LISTBOX2: 01 00 02 00 03 00 04 00 05 00 03 00 a0 50 83 00 00{{$}}
+; RUN: llvm-rc -no-preprocess -win16-version 3.0 /FO %t.res -- %p/Inputs/win16-listbox.rc
+; RUN: %python -c "import sys; print(open(sys.argv[1], 'rb').read().hex(' '))" %t.res | FileCheck %s --check-prefix=LISTBOX3
+; LISTBOX3: 01 00 02 00 03 00 04 00 05 00 01 00 80 50 83 00 00{{$}}
+
+; Combo boxes came with 3.0.
+; RUN: not llvm-rc -no-preprocess -win16-version 2.03 /FO %t.res -- %p/Inputs/win16-combobox.rc 2>&1 | FileCheck %s --check-prefix=COMBO
+; COMBO: combo boxes came with Windows 3.0

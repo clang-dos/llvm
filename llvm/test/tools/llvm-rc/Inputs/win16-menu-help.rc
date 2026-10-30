@@ -1,0 +1,4 @@
+1 MENU
+BEGIN
+  MENUITEM "&Help", 1, HELP
+END

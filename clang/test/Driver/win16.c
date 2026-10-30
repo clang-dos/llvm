@@ -88,6 +88,7 @@
 // WIN31-SAME: "option" "version=3.10"
 // WIN31-NOT:  "segment"
 // WIN31-SAME: "option" "protmode"
+// WIN31-SAME: "@{{.*}}win16{{/|\\\\}}windows.lnk"
 
 // Windows 1.x, 2.x and 3.0 in real mode move segments in memory: the code is
 // fixed, and so is the data in the far data models and DLLs.
@@ -97,14 +98,17 @@
 // WIN2-SAME: "option" "version=2.03" "segment" "type" "code" "fixed"
 // WIN2-NOT:  "data"
 // WIN2-NOT:  "protmode"
+// WIN2-SAME: "@{{.*}}win16{{/|\\\\}}windows200.lnk"
 // RUN: %clang --target=i8086-pc-win163.0 --sysroot=%S/Inputs/msdos_tree \
 // RUN:   -fuse-ld=wlink -mcmodel=large -### %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=WIN30
 // WIN30:      "{{.*}}wlink" "format" "windows"
 // WIN30-SAME: "option" "version=3.00" "segment" "type" "code" "fixed" "segment" "type" "data" "fixed"
 // WIN30-NOT:  "protmode"
+// WIN30-SAME: "@{{.*}}win16{{/|\\\\}}windows300.lnk"
 // RUN: %clang --target=i8086-pc-win161.01 --sysroot=%S/Inputs/msdos_tree \
 // RUN:   -fuse-ld=wlink -shared -mcmodel=medium -### %s -o MYLIB.DLL 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=WIN1
 // WIN1:      "format" "windows" "dll"
 // WIN1-SAME: "option" "version=1.01" "segment" "type" "code" "fixed" "segment" "type" "data" "fixed"
+// WIN1-SAME: "@{{.*}}win16{{/|\\\\}}windows100.lnk"

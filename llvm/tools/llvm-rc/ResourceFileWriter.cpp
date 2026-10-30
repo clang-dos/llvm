@@ -463,11 +463,21 @@ Error ResourceFileWriter::visitAcceleratorsResource(const RCResource *Res) {
   return writeResource(Res, &ResourceFileWriter::writeAcceleratorsBody);
 }
 
+// Windows 1.x and 2.x have their own icon, cursor and bitmap formats: the
+// files of their SDK's icon editor, as their resource compiler copies them.
+bool ResourceFileWriter::isOldPictureFormat() const {
+  return Params.Win16 && Params.Win16Version < 0x0300;
+}
+
 Error ResourceFileWriter::visitBitmapResource(const RCResource *Res) {
+  if (isOldPictureFormat())
+    return writeResource(Res, &ResourceFileWriter::writeOldPictureBody);
   return writeResource(Res, &ResourceFileWriter::writeBitmapBody);
 }
 
 Error ResourceFileWriter::visitCursorResource(const RCResource *Res) {
+  if (isOldPictureFormat())
+    return writeResource(Res, &ResourceFileWriter::writeOldPictureBody);
   return handleError(visitIconOrCursorResource(Res), Res);
 }
 
@@ -476,6 +486,8 @@ Error ResourceFileWriter::visitDialogResource(const RCResource *Res) {
 }
 
 Error ResourceFileWriter::visitIconResource(const RCResource *Res) {
+  if (isOldPictureFormat())
+    return writeResource(Res, &ResourceFileWriter::writeOldPictureBody);
   return handleError(visitIconOrCursorResource(Res), Res);
 }
 
@@ -595,7 +607,14 @@ Error ResourceFileWriter::writeResource(
     RETURN_IF_ERROR(handleError(writeIdentifier(Res->ResName), Res));
     ContextKeeper RAII(this);
     RETURN_IF_ERROR(handleError(Res->applyStmts(this), Res));
-    writeInt<uint16_t>(Res->MemoryFlags);
+    uint16_t MemoryFlags = Res->MemoryFlags;
+    // An icon or cursor of Windows 1.x and 2.x is one resource, with the
+    // flags of a 3.x icon group: pure as well as moveable and discardable.
+    if (isOldPictureFormat() &&
+        (isa<IconResource>(Res) || isa<CursorResource>(Res)) &&
+        MemoryFlags == IconResource::getDefaultMemoryFlags())
+      MemoryFlags |= MfPure;
+    writeInt<uint16_t>(MemoryFlags);
     uint64_t SizeLoc = writeInt<uint32_t>(0);
     uint64_t DataLoc = tell();
     PadBase = DataLoc;
@@ -785,6 +804,71 @@ Error ResourceFileWriter::writeBitmapBody(const RCResource *Base) {
     return createError("Incorrect bitmap file.");
 
   *FS << Buffer.substr(BITMAPFILEHEADER_size);
+  return Error::success();
+}
+
+// A Windows 1.x or 2.x icon, cursor or bitmap: the file of the 1.x and 2.x
+// SDK's icon editor. An icon or cursor file has two bytes (1 0 for an icon,
+// 3 0 or 0 0 for a cursor), the hot spot, the width and height in pixels,
+// the width in bytes, a WORD of 0, and the AND and XOR masks; the resource
+// compiler copies it and sets the second byte to 1. A bitmap file has two
+// bytes (2 0), a BITMAP structure (bmType, the width and height in pixels,
+// the width in bytes, BYTE planes and bits per pixel, and a DWORD of 0) and
+// the bits, and the resource compiler copies it as it is.
+Error ResourceFileWriter::writeOldPictureBody(const RCResource *Base) {
+  StringRef Filename;
+  const char *What;
+  if (auto *Icon = dyn_cast<IconResource>(Base)) {
+    Filename = Icon->IconLoc;
+    What = "icon";
+  } else if (auto *Cursor = dyn_cast<CursorResource>(Base)) {
+    Filename = Cursor->CursorLoc;
+    What = "cursor";
+  } else {
+    Filename = cast<BitmapResource>(Base)->BitmapLoc;
+    What = "bitmap";
+  }
+  bool IsBitmap = isa<BitmapResource>(Base);
+  bool IsLong;
+  stripQuotes(Filename, IsLong);
+  auto File = loadFile(Filename);
+  if (!File)
+    return File.takeError();
+  StringRef Buffer = (*File)->getBuffer();
+
+  // Check that the file is as big as its header says.
+  auto Word = [&](size_t Off) -> uint64_t {
+    return support::endian::read16le(Buffer.data() + Off);
+  };
+  bool Fits;
+  if (IsBitmap) {
+    Fits = !Buffer.starts_with("BM") && Buffer.size() >= 16 &&
+           Word(8) * 8 >= Word(4) * uint8_t(Buffer[11]) &&
+           Buffer.size() >= 16 + Word(8) * Word(6) * uint8_t(Buffer[10]);
+  } else {
+    Fits = Buffer.size() >= 14 && Word(10) * 8 >= Word(6) &&
+           Buffer.size() >= 14 + Word(10) * Word(8) * 2;
+  }
+  if (!Fits) {
+    // The Windows 3.x files: BITMAPFILEHEADER, or ICONDIR (0, 1 for an icon
+    // or 2 for a cursor, the number of images). An old cursor can start the
+    // same way, so the sizes are checked first.
+    if (Buffer.starts_with("BM") ||
+        (Buffer.size() >= 4 && Word(0) == 0 && (Word(2) == 1 || Word(2) == 2)))
+      return createError(Twine("the ") + What + " file " + Filename +
+                         " is in the Windows 3.x format; Windows 1.x and "
+                         "2.x take the format of their SDK's icon editor");
+    return createError(Twine("the ") + What + " file " + Filename +
+                       " is not in the Windows 1.x and 2.x format");
+  }
+
+  if (IsBitmap) {
+    *FS << Buffer;
+  } else {
+    writeInt<uint8_t>(Buffer[0]);
+    writeInt<uint8_t>(1);
+    *FS << Buffer.substr(2);
+  }
   return Error::success();
 }
 
@@ -1243,6 +1327,9 @@ Error ResourceFileWriter::writeDialogBody16(const RCResource *Base) {
   auto *Res = cast<DialogResource>(Base);
   if (Res->IsExtended)
     return createError("DIALOGEX is not in 16-bit Windows");
+  // Dialog fonts (DS_SETFONT) came with Windows 3.0.
+  if (ObjectData.Font && Params.Win16Version < 0x0300)
+    return createError("a dialog FONT is not in Windows 1.x and 2.x");
 
   // Default style: WS_POPUP | WS_BORDER | WS_SYSMENU.
   const uint32_t DefaultStyle = 0x80880000;
@@ -1289,6 +1376,9 @@ Error ResourceFileWriter::writeDialogBody16(const RCResource *Base) {
                         std::move(Err));
     };
     auto TypeInfo = Control::SupportedCtls.lookup(Ctl.Type);
+    // Before 3.0, a LISTBOX is LBS_STANDARD: sorted, with a scroll bar.
+    if (Params.Win16Version < 0x0300 && Ctl.Type.equals_insensitive("LISTBOX"))
+      TypeInfo.Style = 0x50a00003;
     IntWithNotMask CtlStyle(TypeInfo.Style);
     CtlStyle |= Ctl.Style.value_or(RCInt(0));
     RETURN_IF_ERROR(handleCtlError(checkSignedNumberFits<int16_t>(
@@ -1328,6 +1418,8 @@ Error ResourceFileWriter::writeDialogBody16(const RCResource *Base) {
                       .Case("COMBOBOX", 0x85)
                       .Default(std::nullopt);
     }
+    if (ClassByte == 0x85 && Params.Win16Version < 0x0300)
+      return handleCtlError(createError("combo boxes came with Windows 3.0"));
     if (ClassByte)
       writeInt<uint8_t>(*ClassByte);
     else
@@ -1378,12 +1470,19 @@ Error ResourceFileWriter::writeMenuDefinition(
   return writeMenuDefinitionList(PopupPtr->SubItems);
 }
 
-// A 16-bit Windows menu item: WORD flags, WORD ID (not for popups) and
-// an 8-bit string.
+// A 16-bit Windows menu item: WORD flags (a BYTE before Windows 3.0), WORD
+// ID (not for popups) and an 8-bit string.
 Error ResourceFileWriter::writeMenuDefinition16(
     const std::unique_ptr<MenuDefinition> &Def, uint16_t Flags) {
   const MenuDefinition *DefPtr = Def.get();
-  writeInt<uint16_t>(Flags);
+  if (Params.Win16Version < 0x0300) {
+    if (Flags > 0xFF)
+      return createError("menu item flags 0x" + Twine::utohexstr(Flags) +
+                         " do not fit the Windows 1.x and 2.x menu format");
+    writeInt<uint8_t>(Flags);
+  } else {
+    writeInt<uint16_t>(Flags);
+  }
   if (auto *MenuItemPtr = dyn_cast<MenuItem>(DefPtr)) {
     if (MenuItemPtr->Id != static_cast<uint32_t>(-1))
       RETURN_IF_ERROR(
@@ -1461,7 +1560,9 @@ Error ResourceFileWriter::writeMenuExDefinitionList(
 Error ResourceFileWriter::writeMenuBody(const RCResource *Base) {
   // At first, MENUHEADER structure. In fact, these are two WORDs equal to 0.
   // Ref: msdn.microsoft.com/en-us/library/windows/desktop/ms648018.aspx
-  writeInt<uint32_t>(0);
+  // Windows 1.x and 2.x menus have no header.
+  if (!Params.Win16 || Params.Win16Version >= 0x0300)
+    writeInt<uint32_t>(0);
 
   return writeMenuDefinitionList(cast<MenuResource>(Base)->Elements);
 }

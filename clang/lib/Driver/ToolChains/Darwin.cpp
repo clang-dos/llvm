@@ -1890,10 +1890,15 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
   // libSystem, and made libgcc_s.1.dylib a stub. We never link libgcc_s when
   // building for aarch64 or iOS simulator, since libgcc_s was made obsolete
   // before either existed.
-  if (getTriple().getArch() != llvm::Triple::aarch64 &&
-      ((isTargetIOSBased() && isIPhoneOSVersionLT(5, 0) &&
-        !isTargetIOSSimulator()) ||
-       (isTargetMacOSBased() && isMacosxVersionLT(10, 6))))
+  // Mac OS X 10.0 has no libgcc_s.1.dylib; its GCC linked the static
+  // libcc_dynamic.a for the same helpers (64-bit division and so on).
+  // FIXME: 10.1 to 10.3.
+  if (isTargetMacOSBased() && isMacosxVersionLT(10, 1))
+    CmdArgs.push_back("-lcc_dynamic");
+  else if (getTriple().getArch() != llvm::Triple::aarch64 &&
+           ((isTargetIOSBased() && isIPhoneOSVersionLT(5, 0) &&
+             !isTargetIOSSimulator()) ||
+            (isTargetMacOSBased() && isMacosxVersionLT(10, 6))))
     CmdArgs.push_back("-lgcc_s.1");
   AddLinkRuntimeLib(Args, CmdArgs, "builtins");
 }
@@ -4053,9 +4058,17 @@ static void addDefaultCRTLinkArgs(const Darwin &D, const ArgList &Args,
 
   if (!D.isTargetMacOS())
     return;
-  if (D.isMacosxVersionLT(10, 5))
+  if (D.isMacosxVersionLT(10, 5)) {
     CmdArgs.push_back("-lcrt1.o");
-  else if (D.isMacosxVersionLT(10, 6))
+    // Mac OS X 10.0's crt1.o has common symbols, such as
+    // __cthread_init_routine, that libSystem also defines. Its dyld refuses
+    // to run a program that defines them a second time, so have ld64 use
+    // the libSystem copies instead of allocating them in the program.
+    if (D.isMacosxVersionLT(10, 1)) {
+      CmdArgs.push_back("-commons");
+      CmdArgs.push_back("use_dylibs");
+    }
+  } else if (D.isMacosxVersionLT(10, 6))
     CmdArgs.push_back("-lcrt1.10.5.o");
   else if (D.isMacosxVersionLT(10, 8))
     CmdArgs.push_back("-lcrt1.10.6.o");

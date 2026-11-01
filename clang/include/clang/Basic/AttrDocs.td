@@ -3956,6 +3956,23 @@ interrupt would.
   }];
 }
 
+def M68kRawInlineDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+On M68k targets, ``__attribute__((raw_inline(w1, w2, ...)))`` on a function
+declaration makes every call to the function emit the given 16-bit code
+words in place of a ``jsr``. Arguments are passed, and the result returned,
+as the function's calling convention says. This is how classic Mac OS
+headers declare Toolbox traps, together with ``pascal``:
+
+.. code-block:: c
+
+  pascal void InitGraf(void *globalPtr) __attribute__((raw_inline(0xA86E)));
+
+Such a function has no body and its address cannot be taken.
+  }];
+}
+
 def M68kRTDDocs : Documentation {
   let Category = DocCatCallingConvs;
   let Content = [{

@@ -331,6 +331,23 @@ bool M68kExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
 
     return true;
   }
+  case M68k::PASCAL_POP8: {
+    // move.b (sp), d0; addq.l #2, sp
+    BuildMI(MBB, MBBI, DL, TII->get(M68k::MOV8dj), M68k::BD0).addReg(M68k::SP);
+    FL->emitSPUpdate(MBB, MBBI, 2, /*InEpilogue=*/false);
+    MBB.erase(MBBI);
+    return true;
+  }
+  case M68k::PASCAL_POP16:
+  case M68k::PASCAL_POP32: {
+    // move.w/l (sp)+, d0
+    bool Is16 = MBBI->getOpcode() == M68k::PASCAL_POP16;
+    BuildMI(MBB, MBBI, DL, TII->get(Is16 ? M68k::MOV16do : M68k::MOV32do),
+            Is16 ? M68k::WD0 : M68k::D0)
+        .addReg(M68k::SP);
+    MBB.erase(MBBI);
+    return true;
+  }
   case M68k::RET: {
     if (MBB.getParent()->getFunction().getCallingConv() ==
         CallingConv::M68k_INTR) {

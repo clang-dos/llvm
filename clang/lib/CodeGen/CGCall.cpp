@@ -86,11 +86,17 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
     return llvm::CallingConv::ARM_AAPCS_VFP;
   case CC_IntelOclBicc:
     return llvm::CallingConv::Intel_OCL_BI;
-  // __pascal is only implemented for i8086.
+  // __pascal is implemented for i8086 and 68k; on PowerPC (classic Mac OS)
+  // Pascal and C calls are the same.
   case CC_X86Pascal:
-    return Target.getTriple().getArch() == llvm::Triple::i8086
-               ? llvm::CallingConv::X86_16_Pascal
-               : llvm::CallingConv::C;
+    switch (Target.getTriple().getArch()) {
+    case llvm::Triple::i8086:
+      return llvm::CallingConv::X86_16_Pascal;
+    case llvm::Triple::m68k:
+      return llvm::CallingConv::M68k_Pascal;
+    default:
+      return llvm::CallingConv::C;
+    }
   // TODO: Add support for __vectorcall to LLVM.
   case CC_X86VectorCall:
     return llvm::CallingConv::X86_VectorCall;

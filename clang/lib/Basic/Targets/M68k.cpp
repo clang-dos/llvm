@@ -85,6 +85,10 @@ void M68kTargetInfo::getTargetDefines(const LangOptions &Opts,
 
   Builder.defineMacro("__m68k__");
 
+  // "pascal" in Toolbox declarations selects the Pascal calling convention.
+  if (getTriple().isOSMacOSClassic())
+    Builder.defineMacro("pascal", "__attribute__((__pascal__))");
+
   DefineStd(Builder, "mc68000", Opts);
 
   // For sub-architecture
@@ -254,6 +258,7 @@ M68kTargetInfo::checkCallingConvention(CallingConv CC) const {
   switch (CC) {
   case CC_C:
   case CC_M68kRTD:
+  case CC_X86Pascal: // Pascal functions and Toolbox traps on classic Mac OS
     return CCCR_OK;
   default:
     return TargetInfo::checkCallingConvention(CC);

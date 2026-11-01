@@ -302,6 +302,11 @@ namespace CallingConv {
     /// Names are upper case, with no underscore prefix.
     X86_16_Pascal = 128,
 
+    /// Calling convention for Pascal functions and Toolbox traps on classic
+    /// 68k Mac OS: arguments pushed left to right, the callee pops them,
+    /// and the result is left in a stack slot above the arguments.
+    M68k_Pascal = 129,
+
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023
   };

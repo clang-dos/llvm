@@ -63,7 +63,9 @@ M68kRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 
 const uint32_t *
 M68kRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
-                                       CallingConv::ID) const {
+                                       CallingConv::ID CC) const {
+  if (CC == CallingConv::M68k_Pascal)
+    return CSR_M68k_Pascal_RegMask;
   return CSR_STD_RegMask;
 }
 
@@ -139,6 +141,11 @@ BitVector M68kRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
   setBitVector(M68k::PC);
   setBitVector(M68k::SP);
+
+  // On classic Mac OS, A5 points to the application's globals and jump
+  // table, and the Toolbox reads it at any time, interrupts included.
+  if (MF.getSubtarget<M68kSubtarget>().getTargetTriple().isOSMacOSClassic())
+    setBitVector(M68k::A5);
 
   if (TFI->hasFP(MF)) {
     setBitVector(FramePtr);

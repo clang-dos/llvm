@@ -133,6 +133,12 @@ static std::string computeM68kDataLayout(const Triple &TT) {
     return "E-m:e-p:32:32:32-i8:8:8-i16:16:16-i32:32:32-n8:16:32-a:0:32-S32";
   }
 
+  // Classic Mac OS aligns everything of 2 bytes or more to 2, including
+  // 64-bit integers and doubles.
+  if (TT.isOSMacOSClassic())
+    return "E-m:e-p:32:16:32-i8:8:8-i16:16:16-i32:16:32-i64:16:32-f32:16:32-"
+           "f64:16:32-n8:16:32-a:0:16-S16";
+
   // M68k pointers are always 32 bit wide even for 16-bit CPUs.
   // The ABI only specifies 16-bit alignment.
   // On at least the 68020+ with a 32-bit bus, there is a performance benefit
@@ -212,7 +218,7 @@ static std::string computePowerDataLayout(const Triple &T, StringRef ABIName) {
   if ((T.getArch() == Triple::ppc64 &&
        (!T.isPPC64ELFv2ABI() && ABIName != "elfv2"))) {
     Ret += "-Fi64";
-  } else if (T.isOSAIX()) {
+  } else if (T.isPPCAIXABI()) {
     Ret += is64Bit ? "-Fi64" : "-Fi32";
   } else {
     Ret += "-Fn32";
@@ -223,8 +229,8 @@ static std::string computePowerDataLayout(const Triple &T, StringRef ABIName) {
   // PPC64 has 32 and 64 bit registers, PPC32 has only 32 bit ones.
   Ret += is64Bit ? "-i64:64-i128:128-n32:64" : "-i64:64-n32";
 
-  // The ABI alignment for doubles on AIX is 4 bytes.
-  if (T.isOSAIX())
+  // The ABI alignment for doubles on AIX and classic Mac OS is 4 bytes.
+  if (T.isPPCAIXABI())
     Ret += "-f64:32:64";
 
   // Specify the vector alignment explicitly. For v256i1 and v512i1, the

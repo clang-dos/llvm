@@ -49,6 +49,21 @@ M68kTargetInfo::M68kTargetInfo(const llvm::Triple &Triple,
   } else {
     IntAlign = LongAlign = PointerAlign = 16;
   }
+
+  // Classic Mac OS uses the "mac68k" layout of MPW, THINK C and CodeWarrior:
+  // everything of 2 bytes or more is 2-byte aligned, so
+  // struct { char c; double d; int i; } is 14 bytes. The types match
+  // Retro68's gcc, except long double, which is double for now: SANE's
+  // extended type isn't supported.
+  if (getTriple().isOSMacOSClassic()) {
+    SizeType = UnsignedLong;
+    PtrDiffType = SignedLong;
+    IntPtrType = SignedLong;
+    WCharType = SignedLong;
+    FloatAlign = DoubleAlign = LongDoubleAlign = LongLongAlign = 16;
+    LongDoubleWidth = 64;
+    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+  }
 }
 
 bool M68kTargetInfo::setCPU(StringRef Name) {

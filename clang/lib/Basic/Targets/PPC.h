@@ -550,6 +550,51 @@ public:
   }
 };
 
+// Classic Mac OS on PowerPC (System 7.1.2 to Mac OS 9, and CarbonLib). The
+// ABI is 32-bit AIX's, as used by Apple's MrC and Metrowerks CodeWarrior:
+// TOC in r2, TVector function descriptors, "power" struct alignment, and
+// long double the same as double. Unlike AIX, char is signed.
+class LLVM_LIBRARY_VISIBILITY MacOSClassicPPC32TargetInfo
+    : public MacOSClassicTargetInfo<PPC32TargetInfo> {
+public:
+  MacOSClassicPPC32TargetInfo(const llvm::Triple &Triple,
+                              const TargetOptions &Opts)
+      : MacOSClassicTargetInfo<PPC32TargetInfo>(Triple, Opts) {
+    SizeType = UnsignedLong;
+    PtrDiffType = SignedLong;
+    IntPtrType = SignedLong;
+    LongDoubleWidth = 64;
+    LongDoubleAlign = DoubleAlign = 32;
+    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+  }
+
+  void getTargetDefines(const LangOptions &Opts,
+                        MacroBuilder &Builder) const override {
+    MacOSClassicTargetInfo<PPC32TargetInfo>::getTargetDefines(Opts, Builder);
+    // Retro68's gcc defines these, and headers test them.
+    Builder.defineMacro("__NATURAL_ALIGNMENT__");
+    // Pascal and C calls are the same on PowerPC, so "pascal" in Toolbox
+    // declarations is accepted and has no effect.
+    Builder.defineMacro("pascal", "__attribute__((__pascal__))");
+  }
+
+  BuiltinVaListKind getBuiltinVaListKind() const override {
+    return TargetInfo::CharPtrBuiltinVaList;
+  }
+
+  bool defaultsToAIXPowerAlignment() const override { return true; }
+
+  CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
+    switch (CC) {
+    case CC_C:
+    case CC_X86Pascal:
+      return CCCR_OK;
+    default:
+      return CCCR_Warning;
+    }
+  }
+};
+
 class LLVM_LIBRARY_VISIBILITY AIXPPC64TargetInfo :
   public AIXTargetInfo<PPC64TargetInfo> {
 public:

@@ -211,7 +211,7 @@ public:
   bool isTargetMachO() const { return getTargetTriple().isOSBinFormatMachO(); }
   bool isTargetLinux() const { return getTargetTriple().isOSLinux(); }
 
-  bool isAIXABI() const { return getTargetTriple().isOSAIX(); }
+  bool isAIXABI() const { return getTargetTriple().isPPCAIXABI(); }
   /// The 32-bit PowerPC Mac OS X ABI. Like AIX it has a 24-byte linkage area
   /// and a parameter save area, but there is no TOC and no descriptors.
   bool isDarwinABI() const {

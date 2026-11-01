@@ -178,7 +178,7 @@ static std::string computeFSAdditions(StringRef FS, CodeGenOptLevel OL,
       FullFS = "+invariant-function-descriptors";
   }
 
-  if (TT.isOSAIX()) {
+  if (TT.isPPCAIXABI()) {
     if (!FullFS.empty())
       FullFS = "+aix," + FullFS;
     else
@@ -189,10 +189,10 @@ static std::string computeFSAdditions(StringRef FS, CodeGenOptLevel OL,
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
-  if (TT.isOSBinFormatMachO() && !TT.isOSAIX())
+  if (TT.isOSBinFormatMachO() && !TT.isPPCAIXABI())
     return std::make_unique<TargetLoweringObjectFileMachO>();
 
-  if (TT.isOSAIX())
+  if (TT.isPPCAIXABI())
     return std::make_unique<TargetLoweringObjectFileXCOFF>();
 
   return std::make_unique<PPC64LinuxTargetObjectFile>();
@@ -205,7 +205,7 @@ PPCABI PPCTargetMachine::computeABI(const Triple &TT, StringRef ABIName) {
   if (ABIName.starts_with("elfv2"))
     return PPC_ABI_ELFv2;
 
-  if (TT.isOSAIX())
+  if (TT.isPPCAIXABI())
     return ABIName == "vec-extabi" ? PPC_ABI_AIX_EXTABI : PPC_ABI_UNKNOWN;
 
   switch (TT.getArch()) {
@@ -220,22 +220,22 @@ PPCABI PPCTargetMachine::computeABI(const Triple &TT, StringRef ABIName) {
 
 static Reloc::Model getEffectiveRelocModel(const Triple &TT,
                                            std::optional<Reloc::Model> RM) {
-  if (TT.isOSAIX() && RM && *RM != Reloc::PIC_)
+  if (TT.isPPCAIXABI() && RM && *RM != Reloc::PIC_)
     report_fatal_error("invalid relocation model, AIX only supports PIC",
                        false);
 
-  if (TT.isOSBinFormatMachO() && !TT.isOSAIX() && TT.isArch64Bit())
+  if (TT.isOSBinFormatMachO() && !TT.isPPCAIXABI() && TT.isArch64Bit())
     report_fatal_error("64-bit PowerPC Mac OS X is not supported", false);
 
   if (RM)
     return *RM;
 
   // Darwin defaults to dynamic-no-pic, like Apple's GCC for executables.
-  if (TT.isOSBinFormatMachO() && !TT.isOSAIX())
+  if (TT.isOSBinFormatMachO() && !TT.isPPCAIXABI())
     return Reloc::DynamicNoPIC;
 
   // Big Endian PPC and AIX default to PIC.
-  if (TT.getArch() == Triple::ppc64 || TT.isOSAIX())
+  if (TT.getArch() == Triple::ppc64 || TT.isPPCAIXABI())
     return Reloc::PIC_;
 
   // Rest are static by default.
@@ -255,7 +255,7 @@ getEffectivePPCCodeModel(const Triple &TT, std::optional<CodeModel::Model> CM,
 
   if (JIT)
     return CodeModel::Small;
-  if (TT.isOSAIX()) {
+  if (TT.isPPCAIXABI()) {
     // Use large code model for 64-bit AIX by default.
     if (TT.isArch64Bit())
       return CodeModel::Large;

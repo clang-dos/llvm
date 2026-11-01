@@ -109,6 +109,10 @@ StringRef getNormalizedPPCTargetCPU(const Triple &T, StringRef CPUName) {
   // default to a more generic option for each architecture. (except on AIX)
   if (T.isOSAIX())
     return "pwr7";
+  // Classic Mac OS: the 601, the first PowerPC Mac, so code runs on all of
+  // them.
+  if (T.isOSMacOSClassic())
+    return "601";
   else if (T.getArch() == Triple::ppc64le)
     return "ppc64le";
   else if (T.getArch() == Triple::ppc64)

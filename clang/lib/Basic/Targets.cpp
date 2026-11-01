@@ -365,6 +365,9 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
       return std::make_unique<LinuxTargetInfo<M68kTargetInfo>>(Triple, Opts);
     case llvm::Triple::NetBSD:
       return std::make_unique<NetBSDTargetInfo<M68kTargetInfo>>(Triple, Opts);
+    case llvm::Triple::MacOSClassic:
+      return std::make_unique<MacOSClassicTargetInfo<M68kTargetInfo>>(Triple,
+                                                                      Opts);
     default:
       return std::make_unique<M68kTargetInfo>(Triple, Opts);
     }
@@ -385,6 +388,8 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
       return std::make_unique<RTEMSTargetInfo<PPC32TargetInfo>>(Triple, Opts);
     case llvm::Triple::AIX:
       return std::make_unique<AIXPPC32TargetInfo>(Triple, Opts);
+    case llvm::Triple::MacOSClassic:
+      return std::make_unique<MacOSClassicPPC32TargetInfo>(Triple, Opts);
     default:
       return std::make_unique<PPC32TargetInfo>(Triple, Opts);
     }

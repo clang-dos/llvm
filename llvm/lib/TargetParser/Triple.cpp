@@ -1027,7 +1027,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
 
   case Triple::ppc64:
   case Triple::ppc:
-    if (T.isOSAIX())
+    if (T.isPPCAIXABI())
       return Triple::XCOFF;
     if (T.isOSDarwin())
       return Triple::MachO;
@@ -1058,6 +1058,27 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   llvm_unreachable("unknown architecture");
 }
 
+/// Classic Mac OS triples may be spelled with "macos", as Retro68 spells them
+/// (m68k-apple-macos, powerpc-apple-macos9). "macos" normally means Mac OS X,
+/// so only take it as classic Mac OS where that can't be meant: on 68k, which
+/// Mac OS X never ran on, or with a version below 10.
+static Triple::OSType fixupClassicMacOS(Triple::ArchType Arch,
+                                        Triple::OSType OS, StringRef OSName) {
+  if (OS != Triple::MacOSX || !OSName.starts_with("macos") ||
+      OSName.starts_with("macosx"))
+    return OS;
+  if (Arch == Triple::m68k)
+    return Triple::MacOSClassic;
+  if (Arch == Triple::ppc) {
+    StringRef Version = OSName.drop_front(strlen("macos"));
+    unsigned Major;
+    if (!Version.empty() && !Version.consumeInteger(10, Major) && Major >= 1 &&
+        Major <= 9)
+      return Triple::MacOSClassic;
+  }
+  return OS;
+}
+
 /// Construct a triple from the string representation provided.
 ///
 /// This stores the string representation and parses the various pieces into
@@ -1073,6 +1094,7 @@ Triple::Triple(std::string &&Str) : Data(std::move(Str)) {
       Vendor = parseVendor(Components[1]);
       if (Components.size() > 2) {
         OS = parseOS(Components[2]);
+        OS = fixupClassicMacOS(Arch, OS, Components[2]);
         if (Components.size() > 3) {
           Environment = parseEnvironment(Components[3]);
           ObjectFormat = parseFormat(Components[3]);
@@ -1106,6 +1128,7 @@ Triple::Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr)
       Arch(parseArch(ArchStr.str())), SubArch(parseSubArch(ArchStr.str())),
       Vendor(parseVendor(VendorStr.str())), OS(parseOS(OSStr.str())),
       Environment(), ObjectFormat(Triple::UnknownObjectFormat) {
+  OS = fixupClassicMacOS(Arch, OS, OSStr.str());
   ObjectFormat = getDefaultFormat(*this);
 }
 
@@ -1123,6 +1146,7 @@ Triple::Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr,
       Vendor(parseVendor(VendorStr.str())), OS(parseOS(OSStr.str())),
       Environment(parseEnvironment(EnvironmentStr.str())),
       ObjectFormat(parseFormat(EnvironmentStr.str())) {
+  OS = fixupClassicMacOS(Arch, OS, OSStr.str());
   if (ObjectFormat == Triple::UnknownObjectFormat)
     ObjectFormat = getDefaultFormat(*this);
 }
@@ -1503,7 +1527,7 @@ VersionTuple Triple::getOSVersion() const {
   StringRef OSTypeName = getOSTypeName(getOS());
   if (OSName.starts_with(OSTypeName))
     OSName = OSName.substr(OSTypeName.size());
-  else if (getOS() == MacOSX)
+  else if (getOS() == MacOSX || getOS() == MacOSClassic)
     OSName.consume_front("macos");
   else if (OSName.starts_with("visionos"))
     OSName.consume_front("visionos");
@@ -2603,8 +2627,8 @@ LongDoubleFormat Triple::getDefaultLongDoubleFormat() const {
   case ppc64le:
     // PowerPC uses IBM double-double, except on a handful of OSes that use
     // plain IEEE double. NetBSD only switches to IEEE double on 32-bit PowerPC.
-    if (isOSAIX() || isOSFreeBSD() || isOSOpenBSD() || isMusl() ||
-        (isOSNetBSD() && isPPC32()))
+    if (isOSAIX() || isOSMacOSClassic() || isOSFreeBSD() || isOSOpenBSD() ||
+        isMusl() || (isOSNetBSD() && isPPC32()))
       return LongDoubleFormat::IEEEdouble;
     return LongDoubleFormat::PPCDoubleDouble;
   case x86:

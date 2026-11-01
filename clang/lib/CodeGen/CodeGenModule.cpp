@@ -193,7 +193,7 @@ createTargetCodeGenInfo(CodeGenModule &CGM) {
   }
 
   case llvm::Triple::ppc: {
-    if (Triple.isOSAIX())
+    if (Triple.isPPCAIXABI())
       return createAIXTargetCodeGenInfo(CGM, /*Is64Bit=*/false);
 
     bool IsSoftFloat =

@@ -169,7 +169,7 @@ static MCSubtargetInfo *createPPCMCSubtargetInfo(const Triple &TT,
   // Set some default feature to MC layer.
   std::string FullFS = std::string(FS);
 
-  if (TT.isOSAIX()) {
+  if (TT.isPPCAIXABI()) {
     if (!FullFS.empty())
       FullFS = "+aix," + FullFS;
     else

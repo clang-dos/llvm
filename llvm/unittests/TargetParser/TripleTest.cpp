@@ -112,6 +112,49 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_FALSE(T.isOSWindows());
   EXPECT_FALSE(T.isOSMSDOS());
 
+  T = Triple("powerpc-apple-macosclassic");
+  EXPECT_EQ(Triple::ppc, T.getArch());
+  EXPECT_EQ(Triple::Apple, T.getVendor());
+  EXPECT_EQ(Triple::MacOSClassic, T.getOS());
+  EXPECT_EQ(Triple::XCOFF, T.getObjectFormat());
+  EXPECT_TRUE(T.isOSMacOSClassic());
+  EXPECT_TRUE(T.isPPCAIXABI());
+  EXPECT_FALSE(T.isOSDarwin());
+  EXPECT_FALSE(T.isMacOSX());
+  EXPECT_FALSE(T.isOSAIX());
+  EXPECT_EQ(LongDoubleFormat::IEEEdouble, T.getDefaultLongDoubleFormat());
+
+  T = Triple("powerpc-apple-macosclassic9.2");
+  EXPECT_EQ(Triple::MacOSClassic, T.getOS());
+  EXPECT_EQ(VersionTuple(9, 2), T.getOSVersion());
+
+  // Retro68's spellings: "macos" is classic Mac OS on 68k, and on PowerPC
+  // only with a version below 10.
+  T = Triple("m68k-apple-macos");
+  EXPECT_EQ(Triple::m68k, T.getArch());
+  EXPECT_EQ(Triple::MacOSClassic, T.getOS());
+  EXPECT_EQ(Triple::ELF, T.getObjectFormat());
+  EXPECT_FALSE(T.isPPCAIXABI());
+
+  T = Triple("m68k-apple-macos7.5.3");
+  EXPECT_EQ(Triple::MacOSClassic, T.getOS());
+  EXPECT_EQ(VersionTuple(7, 5, 3), T.getOSVersion());
+
+  T = Triple("powerpc-apple-macos9.2");
+  EXPECT_EQ(Triple::MacOSClassic, T.getOS());
+  EXPECT_EQ(Triple::XCOFF, T.getObjectFormat());
+  EXPECT_EQ(VersionTuple(9, 2), T.getOSVersion());
+
+  T = Triple("powerpc", "apple", "macos8.6");
+  EXPECT_EQ(Triple::MacOSClassic, T.getOS());
+
+  T = Triple("powerpc-apple-macos");
+  EXPECT_EQ(Triple::MacOSX, T.getOS());
+  T = Triple("powerpc-apple-macos10.4");
+  EXPECT_EQ(Triple::MacOSX, T.getOS());
+  T = Triple("powerpc-apple-macosx10.2");
+  EXPECT_EQ(Triple::MacOSX, T.getOS());
+
   T = Triple("ia16-unknown-dos-elf");
   EXPECT_EQ(Triple::i8086, T.getArch());
   EXPECT_EQ(Triple::MSDOS, T.getOS());
@@ -4054,6 +4097,7 @@ TEST(TripleTest, X86_16) {
   EXPECT_EQ("x86", Triple::getArchTypePrefix(Triple::i8086));
   EXPECT_EQ("msdos", Triple::getOSTypeName(Triple::MSDOS));
   EXPECT_EQ("win16", Triple::getOSTypeName(Triple::Win16));
+  EXPECT_EQ("macosclassic", Triple::getOSTypeName(Triple::MacOSClassic));
   EXPECT_EQ("omf", Triple::getObjectFormatTypeName(Triple::OMF));
   EXPECT_EQ(Triple::i8086, Triple::getArchTypeForLLVMName("i8086"));
 }

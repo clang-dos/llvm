@@ -34,6 +34,7 @@
 #include "ToolChains/MSDOS.h"
 #include "ToolChains/MSP430.h"
 #include "ToolChains/MSVC.h"
+#include "ToolChains/MacOSClassic.h"
 #include "ToolChains/Managarm.h"
 #include "ToolChains/MinGW.h"
 #include "ToolChains/MipsLinux.h"
@@ -6183,6 +6184,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
     case llvm::Triple::MSDOS:
     case llvm::Triple::Win16:
       TC = std::make_unique<toolchains::MSDOS>(*this, Target, Args);
+      break;
+    case llvm::Triple::MacOSClassic:
+      TC = std::make_unique<toolchains::MacOSClassic>(*this, Target, Args);
       break;
     case llvm::Triple::Darwin:
     case llvm::Triple::MacOSX:

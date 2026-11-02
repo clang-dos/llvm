@@ -3127,6 +3127,9 @@ void tools::addMCModel(const Driver &D, const llvm::opt::ArgList &Args,
       Ok = CM == "small" || CM == "medium" || CM == "large";
     } else if (Triple.getArch() == llvm::Triple::lanai) {
       Ok = llvm::is_contained({"small", "medium", "large"}, CM);
+    } else if (Triple.getArch() == llvm::Triple::m68k) {
+      // small: 16-bit PC-relative data references; large: 32-bit absolute.
+      Ok = llvm::is_contained({"small", "medium", "large"}, CM);
     }
     if (Ok) {
       CmdArgs.push_back(Args.MakeArgString("-mcmodel=" + CM));

@@ -355,7 +355,8 @@ public:
     MSDOS,        // MS-DOS and compatibles (16-bit real mode)
     Win16,        // 16-bit Windows (Windows 3.x NE programs and DLLs)
     MacOSClassic, // Classic Mac OS (System 7 to Mac OS 9) on 68k and PowerPC
-    LastOSType = MacOSClassic
+    AmigaOS,      // Classic AmigaOS (1.x to 3.x) on 68k, Hunk executables
+    LastOSType = AmigaOS
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -770,6 +771,9 @@ public:
   /// Classic Mac OS (System 7 to Mac OS 9), on 68k or PowerPC. Not Mac OS X:
   /// isOSDarwin() and isMacOSX() are false.
   bool isOSMacOSClassic() const { return getOS() == Triple::MacOSClassic; }
+
+  /// Classic AmigaOS (Kickstart 1.x to 3.x) on 68k.
+  bool isOSAmigaOS() const { return getOS() == Triple::AmigaOS; }
 
   /// Does this PowerPC target use the AIX ABI (TOC in r2, function
   /// descriptors, XCOFF objects)? True for AIX and for classic Mac OS on

@@ -47,8 +47,16 @@ M68kRegisterInfo::M68kRegisterInfo(const M68kSubtarget &ST)
     // passes IP anyway, how this works?
     : M68kGenRegisterInfo(M68k::A0, 0, 0, M68k::PC), Subtarget(ST) {
   StackPtr = M68k::SP;
-  FramePtr = M68k::A6;
-  GlobalBasePtr = M68k::A5;
+  if (ST.getTargetTriple().isOSAmigaOS()) {
+    // AmigaOS passes the library base in A6 to every OS call, so A6 can't
+    // hold the frame. Amiga compilers use A5 for the frame pointer, and A4
+    // for the small-data base.
+    FramePtr = M68k::A5;
+    GlobalBasePtr = M68k::A4;
+  } else {
+    FramePtr = M68k::A6;
+    GlobalBasePtr = M68k::A5;
+  }
   BasePtr = M68k::A4;
 }
 

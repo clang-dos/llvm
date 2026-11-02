@@ -105,7 +105,10 @@ M68kTargetLowering::M68kTargetLowering(const M68kTargetMachine &TM,
                   ISD::UMUL_LOHI, ISD::SMUL_LOHI}) {
     setOperationAction(OP, MVT::i8, Promote);
     setOperationAction(OP, MVT::i16, Legal);
-    setOperationAction(OP, MVT::i32, LibCall);
+    // There are no library functions for these, so split them into
+    // operations that have one: a 64-bit multiply, or a divide and a
+    // remainder.
+    setOperationAction(OP, MVT::i32, Expand);
   }
 
   for (auto OP : {ISD::UMUL_LOHI, ISD::SMUL_LOHI}) {
@@ -252,29 +255,32 @@ MVT M68kTargetLowering::getScalarShiftAmountTy(const DataLayout &DL,
 
 enum StructReturnType { NotStructReturn, RegStructReturn, StackStructReturn };
 
+// On AmigaOS the hidden struct-return pointer is passed in A1, as with gcc,
+// so it's never on the stack for the callee to pop.
 static StructReturnType
-callIsStructReturn(const SmallVectorImpl<ISD::OutputArg> &Outs) {
+callIsStructReturn(const SmallVectorImpl<ISD::OutputArg> &Outs,
+                   bool SRetInReg) {
   if (Outs.empty())
     return NotStructReturn;
 
   const ISD::ArgFlagsTy &Flags = Outs[0].Flags;
   if (!Flags.isSRet())
     return NotStructReturn;
-  if (Flags.isInReg())
+  if (Flags.isInReg() || SRetInReg)
     return RegStructReturn;
   return StackStructReturn;
 }
 
 /// Determines whether a function uses struct return semantics.
 static StructReturnType
-argsAreStructReturn(const SmallVectorImpl<ISD::InputArg> &Ins) {
+argsAreStructReturn(const SmallVectorImpl<ISD::InputArg> &Ins, bool SRetInReg) {
   if (Ins.empty())
     return NotStructReturn;
 
   const ISD::ArgFlagsTy &Flags = Ins[0].Flags;
   if (!Flags.isSRet())
     return NotStructReturn;
-  if (Flags.isInReg())
+  if (Flags.isInReg() || SRetInReg)
     return RegStructReturn;
   return StackStructReturn;
 }
@@ -597,7 +603,8 @@ SDValue M68kTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool IsVarArg = CLI.IsVarArg;
 
   MachineFunction &MF = DAG.getMachineFunction();
-  StructReturnType SR = callIsStructReturn(Outs);
+  StructReturnType SR =
+      callIsStructReturn(Outs, Subtarget.getTargetTriple().isOSAmigaOS());
   bool IsSibcall = false;
   M68kMachineFunctionInfo *MFI = MF.getInfo<M68kMachineFunctionInfo>();
   // const M68kRegisterInfo *TRI = Subtarget.getRegisterInfo();
@@ -1168,7 +1175,9 @@ SDValue M68kTargetLowering::LowerFormalArguments(
   } else {
     MMFI->setBytesToPopOnReturn(0); // Callee pops nothing.
     // If this is an sret function, the return should pop the hidden pointer.
-    if (!canGuaranteeTCO(CCID) && argsAreStructReturn(Ins) == StackStructReturn)
+    if (!canGuaranteeTCO(CCID) &&
+        argsAreStructReturn(Ins, Subtarget.getTargetTriple().isOSAmigaOS()) ==
+            StackStructReturn)
       MMFI->setBytesToPopOnReturn(4);
   }
 

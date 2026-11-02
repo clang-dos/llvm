@@ -1,0 +1,78 @@
+## A small program with a code, a data and a bss section. Each becomes a
+## hunk, and each R_68K_32 relocation becomes a HUNK_RELOC32 entry holding
+## the offset from the start of the target hunk.
+
+# RUN: yaml2obj %s -o %t.elf
+# RUN: llvm-elf2hunk %t.elf -o %t.hunk -v | FileCheck %s --check-prefix=LAYOUT
+# RUN: od -An -v -tx1 %t.hunk | FileCheck %s
+
+# LAYOUT:      hunk 0: CODE, 8 bytes, 1 relocations
+# LAYOUT-NEXT: hunk 1: DATA, 4 bytes, 1 relocations
+# LAYOUT-NEXT: hunk 2: BSS, 8 bytes, 0 relocations
+
+## HUNK_HEADER: no libraries, 3 hunks (0 to 2), sizes in longwords.
+# CHECK:      00 00 03 f3 00 00 00 00 00 00 00 03 00 00 00 00
+# CHECK-NEXT: 00 00 00 02 00 00 00 02 00 00 00 01 00 00 00 02
+## HUNK_CODE: move.l #data+0, %d0; nop; nop. The address becomes 0.
+# CHECK-NEXT: 00 00 03 e9 00 00 00 02 20 3c 00 00 00 00 4e 71
+## HUNK_RELOC32: 1 offset (2) into hunk 1, then HUNK_END.
+# CHECK-NEXT: 00 00 03 ec 00 00 00 01 00 00 00 01 00 00 00 02
+# CHECK-NEXT: 00 00 00 00 00 00 03 f2
+## HUNK_DATA: a pointer to code+4, relocated against hunk 0.
+# CHECK-SAME:                         00 00 03 ea 00 00 00 01
+# CHECK-NEXT: 00 00 00 04 00 00 03 ec 00 00 00 01 00 00 00 00
+# CHECK-NEXT: 00 00 00 00 00 00 00 00 00 00 03 f2
+## HUNK_BSS of 2 longwords.
+# CHECK-SAME:                                     00 00 03 eb
+# CHECK-NEXT: 00 00 00 02 00 00 03 f2
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS32
+  Data:    ELFDATA2MSB
+  Type:    ET_EXEC
+  Machine: EM_68K
+  Entry:   0x1000
+Sections:
+  - Name:    .text
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address: 0x1000
+    Content: 203C000020004E71
+  - Name:    .data
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 0x2000
+    Content: '00001004'
+  - Name:    .bss
+    Type:    SHT_NOBITS
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 0x3000
+    Size:    8
+  - Name:    .rela.text
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .text
+    Relocations:
+      - Offset: 0x1002
+        Symbol: data
+        Type:   R_68K_32
+  - Name:    .rela.data
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .data
+    Relocations:
+      - Offset: 0x2000
+        Symbol: _start
+        Type:   R_68K_32
+        Addend: 4
+Symbols:
+  - Name:    _start
+    Section: .text
+    Value:   0x1000
+    Binding: STB_GLOBAL
+  - Name:    data
+    Section: .data
+    Value:   0x2000
+    Binding: STB_GLOBAL
+...

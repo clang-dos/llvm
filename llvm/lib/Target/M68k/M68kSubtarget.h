@@ -60,6 +60,9 @@ protected:
 
   const M68kTargetMachine &TM;
 
+  // Before InstrInfo, whose register info picks the frame pointer by OS.
+  Triple TargetTriple;
+
   M68kInstrInfo InstrInfo;
   M68kFrameLowering FrameLowering;
   M68kTargetLowering TLInfo;
@@ -67,8 +70,6 @@ protected:
   /// The minimum alignment known to hold of the stack frame on
   /// entry to the function and which must be maintained by every function.
   unsigned stackAlignment = 8;
-
-  Triple TargetTriple;
 
 public:
   /// This constructor initializes the data members to match that

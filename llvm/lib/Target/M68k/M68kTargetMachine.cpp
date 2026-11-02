@@ -51,9 +51,15 @@ Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
   return RM.value_or(Reloc::Static);
 }
 
-CodeModel::Model getEffectiveCodeModel(std::optional<CodeModel::Model> CM,
+CodeModel::Model getEffectiveCodeModel(const Triple &TT,
+                                       std::optional<CodeModel::Model> CM,
                                        bool JIT) {
   if (!CM) {
+    // AmigaOS loads each hunk (code, data, bss) at its own address, so code
+    // can't reach data with a 16-bit PC-relative offset. Use 32-bit absolute
+    // addresses, which become HUNK_RELOC32 entries.
+    if (TT.isOSAmigaOS())
+      return CodeModel::Large;
     return CodeModel::Small;
   } else if (CM == CodeModel::Kernel) {
     llvm_unreachable("Kernel code model is not implemented yet");
@@ -70,7 +76,7 @@ M68kTargetMachine::M68kTargetMachine(const Target &T, const Triple &TT,
                                      CodeGenOptLevel OL, bool JIT)
     : CodeGenTargetMachineImpl(T, TT, CPU, FS, Options,
                                getEffectiveRelocModel(RM),
-                               ::getEffectiveCodeModel(CM, JIT), OL),
+                               ::getEffectiveCodeModel(TT, CM, JIT), OL),
       TLOF(std::make_unique<M68kELFTargetObjectFile>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();

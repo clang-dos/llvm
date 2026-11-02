@@ -3140,7 +3140,22 @@ M68kTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
     }
   }
 
-  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+  auto Res = TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+
+  // An explicit register ("{d0}", from `register short x asm("d0")`) names
+  // the 32-bit register. For a narrower value use its low word or byte, or
+  // there is no way to copy between them.
+  if (Res.first && (VT == MVT::i16 || VT == MVT::i8)) {
+    unsigned Idx =
+        VT == MVT::i16 ? M68k::MxSubRegIndex16Lo : M68k::MxSubRegIndex8Lo;
+    if (MCRegister Sub = TRI->getSubReg(Res.first, Idx)) {
+      for (const TargetRegisterClass *RC :
+           {&M68k::DR16RegClass, &M68k::AR16RegClass, &M68k::DR8RegClass})
+        if (RC->contains(Sub))
+          return std::make_pair(unsigned(Sub), RC);
+    }
+  }
+  return Res;
 }
 
 /// Determines whether the callee is required to pop its own arguments.

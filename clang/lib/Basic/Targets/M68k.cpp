@@ -64,6 +64,15 @@ M68kTargetInfo::M68kTargetInfo(const llvm::Triple &Triple,
     LongDoubleWidth = 64;
     LongDoubleFormat = &llvm::APFloat::IEEEdouble();
   }
+
+  // AmigaOS compilers (gcc, vbcc, SAS/C) also align everything of 2 bytes
+  // or more to 2. long double is double for now: gcc's 96-bit 68881
+  // extended type needs FPU code generation, which we don't have yet.
+  if (getTriple().isOSAmigaOS()) {
+    FloatAlign = DoubleAlign = LongDoubleAlign = LongLongAlign = 16;
+    LongDoubleWidth = 64;
+    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+  }
 }
 
 bool M68kTargetInfo::setCPU(StringRef Name) {

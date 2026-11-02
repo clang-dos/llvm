@@ -812,9 +812,7 @@ void M68kInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // without any idea that on M68k, this is extremely likely to implicitly kill
   // the CCR.
   // The workaround checks whether CCR is live during this copy, and if so,
-  // backs up CCR and restores it after the copy. It's inefficient and prevents
-  // M68000-targeted builds from running on 010+ (because 000 uses MOVE from SR
-  // and 010+ uses MOVE from CCR).
+  // makes the copy in a way that keeps it (see below).
   // The fix condition is to prevent COPY from ever being inserted while CCR is
   // live (which would also stop this workaround from ever triggering).
 
@@ -838,41 +836,70 @@ void M68kInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         .addReg(SrcReg, getKillRegState(KillSrc));
     return;
   }
-  if (UsedRegs.available(M68k::CCR)) {
+  // A move to an address register (movea) leaves the condition codes alone.
+  bool DstIsAddr = M68k::AR32RegClass.contains(DstReg) ||
+                   M68k::AR16RegClass.contains(DstReg);
+  if (UsedRegs.available(M68k::CCR) || DstIsAddr) {
     BuildMI(MBB, MI, DL, get(Opc), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
     return;
   }
 
-  // CCR is live, so we must restore it after the copy. Prepare push/pop ops.
-  // 68000 must use MOVE from SR, 68010+ must use MOVE from CCR. In either
-  // case, upon moving back, MOVE to CCR will mask out the upper byte anyway.
+  // CCR is live, so the copy must not change it.
+  //
+  // Code for the 68000 also has to run on the 68010 and later, where MOVE
+  // from SR is privileged, and the 68000 has no MOVE from CCR. MOVEM and LEA
+  // don't change the condition codes, so copy the whole register through the
+  // stack with them instead.
+  if (STI.isM68000()) {
+    auto Full = [&](Register R) -> Register {
+      if (M68k::XR32RegClass.contains(R))
+        return R;
+      bool IsAddr = M68k::AR16RegClass.contains(R);
+      return RI.getMatchingMegaReg(
+          R,
+          RI.getRegClass(IsAddr ? M68k::AR32RegClassID : M68k::DR32RegClassID));
+    };
+    Register SrcFull = Full(SrcReg), DstFull = Full(DstReg);
+    Register SP = RI.getStackRegister();
+    M68k::addRegIndirectWithDisp(BuildMI(MBB, MI, DL, get(M68k::LEA32p), SP),
+                                 SP, false, -4);
+    BuildMI(MBB, MI, DL, get(M68k::MOVM32pm))
+        .addImm(0)
+        .addReg(SP)
+        .addImm(1 << RI.getSpillRegisterOrder(SrcFull))
+        .addReg(SrcFull, RegState::Implicit | getKillRegState(KillSrc));
+    BuildMI(MBB, MI, DL, get(M68k::MOVM32mp))
+        .addImm(1 << RI.getSpillRegisterOrder(DstFull))
+        .addImm(0)
+        .addReg(SP)
+        .addReg(DstFull, RegState::ImplicitDefine);
+    M68k::addRegIndirectWithDisp(BuildMI(MBB, MI, DL, get(M68k::LEA32p), SP),
+                                 SP, false, 4);
+    return;
+  }
 
-  // Look for an available data register for the CCR, or push to stack if
-  // there are none
+  // On the 68010 and later, save CCR with MOVE from CCR and restore it after
+  // the copy, in a free data register or on the stack.
   BitVector Allocatable =
       RI.getAllocatableSet(MF, RI.getRegClass(M68k::DR16RegClassID));
   for (Register Reg : Allocatable.set_bits()) {
     if (!RI.regsOverlap(DstReg, Reg) && (UsedRegs.available(Reg))) {
-      unsigned CCRPushOp = STI.isM68000() ? M68k::MOV16ds : M68k::MOV16dc;
-      unsigned CCRPopOp = M68k::MOV16cd;
-      BuildMI(MBB, MI, DL, get(CCRPushOp), Reg).addReg(CCRSrcReg);
+      BuildMI(MBB, MI, DL, get(M68k::MOV16dc), Reg).addReg(M68k::CCR);
       BuildMI(MBB, MI, DL, get(Opc), DstReg)
           .addReg(SrcReg, getKillRegState(KillSrc));
-      BuildMI(MBB, MI, DL, get(CCRPopOp), M68k::CCR).addReg(Reg);
+      BuildMI(MBB, MI, DL, get(M68k::MOV16cd), M68k::CCR).addReg(Reg);
       return;
     }
   }
 
-  unsigned CCRPushOp = STI.isM68000() ? M68k::MOV16es : M68k::MOV16ec;
-  unsigned CCRPopOp = M68k::MOV16co;
-
-  BuildMI(MBB, MI, DL, get(CCRPushOp))
+  BuildMI(MBB, MI, DL, get(M68k::MOV16ec))
       .addReg(RI.getStackRegister())
-      .addReg(CCRSrcReg);
+      .addReg(M68k::CCR);
   BuildMI(MBB, MI, DL, get(Opc), DstReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
-  BuildMI(MBB, MI, DL, get(CCRPopOp), M68k::CCR).addReg(RI.getStackRegister());
+  BuildMI(MBB, MI, DL, get(M68k::MOV16co), M68k::CCR)
+      .addReg(RI.getStackRegister());
   return;
 }
 

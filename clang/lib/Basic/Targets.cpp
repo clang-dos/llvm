@@ -368,6 +368,8 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
     case llvm::Triple::MacOSClassic:
       return std::make_unique<MacOSClassicTargetInfo<M68kTargetInfo>>(Triple,
                                                                       Opts);
+    case llvm::Triple::AmigaOS:
+      return std::make_unique<AmigaOSTargetInfo<M68kTargetInfo>>(Triple, Opts);
     default:
       return std::make_unique<M68kTargetInfo>(Triple, Opts);
     }

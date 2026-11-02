@@ -871,9 +871,10 @@ define i64 @atomicrmw_max_i64(i64 %val, ptr %ptr) {
 ; NO-ATOMIC-000-NEXT:    move.l %a2, (4,%sp)
 ; NO-ATOMIC-000-NEXT:    move.l %d4, %d2
 ; NO-ATOMIC-000-NEXT:    sub.l %d1, %d2
-; NO-ATOMIC-000-NEXT:    move.w %sr, -(%sp)
-; NO-ATOMIC-000-NEXT:    move.l %d5, %d2
-; NO-ATOMIC-000-NEXT:    move.w (%sp)+, %ccr
+; NO-ATOMIC-000-NEXT:    lea (-4,%sp), %sp
+; NO-ATOMIC-000-NEXT:    movem.l %d5, (0,%sp)
+; NO-ATOMIC-000-NEXT:    movem.l (0,%sp), %d2
+; NO-ATOMIC-000-NEXT:    lea (4,%sp), %sp
 ; NO-ATOMIC-000-NEXT:    subx.l %d0, %d2
 ; NO-ATOMIC-000-NEXT:    slt %d2
 ; NO-ATOMIC-000-NEXT:    cmpi.b #0, %d2
@@ -973,9 +974,10 @@ define i64 @atomicrmw_max_i64(i64 %val, ptr %ptr) {
 ; NO-ATOMIC-PIC-000-NEXT:    move.l %a2, (4,%sp)
 ; NO-ATOMIC-PIC-000-NEXT:    move.l %d4, %d2
 ; NO-ATOMIC-PIC-000-NEXT:    sub.l %d1, %d2
-; NO-ATOMIC-PIC-000-NEXT:    move.w %sr, -(%sp)
-; NO-ATOMIC-PIC-000-NEXT:    move.l %d5, %d2
-; NO-ATOMIC-PIC-000-NEXT:    move.w (%sp)+, %ccr
+; NO-ATOMIC-PIC-000-NEXT:    lea (-4,%sp), %sp
+; NO-ATOMIC-PIC-000-NEXT:    movem.l %d5, (0,%sp)
+; NO-ATOMIC-PIC-000-NEXT:    movem.l (0,%sp), %d2
+; NO-ATOMIC-PIC-000-NEXT:    lea (4,%sp), %sp
 ; NO-ATOMIC-PIC-000-NEXT:    subx.l %d0, %d2
 ; NO-ATOMIC-PIC-000-NEXT:    slt %d2
 ; NO-ATOMIC-PIC-000-NEXT:    cmpi.b #0, %d2

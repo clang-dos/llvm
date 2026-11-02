@@ -854,6 +854,39 @@ public:
   }
 };
 
+// Classic AmigaOS (Kickstart 1.x to 3.x) on 68k.
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY AmigaOSTargetInfo : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    // What gcc for AmigaOS (bebbo's amiga-gcc) and vbcc define.
+    DefineStd(Builder, "amiga", Opts);
+    DefineStd(Builder, "amigaos", Opts);
+    Builder.defineMacro("AMIGA");
+    Builder.defineMacro("MCH_AMIGA");
+    Builder.defineMacro("__AMIGA__");
+    // Amiga compiler keywords used in the NDK and in Amiga sources. __chip
+    // puts data in chip RAM, where the custom chips can reach it. There are
+    // no near or far pointers, and stack arguments are the default.
+    Builder.defineMacro("__chip",
+                        "__attribute__((__section__(\".datachip\")))");
+    Builder.defineMacro("__far", "");
+    Builder.defineMacro("__near", "");
+    Builder.defineMacro("__stdargs", "");
+    Builder.defineMacro("__saveds", "");
+    Builder.defineMacro("__aligned", "__attribute__((__aligned__(4)))");
+    if (Opts.C11) {
+      Builder.defineMacro("__STDC_NO_ATOMICS__");
+      Builder.defineMacro("__STDC_NO_THREADS__");
+    }
+  }
+
+public:
+  AmigaOSTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {}
+};
+
 // z/OS target
 template <typename Target>
 class LLVM_LIBRARY_VISIBILITY ZOSTargetInfo : public OSTargetInfo<Target> {

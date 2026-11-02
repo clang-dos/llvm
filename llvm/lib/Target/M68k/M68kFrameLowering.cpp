@@ -542,7 +542,8 @@ void M68kFrameLowering::emitPrologue(MachineFunction &MF,
     MFI.setOffsetAdjustment(-NumBytes);
 
     BuildMI(MBB, MBBI, DL, TII.get(M68k::LINK16))
-        .addReg(M68k::WA6, RegState::Kill)
+        .addReg(TRI->getSubReg(MachineFramePtr, M68k::MxSubRegIndex16Lo),
+                RegState::Kill)
         .addImm(-NumBytes)
         .setMIFlag(MachineInstr::FrameSetup);
 

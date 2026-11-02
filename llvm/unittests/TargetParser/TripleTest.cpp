@@ -112,6 +112,18 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_FALSE(T.isOSWindows());
   EXPECT_FALSE(T.isOSMSDOS());
 
+  T = Triple("m68k-unknown-amigaos");
+  EXPECT_EQ(Triple::m68k, T.getArch());
+  EXPECT_EQ(Triple::AmigaOS, T.getOS());
+  EXPECT_EQ(Triple::ELF, T.getObjectFormat());
+  EXPECT_TRUE(T.isOSAmigaOS());
+  EXPECT_FALSE(T.isOSMacOSClassic());
+
+  // amiga-gcc's spelling.
+  T = Triple(Triple::normalize("m68k-amigaos"));
+  EXPECT_EQ(Triple::AmigaOS, T.getOS());
+  EXPECT_EQ("m68k-unknown-amigaos", T.str());
+
   T = Triple("powerpc-apple-macosclassic");
   EXPECT_EQ(Triple::ppc, T.getArch());
   EXPECT_EQ(Triple::Apple, T.getVendor());

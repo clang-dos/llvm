@@ -11,6 +11,7 @@
 #include "ToolChains/AIX.h"
 #include "ToolChains/AMDGPU.h"
 #include "ToolChains/AVR.h"
+#include "ToolChains/AmigaOS.h"
 #include "ToolChains/Arch/RISCV.h"
 #include "ToolChains/BareMetal.h"
 #include "ToolChains/CSKYToolChain.h"
@@ -6212,6 +6213,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       break;
     case llvm::Triple::MacOSClassic:
       TC = std::make_unique<toolchains::MacOSClassic>(*this, Target, Args);
+      break;
+    case llvm::Triple::AmigaOS:
+      TC = std::make_unique<toolchains::AmigaOS>(*this, Target, Args);
       break;
     case llvm::Triple::Darwin:
     case llvm::Triple::MacOSX:

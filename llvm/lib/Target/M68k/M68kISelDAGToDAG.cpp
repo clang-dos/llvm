@@ -1078,13 +1078,28 @@ bool M68kDAGToDAGISel::SelectARI(SDNode *Parent, SDValue N, SDValue &Base) {
     return false;
   }
 
+  // An address no other mode could take, such as a store to a PC-relative
+  // global plus an offset (stores cannot use PC-relative modes): compute
+  // the whole address into a register. ARI is the last mode tried.
+  auto WholeAddress = [&]() {
+    if (AM.hasFrameIndex() || N.getOpcode() == ISD::FrameIndex)
+      return false;
+    Base = N;
+    LLVM_DEBUG(dbgs() << "SUCCESS, the whole address in a register\n");
+    return true;
+  };
+
   if (AM.isPCRelative()) {
+    if (WholeAddress())
+      return true;
     LLVM_DEBUG(dbgs() << "REJECT: Cannot match PC relative address\n");
     return false;
   }
 
   // AddrType::ARI does not use these
   if (AM.hasIndexReg() || AM.Disp != 0) {
+    if (WholeAddress())
+      return true;
     LLVM_DEBUG(dbgs() << "REJECT: Cannot match Index or Disp\n");
     return false;
   }

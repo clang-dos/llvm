@@ -366,10 +366,10 @@ void X86FrameLowering::emitSPUpdate(MachineBasicBlock &MBB,
       // Exchange the new SP in RAX with the top of the stack.
       addRegOffset(
           BuildMI(MBB, MBBI, DL, TII.get(X86::XCHG64rm), Rax).addReg(Rax),
-          StackPtr, false, 0);
+          StackPtr, 0);
       // Load new SP from the top of the stack into RSP.
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rm), StackPtr),
-                   StackPtr, false, 0);
+                   StackPtr, 0);
       return;
     }
   }
@@ -461,7 +461,7 @@ MachineInstrBuilder X86FrameLowering::BuildStackAdjustment(
     MI = addRegOffset(BuildMI(MBB, MBBI, DL,
                               TII.get(getLEArOpcode(Uses64BitFramePtr, Is16BitABI)),
                               StackPtr),
-                      StackPtr, false, Offset);
+                      StackPtr, Offset);
   } else {
     unsigned Opc = IsSub ? getSUBriOpcode(Uses64BitFramePtr, Is16BitABI)
                          : getADDriOpcode(Uses64BitFramePtr, Is16BitABI);
@@ -892,7 +892,7 @@ void X86FrameLowering::emitStackProbeInlineGenericBlock(
 
     addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(MovMIOpc))
                      .setMIFlag(MachineInstr::FrameSetup),
-                 StackPtr, false, 0)
+                 StackPtr, 0)
         .addImm(0)
         .setMIFlag(MachineInstr::FrameSetup);
     NumFrameExtraProbe++;
@@ -911,7 +911,7 @@ void X86FrameLowering::emitStackProbeInlineGenericBlock(
     }
     addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(MovMIOpc))
                      .setMIFlag(MachineInstr::FrameSetup),
-                 StackPtr, false, 0)
+                 StackPtr, 0)
         .addImm(0)
         .setMIFlag(MachineInstr::FrameSetup);
     NumFrameExtraProbe++;
@@ -966,7 +966,7 @@ void X86FrameLowering::emitStackProbeInlineGenericLoop(
 
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(MovMIOpc))
                        .setMIFlag(MachineInstr::FrameSetup),
-                   StackPtr, false, 0)
+                   StackPtr, 0)
           .addImm(0)
           .setMIFlag(MachineInstr::FrameSetup);
       NumFrameExtraProbe++;
@@ -1049,7 +1049,7 @@ void X86FrameLowering::emitStackProbeInlineGenericLoop(
   // touch the page
   addRegOffset(BuildMI(testMBB, DL, TII.get(MovMIOpc))
                    .setMIFlag(MachineInstr::FrameSetup),
-               StackPtr, false, 0)
+               StackPtr, 0)
       .addImm(0)
       .setMIFlag(MachineInstr::FrameSetup);
 
@@ -1203,11 +1203,11 @@ void X86FrameLowering::emitStackProbeInlineWindowsCoreCLR64(
       RDXShadowSlot += 8;
     // Emit the saves if needed.
     if (IsRCXLiveIn)
-      addRegOffset(BuildMI(&MBB, DL, TII.get(X86::MOV64mr)), X86::RSP, false,
+      addRegOffset(BuildMI(&MBB, DL, TII.get(X86::MOV64mr)), X86::RSP,
                    RCXShadowSlot)
           .addReg(X86::RCX);
     if (IsRDXLiveIn)
-      addRegOffset(BuildMI(&MBB, DL, TII.get(X86::MOV64mr)), X86::RSP, false,
+      addRegOffset(BuildMI(&MBB, DL, TII.get(X86::MOV64mr)), X86::RSP,
                    RDXShadowSlot)
           .addReg(X86::RDX);
   } else {
@@ -1272,7 +1272,7 @@ void X86FrameLowering::emitStackProbeInlineWindowsCoreCLR64(
   if (InProlog)
     LoopMBB->addLiveIn(JoinReg);
   addRegOffset(BuildMI(LoopMBB, DL, TII.get(X86::LEA64r), ProbeReg), JoinReg,
-               false, -PageSize);
+               -PageSize);
 
   // Probe by storing a byte onto the stack.
   BuildMI(LoopMBB, DL, TII.get(X86::MOV8mi))
@@ -1299,11 +1299,11 @@ void X86FrameLowering::emitStackProbeInlineWindowsCoreCLR64(
     if (RCXShadowSlot) // It means we spilled RCX in the prologue.
       addRegOffset(BuildMI(*ContinueMBB, ContinueMBBI, DL,
                            TII.get(X86::MOV64rm), X86::RCX),
-                   X86::RSP, false, RCXShadowSlot);
+                   X86::RSP, RCXShadowSlot);
     if (RDXShadowSlot) // It means we spilled RDX in the prologue.
       addRegOffset(BuildMI(*ContinueMBB, ContinueMBBI, DL,
                            TII.get(X86::MOV64rm), X86::RDX),
-                   X86::RSP, false, RDXShadowSlot);
+                   X86::RSP, RDXShadowSlot);
   }
 
   // Now that the probing is done, add code to continueMBB to update
@@ -1459,12 +1459,9 @@ X86FrameLowering::calculateMaxStackAlign(const MachineFunction &MF) const {
       MaxAlign = Align(SlotSize);
   }
 
-  if (!Is64Bit && MF.getFunction().getCallingConv() == CallingConv::X86_INTR) {
-    if (HasRealign)
-      MaxAlign = (MaxAlign > 16) ? MaxAlign : Align(16);
-    else
-      MaxAlign = Align(16);
-  }
+  if (!Is64Bit && MF.getFunction().getCallingConv() == CallingConv::X86_INTR)
+    MaxAlign = std::max(MaxAlign, Align(16));
+
   return MaxAlign.value();
 }
 
@@ -1565,7 +1562,7 @@ void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
       {
         addRegOffset(BuildMI(bodyMBB, DL, TII.get(MovMIOpc))
                          .setMIFlag(MachineInstr::FrameSetup),
-                     StackPtr, false, 0)
+                     StackPtr, 0)
             .addImm(0)
             .setMIFlag(MachineInstr::FrameSetup);
 
@@ -1599,7 +1596,7 @@ void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
             .setMIFlag(MachineInstr::FrameSetup);
         addRegOffset(BuildMI(footMBB, DL, TII.get(MovMIOpc))
                          .setMIFlag(MachineInstr::FrameSetup),
-                     StackPtr, false, 0)
+                     StackPtr, 0)
             .addImm(0)
             .setMIFlag(MachineInstr::FrameSetup);
         footMBB->addSuccessor(&MBB);
@@ -1986,7 +1983,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     // The runtime cares about this.
     // MOV64mr %rdx, 16(%rsp)
     unsigned MOVmr = Uses64BitFramePtr ? X86::MOV64mr : X86::MOV32mr;
-    addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(MOVmr)), StackPtr, true, 16)
+    addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(MOVmr)), StackPtr, 16)
         .addReg(Establisher)
         .setMIFlag(MachineInstr::FrameSetup);
     MBB.addLiveIn(Establisher);
@@ -2322,10 +2319,10 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       MachineInstr *MI;
       if (Is64Bit)
         MI = addRegOffset(BuildMI(MF, DL, TII.get(X86::MOV64rm), X86::RAX),
-                          StackPtr, false, NumBytes - 8);
+                          StackPtr, NumBytes - 8);
       else
         MI = addRegOffset(BuildMI(MF, DL, TII.get(X86::MOV32rm), X86::EAX),
-                          StackPtr, false, NumBytes - 4);
+                          StackPtr, NumBytes - 4);
       MI->setFlag(MachineInstr::FrameSetup);
       MBB.insert(MBBI, MI);
     }
@@ -2348,14 +2345,14 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       MachinePointerInfo NoInfo;
       MBB.addLiveIn(Establisher);
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rm), Establisher),
-                   Establisher, false, PSPSlotOffset)
+                   Establisher, PSPSlotOffset)
           .addMemOperand(MF.getMachineMemOperand(
               NoInfo, MachineMemOperand::MOLoad, SlotSize, Align(SlotSize)));
       ;
       // Save the root establisher back into the current funclet's (mostly
       // empty) frame, in case a sub-funclet or the GC needs it.
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr)), StackPtr,
-                   false, PSPSlotOffset)
+                   PSPSlotOffset)
           .addReg(Establisher)
           .addMemOperand(MF.getMachineMemOperand(
               NoInfo,
@@ -2398,7 +2395,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
 
     if (SEHFrameOffset)
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::LEA64r), FramePtr),
-                   SPOrEstablisher, false, SEHFrameOffset);
+                   SPOrEstablisher, SEHFrameOffset);
     else
       BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rr), FramePtr)
           .addReg(SPOrEstablisher);
@@ -2417,7 +2414,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       int64_t EHRegOffset = getFrameIndexReference(MF, FI, FrameReg).getFixed();
       // ESP is the first field, so no extra displacement is needed.
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV32mr)), FrameReg,
-                   false, EHRegOffset)
+                   EHRegOffset)
           .addReg(X86::ESP);
     }
   }
@@ -2467,7 +2464,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     unsigned PSPSlotOffset = getPSPSlotOffsetFromSP(MF);
     auto PSPInfo = MachinePointerInfo::getFixedStack(
         MF, MF.getWinEHFuncInfo()->PSPSymFrameIdx);
-    addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr)), StackPtr, false,
+    addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr)), StackPtr,
                  PSPSlotOffset)
         .addReg(StackPtr)
         .addMemOperand(MF.getMachineMemOperand(
@@ -2501,7 +2498,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       // Stash value of base pointer.  Saving RSP instead of EBP shortens
       // dependence chain. Used by SjLj EH.
       unsigned Opm = Uses64BitFramePtr ? X86::MOV64mr : X86::MOV32mr;
-      addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(Opm)), FramePtr, true,
+      addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(Opm)), FramePtr,
                    X86FI->getRestoreBasePointerOffset())
           .addReg(SPOrEstablisher)
           .setMIFlag(MachineInstr::FrameSetup);
@@ -2518,7 +2515,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
           getFrameIndexReference(MF, X86FI->getSEHFramePtrSaveIndex(), UsedReg)
               .getFixed();
       assert(UsedReg == BasePtr);
-      addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(Opm)), UsedReg, true, Offset)
+      addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(Opm)), UsedReg, Offset)
           .addReg(FramePtr)
           .setMIFlag(MachineInstr::FrameSetup);
     }
@@ -2929,7 +2926,7 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
     if (LEAAmount != 0) {
       unsigned Opc = getLEArOpcode(Uses64BitFramePtr, Is16BitABI);
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr), FramePtr,
-                   false, LEAAmount);
+                   LEAAmount);
       --MBBI;
     } else {
       unsigned Opc = (Uses64BitFramePtr ? X86::MOV64rr : X86::MOV32rr);
@@ -3356,7 +3353,9 @@ bool X86FrameLowering::assignCalleeSavedSpillSlots(
 
     const TargetRegisterClass *RC = getCalleeSavedSpillRC(Reg, STI, *TRI);
     unsigned Size = TRI->getSpillSize(*RC);
-    Align Alignment = TRI->getSpillAlign(*RC);
+    // The slot is fixed relative to the incoming stack pointer, so it cannot be
+    // aligned beyond what that guarantees, even if the stack is realigned.
+    Align Alignment = std::min(TRI->getSpillAlign(*RC), getStackAlign());
     // ensure alignment
     assert(SpillSlotOffset < 0 && "SpillSlotOffset should always < 0 on X86");
     SpillSlotOffset = -alignTo(-SpillSlotOffset, Alignment);
@@ -4063,10 +4062,10 @@ void X86FrameLowering::adjustForHiPEPrologue(
 
     // Create new MBB for StackCheck:
     addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(LEAop), ScratchReg), SPReg,
-                 false, -MaxStack);
+                 -MaxStack);
     // SPLimitOffset is in a fixed heap location (pointed by BP).
     addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(CMPop)).addReg(ScratchReg),
-                 PReg, false, SPLimitOffset);
+                 PReg, SPLimitOffset);
     BuildMI(stackCheckMBB, DL, TII.get(X86::JCC_1))
         .addMBB(&PrologueMBB)
         .addImm(X86::COND_AE);
@@ -4074,9 +4073,9 @@ void X86FrameLowering::adjustForHiPEPrologue(
     // Create new MBB for IncStack:
     BuildMI(incStackMBB, DL, TII.get(CALLop)).addExternalSymbol("inc_stack_0");
     addRegOffset(BuildMI(incStackMBB, DL, TII.get(LEAop), ScratchReg), SPReg,
-                 false, -MaxStack);
+                 -MaxStack);
     addRegOffset(BuildMI(incStackMBB, DL, TII.get(CMPop)).addReg(ScratchReg),
-                 PReg, false, SPLimitOffset);
+                 PReg, SPLimitOffset);
     BuildMI(incStackMBB, DL, TII.get(X86::JCC_1))
         .addMBB(incStackMBB)
         .addImm(X86::COND_LE);
@@ -4377,7 +4376,7 @@ MachineBasicBlock::iterator X86FrameLowering::restoreWin32EHStackPointers(
   if (RestoreSP) {
     // MOV32rm -EHRegSize(%ebp), %esp
     addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV32rm), X86::ESP),
-                 X86::EBP, true, -EHRegSize)
+                 X86::EBP, -EHRegSize)
         .setMIFlag(MachineInstr::FrameSetup);
   }
 
@@ -4400,7 +4399,7 @@ MachineBasicBlock::iterator X86FrameLowering::restoreWin32EHStackPointers(
   } else if (UsedReg == BasePtr) {
     // LEA offset(%ebp), %esi
     addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::LEA32r), BasePtr),
-                 FramePtr, false, EndOffset)
+                 FramePtr, EndOffset)
         .setMIFlag(MachineInstr::FrameSetup);
     // MOV32rm SavedEBPOffset(%esi), %ebp
     assert(X86FI->getHasSEHFramePtrSave());
@@ -4409,7 +4408,7 @@ MachineBasicBlock::iterator X86FrameLowering::restoreWin32EHStackPointers(
             .getFixed();
     assert(UsedReg == BasePtr);
     addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV32rm), FramePtr),
-                 UsedReg, true, Offset)
+                 UsedReg, Offset)
         .setMIFlag(MachineInstr::FrameSetup);
   } else {
     llvm_unreachable("32-bit frames with WinEH must use FramePtr or BasePtr");

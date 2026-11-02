@@ -31300,6 +31300,11 @@ bool DAGCombiner::SimplifySelectOps(SDNode *TheSelect, SDValue LHS,
         // locations are not in the same address space.
         LLD->getPointerInfo().getAddrSpace() !=
             RLD->getPointerInfo().getAddrSpace() ||
+        // The addresses must have the same type to be selected between. A
+        // target may have already rewritten the address of one load and not
+        // yet the other (i8086 far pointers become 16-bit FARADDR nodes).
+        LLD->getBasePtr().getValueType() !=
+            RLD->getBasePtr().getValueType() ||
         // We can't produce a CMOV of a TargetFrameIndex since we won't
         // generate the address generation required.
         LLD->getBasePtr().getOpcode() == ISD::TargetFrameIndex ||

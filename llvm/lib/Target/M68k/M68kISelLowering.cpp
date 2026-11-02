@@ -3142,6 +3142,11 @@ M68kTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
     }
   }
 
+  // The "cc" clobber is the condition codes: without it, a compare can be
+  // scheduled before an asm statement that changes them and a branch after.
+  if (Constraint == "{cc}")
+    return std::make_pair(unsigned(M68k::CCR), &M68k::CCRCRegClass);
+
   auto Res = TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 
   // An explicit register ("{d0}", from `register short x asm("d0")`) names

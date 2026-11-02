@@ -3468,6 +3468,20 @@ LValue CodeGenFunction::EmitLoadOfPointerLValue(Address PtrAddr,
   return MakeAddrLValue(Addr, PtrTy->getPointeeType(), BaseInfo, TBAAInfo);
 }
 
+/// llvm.threadlocal.address of a thread-local variable's address \p V. When
+/// the variable is in another address space than the one the language uses
+/// for it (as with the far data pointers of the i8086 large and huge models),
+/// \p V is an addrspacecast of the global: the intrinsic takes the global
+/// itself, and its result is cast in the same way.
+static llvm::Value *emitThreadLocalAddress(CGBuilderTy &Builder,
+                                           llvm::Value *V) {
+  auto *GV = cast<llvm::GlobalValue>(V->stripPointerCasts());
+  llvm::Value *Addr = Builder.CreateThreadLocalAddress(GV);
+  if (Addr->getType() != V->getType())
+    Addr = Builder.CreateAddrSpaceCast(Addr, V->getType());
+  return Addr;
+}
+
 static LValue EmitGlobalVarDeclLValue(CodeGenFunction &CGF,
                                       const Expr *E, const VarDecl *VD) {
   QualType T = E->getType();
@@ -3496,7 +3510,7 @@ static LValue EmitGlobalVarDeclLValue(CodeGenFunction &CGF,
   llvm::Value *V = CGF.CGM.GetAddrOfGlobalVar(VD);
 
   if (VD->getTLSKind() != VarDecl::TLS_None)
-    V = CGF.Builder.CreateThreadLocalAddress(V);
+    V = emitThreadLocalAddress(CGF.Builder, V);
 
   llvm::Type *RealVarTy = CGF.getTypes().ConvertTypeForMem(VD->getType());
   CharUnits Alignment = CGF.getContext().getDeclAlign(VD);
@@ -3822,7 +3836,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     // Handle threadlocal function locals.
     if (VD->getTLSKind() != VarDecl::TLS_None)
       addr = addr.withPointer(
-          Builder.CreateThreadLocalAddress(addr.getBasePointer()),
+          emitThreadLocalAddress(Builder, addr.getBasePointer()),
           NotKnownNonNull);
 
     // Check for OpenMP threadprivate variables.

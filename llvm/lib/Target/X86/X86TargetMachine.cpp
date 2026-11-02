@@ -96,6 +96,7 @@ extern "C" LLVM_C_ABI void LLVMInitializeX86Target() {
   initializeX86PartialReductionLegacyPass(PR);
   initializeX86I8086PrintfVariantsPass(PR);
   initializeX86I8086InterruptArgsLegacyPass(PR);
+  initializeX86I8086ThreadLocalPass(PR);
   initializeX86HugePointersLegacyPass(PR);
   initializeX86ReturnThunksLegacyPass(PR);
   initializeX86DAGToDAGISelLegacyPass(PR);
@@ -451,6 +452,9 @@ void X86PassConfig::addIRPasses() {
     addPass(createX86I8086PrintfVariantsPass());
   if (TM->getTargetTriple().getArch() == Triple::i8086)
     addPass(createX86I8086InterruptArgsLegacyPass());
+  // On i8086, thread-local variables are ordinary ones.
+  if (TM->getTargetTriple().getArch() == Triple::i8086)
+    addPass(createX86I8086ThreadLocalPass());
 
   if (TM->getOptLevel() != CodeGenOptLevel::None) {
     addPass(createInterleavedAccessPass());

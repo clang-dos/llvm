@@ -71,6 +71,11 @@
 //
 // A defined global symbol named "_start" becomes the module's start address.
 //
+// OMF names are at most 255 bytes. A longer symbol name, such as that of a
+// C++ template instance, is written as its first 238 bytes, '$' and 16 hex
+// digits of a hash of the whole name, which every module computes the same
+// way, so that references, publics and COMDATs of the name still match.
+//
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
@@ -89,6 +94,7 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/xxhash.h"
 
 #include <map>
 
@@ -370,6 +376,16 @@ public:
 
 } // end anonymous namespace
 
+/// The OMF name of a symbol: the name itself, or for a name over 255 bytes a
+/// shortened one with a hash of the whole name.
+static std::string omfName(StringRef Name) {
+  if (Name.size() <= 255)
+    return Name.str();
+  return (Name.take_front(238) + "$" +
+          utohexstr(xxh3_64bits(Name), /*LowerCase=*/false, /*Width=*/16))
+      .str();
+}
+
 std::optional<SegmentKind>
 OMFObjectWriter::classifySection(const MCSectionELF &Sec) const {
   unsigned Flags = Sec.getFlags();
@@ -426,8 +442,7 @@ void OMFObjectWriter::findComdats() {
       if (Sym.isTemporary() || !Sym.isBindingSet() ||
           Sym.getBinding() == ELF::STB_LOCAL)
         continue; // Not exported: references reach it in the COMDAT.
-      if (Sym.getName().size() <= 255 && Asm->getSymbolOffset(Sym, Offset) &&
-          Offset == 0)
+      if (Asm->getSymbolOffset(Sym, Offset) && Offset == 0)
         Aliases[&Base->getSection()].push_back(&Sym);
       else
         Excluded.insert(&Base->getSection());
@@ -501,8 +516,6 @@ void OMFObjectWriter::findComdats() {
       if (!Asm->getSymbolOffset(*Sym, Offset) || Offset != 0)
         continue;
     }
-    if (Sym->getName().size() > 255)
-      continue;
     // A group section is any one of identical copies. So is a C++ type_info
     // object or its name: code built without RTTI has its own copy, in a
     // group, of one that the C++ runtime defines.
@@ -987,12 +1000,7 @@ void OMFObjectWriter::writeExternals() {
     R.clear();
   };
   for (const MCSymbol *Sym : Externals) {
-    StringRef Name = Sym->getName();
-    if (Name.size() > 255) {
-      getContext().reportError(SMLoc(), "symbol name '" + Name +
-                                            "' is too long for OMF");
-      Name = Name.take_front(255);
-    }
+    std::string Name = omfName(Sym->getName());
     if (Sym->isCommon()) {
       if (ComDef.size() + Name.size() + 8 > OMF::MaxRecordData)
         Flush(ComDef);
@@ -1051,7 +1059,7 @@ void OMFObjectWriter::writePublics() {
   // Group publics by segment. Absolute symbols use segment 0.
   // The last entry holds the absolute symbols.
   const SegIdx Absolute = Segs.size();
-  SmallVector<SmallVector<std::pair<StringRef, uint64_t>, 16>, 16> Publics(
+  SmallVector<SmallVector<std::pair<std::string, uint64_t>, 16>, 16> Publics(
       Segs.size() + 1);
   for (const MCSymbol &S : Asm->symbols()) {
     const auto &Sym = static_cast<const MCSymbolELF &>(S);
@@ -1068,13 +1076,13 @@ void OMFObjectWriter::writePublics() {
     SegIdx K;
     uint64_t Offset;
     if (getSymbolLocation(Sym, K, Offset)) {
-      Publics[K].push_back({Sym.getName(), Offset});
+      Publics[K].push_back({omfName(Sym.getName()), Offset});
       continue;
     }
     if (Sym.isVariable()) {
       int64_t Value;
       if (Sym.getVariableValue()->evaluateAsAbsolute(Value, *Asm)) {
-        Publics[Absolute].push_back({Sym.getName(), uint64_t(Value)});
+        Publics[Absolute].push_back({omfName(Sym.getName()), uint64_t(Value)});
         continue;
       }
     }
@@ -1100,7 +1108,7 @@ void OMFObjectWriter::writePublics() {
     Start();
     size_t HeaderSize = PubDef.size();
     for (auto &[Name, Offset] : Publics[K]) {
-      StringRef N = Name.take_front(255);
+      StringRef N = Name;
       if (PubDef.size() + N.size() + 4 > OMF::MaxRecordData) {
         PubDef.write(OS);
         PubDef.clear();
@@ -1249,7 +1257,7 @@ void OMFObjectWriter::writeComdats() {
   // COMDAT names are LNAMES, numbered after the segment and class names.
   Record LNames(OMF::LNAMES);
   for (const Comdat &C : Comdats) {
-    StringRef Name = C.Sym->getName();
+    std::string Name = omfName(C.Sym->getName());
     if (LNames.size() + Name.size() + 1 > OMF::MaxRecordData) {
       LNames.write(OS);
       LNames.clear();
@@ -1375,15 +1383,15 @@ void OMFObjectWriter::writeAliases() {
     uint64_t Offset;
     if (!getComdatLocation(*Sym, Idx, Offset))
       continue;
-    StringRef Target = Comdats[Idx].Sym->getName();
-    if (Target == Sym->getName())
+    std::string Target = omfName(Comdats[Idx].Sym->getName());
+    std::string Name = omfName(Sym->getName());
+    if (Target == Name)
       continue;
-    if (Alias.size() + Sym->getName().size() + Target.size() + 2 >
-        OMF::MaxRecordData) {
+    if (Alias.size() + Name.size() + Target.size() + 2 > OMF::MaxRecordData) {
       Alias.write(OS);
       Alias.clear();
     }
-    Alias.name(Sym->getName());
+    Alias.name(Name);
     Alias.name(Target);
   }
   if (Alias.size())

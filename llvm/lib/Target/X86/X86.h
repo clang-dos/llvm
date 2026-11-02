@@ -388,6 +388,9 @@ FunctionPass *createX86PartialReductionLegacyPass();
 
 /// On i8086, call picolibc's integer printf and scanf where the format allows.
 ModulePass *createX86I8086PrintfVariantsPass();
+/// i8086: make thread-local variables ordinary ones (a DOS program has one
+/// thread).
+ModulePass *createX86I8086ThreadLocalPass();
 /// i8086: make an interrupt function's accesses through its pointer to the
 /// saved registers SS-relative.
 FunctionPass *createX86I8086InterruptArgsLegacyPass();
@@ -578,6 +581,7 @@ void initializeX86OptimizeLEAsLegacyPass(PassRegistry &);
 void initializeX86PartialReductionLegacyPass(PassRegistry &);
 void initializeX86I8086PrintfVariantsPass(PassRegistry &);
 void initializeX86I8086InterruptArgsLegacyPass(PassRegistry &);
+void initializeX86I8086ThreadLocalPass(PassRegistry &);
 void initializeX86HugePointersLegacyPass(PassRegistry &);
 void initializeX86PreTileConfigLegacyPass(PassRegistry &);
 void initializeX86ReturnThunksLegacyPass(PassRegistry &);

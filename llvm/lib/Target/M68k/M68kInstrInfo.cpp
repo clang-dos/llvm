@@ -389,7 +389,7 @@ bool M68kInstrInfo::ExpandMOVI(MachineInstrBuilder &MIB, MVT MVTSize) const {
     LLVM_DEBUG(dbgs() << NewMI << "\n");
     MIB->removeFromParent();
 
-    // Sign extention doesn't matter if we only use the bottom 8 bits
+    // Sign extension doesn't matter if we only use the bottom 8 bits.
   } else if (MVTSize == MVT::i8 ||
              (!IsAddressReg && Imm >= -128 && Imm <= 127)) {
     LLVM_DEBUG(dbgs() << "MOVEQ\n");
@@ -706,30 +706,6 @@ bool M68kInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return ExpandPUSH_POP(MIB, get(M68k::MOV16ro), false);
   case M68k::POP32r:
     return ExpandPUSH_POP(MIB, get(M68k::MOV32ro), false);
-
-  case M68k::SETCS_C8d:
-  case M68k::SETCS_C16d:
-  case M68k::SETCS_C32d: {
-    // scs, then sign-extend the byte: 0 or -1 from the carry flag.
-    MachineBasicBlock &MBB = *MI.getParent();
-    const DebugLoc &DL = MI.getDebugLoc();
-    Register Reg = MI.getOperand(0).getReg();
-    unsigned Opc = MI.getOpcode();
-    Register R8 = Opc == M68k::SETCS_C8d
-                      ? Reg
-                      : Register(RI.getSubReg(Reg, M68k::MxSubRegIndex8Lo));
-    BuildMI(MBB, MI, DL, get(M68k::SETd8cs), R8);
-    if (Opc != M68k::SETCS_C8d) {
-      Register R16 = Opc == M68k::SETCS_C16d
-                         ? Reg
-                         : Register(RI.getSubReg(Reg, M68k::MxSubRegIndex16Lo));
-      BuildMI(MBB, MI, DL, get(M68k::EXT16), R16).addReg(R16);
-    }
-    if (Opc == M68k::SETCS_C32d)
-      BuildMI(MBB, MI, DL, get(M68k::EXT32), Reg).addReg(Reg);
-    MI.eraseFromParent();
-    return true;
-  }
   }
   return false;
 }

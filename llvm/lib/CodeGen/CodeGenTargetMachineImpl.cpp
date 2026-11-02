@@ -83,13 +83,6 @@ void CodeGenTargetMachineImpl::initAsmInfo() {
   if (Options.MCOptions.PPCUseFullRegisterNames)
     TmpAsmInfo->setFullRegisterNames(true);
 
-  assert(TmpAsmInfo->getExceptionHandlingType() ==
-             getTargetTriple().getDefaultExceptionHandling() &&
-         "MCAsmInfo and Triple disagree on default exception handling type");
-
-  if (Options.ExceptionModel != ExceptionHandling::Default)
-    TmpAsmInfo->setExceptionsType(Options.ExceptionModel);
-
   AsmInfo.reset(TmpAsmInfo);
 }
 

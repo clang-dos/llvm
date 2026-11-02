@@ -363,31 +363,6 @@ def PASCAL_POP16 : MxPseudo<(outs), (ins)>;
 def PASCAL_POP32 : MxPseudo<(outs), (ins)>;
 }
 
-//===----------------------------------------------------------------------===//
-// SETCC_C Patterns
-//===----------------------------------------------------------------------===//
-
-// Materialize the carry bit as 0 or -1. This is "scs" and sign extension,
-// not "subx d,d" as on x86 (sbb): subx reads X, which cmp and tst leave
-// alone, while the carry these come from is often a compare's.
-let Uses = [CCR], Defs = [CCR], isPseudo = 1 in {
-def SETCS_C8d : MxPseudo<(outs MxDRD8:$dst), (ins),
-                         [(set MxDRD8:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
-def SETCS_C16d : MxPseudo<(outs MxDRD16:$dst), (ins),
-                          [(set MxDRD16:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
-def SETCS_C32d : MxPseudo<(outs MxDRD32:$dst), (ins),
-                          [(set MxDRD32:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
-} // Uses = [CCR], Defs = [CCR], isPseudo = 1
-
-
-def : Pat<(i16 (anyext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C16d)>;
-def : Pat<(i32 (anyext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C32d)>;
-
-def : Pat<(i16 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C16d)>;
-def : Pat<(i32 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C32d)>;
-
-def : Pat<(and (i8 (MxSetCC_C MxCONDcs, CCR)), 1), (SETd8cs)>;
-
 //===------------===//
 // Trap / Breakpoint
 //===------------===//

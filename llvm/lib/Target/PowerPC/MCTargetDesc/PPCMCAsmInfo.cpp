@@ -202,9 +202,6 @@ PPCELFMCAsmInfo::PPCELFMCAsmInfo(bool is64Bit, const Triple &T,
   // Set up DWARF directives
   MinInstAlignment = 4;
 
-  // Exceptions handling
-  ExceptionsType = ExceptionHandling::DwarfCFI;
-
   ZeroDirective = "\t.space\t";
   Data64bitsDirective = is64Bit ? "\t.quad\t" : nullptr;
   AssemblerDialect = 1;           // New-Style mnemonics.
@@ -237,8 +234,6 @@ PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit, const Triple &T,
   CommentString = ";";
   SeparatorString = "@";
   setFullRegisterNames(true);
-
-  ExceptionsType = ExceptionHandling::DwarfCFI;
 
   // We can't emit a 64-bit unit in PPC32 mode.
   if (!is64Bit)

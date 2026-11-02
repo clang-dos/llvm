@@ -176,12 +176,11 @@ bool CodeGenModule::TryEmitBaseDestructorAsAlias(const CXXDestructorDecl *D) {
   // requires explicit comdat support in the IL.
   if (llvm::GlobalValue::isWeakForLinker(TargetLinkage))
     return true;
-  // Create the alias with no name.
-  // The alias is in the aliasee's address space, which for a function is
-  // the program address space.
-  auto *Alias = llvm::GlobalAlias::create(AliasValueType,
-                                          Aliasee->getAddressSpace(), Linkage,
-                                          "", Aliasee, &getModule());
+
+  // Create the alias with no name, in the same address space as the aliasee.
+  auto *Alias =
+      llvm::GlobalAlias::create(AliasValueType, Aliasee->getAddressSpace(),
+                                Linkage, "", Aliasee, &getModule());
 
   // Destructors are always unnamed_addr.
   Alias->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);

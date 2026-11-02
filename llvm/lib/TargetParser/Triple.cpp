@@ -2518,6 +2518,11 @@ bool Triple::isValidVersionForOS(OSType OSKind, const VersionTuple &Version) {
 }
 
 ExceptionHandling Triple::getDefaultExceptionHandling() const {
+  // 16-bit code has no DWARF unwinder, and OMF objects no .eh_frame: use
+  // setjmp/longjmp-style function contexts whatever the object format.
+  if (getArch() == Triple::i8086)
+    return ExceptionHandling::SjLj;
+
   if (isOSBinFormatCOFF()) {
     if (getArch() == Triple::x86 &&
         (isOSCygMing() || isWindowsItaniumEnvironment()))
@@ -2539,10 +2544,6 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
     return isOSDarwin() && !isWatchABI() ? ExceptionHandling::SjLj
                                          : ExceptionHandling::DwarfCFI;
   }
-
-  // 16-bit code has no DWARF unwinder, and OMF objects no .eh_frame.
-  if (getArch() == Triple::i8086)
-    return ExceptionHandling::SjLj;
 
   if (isAArch64() || isX86() || isPPC() || isMIPS() || isSPARC() || isBPF() ||
       isRISCV() || isLoongArch())
@@ -2665,6 +2666,16 @@ LongDoubleFormat Triple::getDefaultLongDoubleFormat() const {
   default:
     return LongDoubleFormat::IEEEdouble;
   }
+}
+
+DebuggerKind Triple::getDefaultDebuggerTuning() const {
+  if (isOSDarwin())
+    return DebuggerKind::LLDB;
+  if (isPS())
+    return DebuggerKind::SCE;
+  if (isOSAIX())
+    return DebuggerKind::DBX;
+  return DebuggerKind::GDB;
 }
 
 // HLSL triple environment orders are relied on in the front end

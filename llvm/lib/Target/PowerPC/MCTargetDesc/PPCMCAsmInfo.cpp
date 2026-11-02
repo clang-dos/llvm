@@ -235,8 +235,6 @@ PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit, const Triple &T,
   SeparatorString = "@";
   setFullRegisterNames(true);
 
-  ExceptionsType = ExceptionHandling::DwarfCFI;
-
   // We can't emit a 64-bit unit in PPC32 mode.
   if (!is64Bit)
     Data64bitsDirective = nullptr;

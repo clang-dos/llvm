@@ -5294,7 +5294,7 @@ void X86FrameLowering::emitEpilogue16(MachineFunction &MF,
   if (NumBytes || MFI.hasVarSizedObjects()) {
     if (CSSize)
       addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(X86::LEA16r), StackPtr),
-                   FramePtr, false, -(int64_t)CSSize)
+                   FramePtr, -(int64_t)CSSize)
           .setMIFlag(MachineInstr::FrameDestroy);
     else
       BuildMI(MBB, MBBI, DL, TII.get(X86::MOV16rr), StackPtr)

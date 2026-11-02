@@ -690,28 +690,6 @@ void M68kInstrInfo::buildClearRegister(Register Reg, MachineBasicBlock &MBB,
         "buildClearRegister is not implemented for " + RI.getRegAsmName(Reg));
 }
 
-/// Expand a single-def pseudo instruction to a two-addr
-/// instruction with two undef reads of the register being defined.
-/// This is used for mapping:
-///   %d0 = SETCS_C32d
-/// to:
-///   %d0 = SUBX32dd %d0<undef>, %d0<undef>
-///
-static bool Expand2AddrUndef(MachineInstrBuilder &MIB,
-                             const MCInstrDesc &Desc) {
-  assert(Desc.getNumOperands() == 3 && "Expected two-addr instruction.");
-  Register Reg = MIB->getOperand(0).getReg();
-  MIB->setDesc(Desc);
-
-  // MachineInstr::addOperand() will insert explicit operands before any
-  // implicit operands.
-  MIB.addReg(Reg, RegState::Undef).addReg(Reg, RegState::Undef);
-  // But we don't trust that.
-  assert(MIB->getOperand(1).getReg() == Reg &&
-         MIB->getOperand(2).getReg() == Reg && "Misplaced operand");
-  return true;
-}
-
 bool M68kInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MachineInstrBuilder MIB(*MI.getParent()->getParent(), MI);
   switch (MI.getOpcode()) {
@@ -730,11 +708,28 @@ bool M68kInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return ExpandPUSH_POP(MIB, get(M68k::MOV32ro), false);
 
   case M68k::SETCS_C8d:
-    return Expand2AddrUndef(MIB, get(M68k::SUBX8dd));
   case M68k::SETCS_C16d:
-    return Expand2AddrUndef(MIB, get(M68k::SUBX16dd));
-  case M68k::SETCS_C32d:
-    return Expand2AddrUndef(MIB, get(M68k::SUBX32dd));
+  case M68k::SETCS_C32d: {
+    // scs, then sign-extend the byte: 0 or -1 from the carry flag.
+    MachineBasicBlock &MBB = *MI.getParent();
+    const DebugLoc &DL = MI.getDebugLoc();
+    Register Reg = MI.getOperand(0).getReg();
+    unsigned Opc = MI.getOpcode();
+    Register R8 = Opc == M68k::SETCS_C8d
+                      ? Reg
+                      : Register(RI.getSubReg(Reg, M68k::MxSubRegIndex8Lo));
+    BuildMI(MBB, MI, DL, get(M68k::SETd8cs), R8);
+    if (Opc != M68k::SETCS_C8d) {
+      Register R16 = Opc == M68k::SETCS_C16d
+                         ? Reg
+                         : Register(RI.getSubReg(Reg, M68k::MxSubRegIndex16Lo));
+      BuildMI(MBB, MI, DL, get(M68k::EXT16), R16).addReg(R16);
+    }
+    if (Opc == M68k::SETCS_C32d)
+      BuildMI(MBB, MI, DL, get(M68k::EXT32), Reg).addReg(Reg);
+    MI.eraseFromParent();
+    return true;
+  }
   }
   return false;
 }

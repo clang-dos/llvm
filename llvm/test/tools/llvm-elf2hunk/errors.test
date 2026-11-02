@@ -1,0 +1,42 @@
+## A PC-relative reference from one hunk to another can't be relocated.
+# RUN: yaml2obj %s -o %t.elf
+# RUN: not llvm-elf2hunk %t.elf -o %t.hunk 2>&1 | FileCheck %s
+# CHECK: error: a PC-relative reference at offset 2 of hunk 0 goes to hunk 1; build with the large code model (-mcmodel=large)
+
+## The program must start at the first byte of its code.
+# RUN: yaml2obj %s -DENTRY=0x1002 -o %t2.elf
+# RUN: not llvm-elf2hunk %t2.elf -o %t2.hunk 2>&1 | FileCheck %s --check-prefix=ENTRY
+# ENTRY: error: the entry point must be the first byte of the code; link the startup code first
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS32
+  Data:    ELFDATA2MSB
+  Type:    ET_EXEC
+  Machine: EM_68K
+  Entry:   [[ENTRY=0x1000]]
+Sections:
+  - Name:    .text
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address: 0x1000
+    Content: 41FA0FFE4E75
+  - Name:    .data
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 0x2000
+    Content: '00000000'
+  - Name:    .rela.text
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .text
+    Relocations:
+      - Offset: 0x1002
+        Symbol: data
+        Type:   R_68K_PC16
+Symbols:
+  - Name:    data
+    Section: .data
+    Value:   0x2000
+    Binding: STB_GLOBAL
+...

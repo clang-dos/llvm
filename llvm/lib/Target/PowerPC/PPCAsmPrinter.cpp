@@ -3594,7 +3594,7 @@ INITIALIZE_PASS(PPCDarwinAsmPrinter, "ppc-darwin-asm-printer",
 static AsmPrinter *
 createPPCAsmPrinterPass(TargetMachine &tm,
                         std::unique_ptr<MCStreamer> &&Streamer) {
-  if (tm.getTargetTriple().isOSAIX())
+  if (tm.getTargetTriple().isPPCAIXABI())
     return new PPCAIXAsmPrinter(tm, std::move(Streamer));
   if (tm.getTargetTriple().isOSBinFormatMachO())
     return new PPCDarwinAsmPrinter(tm, std::move(Streamer));

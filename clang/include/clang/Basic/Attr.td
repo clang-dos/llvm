@@ -3667,6 +3667,13 @@ def PreserveAll : DeclOrTypeAttr {
   let Documentation = [PreserveAllDocs];
 }
 
+def M68kRawInline : InheritableAttr, TargetSpecificAttr<TargetM68k> {
+  let Spellings = [GNU<"raw_inline">];
+  let Args = [VariadicUnsignedArgument<"Words">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [M68kRawInlineDocs];
+}
+
 def M68kRTD: DeclOrTypeAttr {
   let Spellings = [Clang<"m68k_rtd">];
   let Documentation = [M68kRTDDocs];

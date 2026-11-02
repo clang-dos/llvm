@@ -352,6 +352,17 @@ def RET : MxPseudo<(outs), (ins i32imm:$adj, variable_ops),
                    [(MxRet timm:$adj)]>;
 } // isTerminator = 1, isReturn = 1, isBarrier = 1, hasCtrlDep = 1
 
+// After a call to a Pascal function or Toolbox trap, pop the result the
+// callee left on the stack into D0. A byte result is the high byte of a word.
+// These count as part of the call (isCall), so that the stack adjustment
+// for a callee-popped call frame goes after them.
+let isCodeGenOnly = 1, hasSideEffects = 1, isCall = 1,
+    Defs = [SP, D0], Uses = [SP] in {
+def PASCAL_POP8  : MxPseudo<(outs), (ins)>;
+def PASCAL_POP16 : MxPseudo<(outs), (ins)>;
+def PASCAL_POP32 : MxPseudo<(outs), (ins)>;
+}
+
 //===----------------------------------------------------------------------===//
 // SETCC_C Patterns
 //===----------------------------------------------------------------------===//

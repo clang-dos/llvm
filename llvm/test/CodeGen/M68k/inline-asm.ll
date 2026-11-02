@@ -168,3 +168,18 @@ entry:
   call void asm sideeffect "move.w #1235,%ccr", ""()
   ret void
 }
+
+; A symbol passed for an immediate operand is printed as an immediate.
+define void @symbol_immediate() {
+; CHECK-LABEL: symbol_immediate:
+; CHECK:         ;APP
+; CHECK-NEXT:    move.l #g, -(%sp)
+; CHECK-NEXT:    ;NO_APP
+; CHECK-NEXT:    ;APP
+; CHECK-NEXT:    move.l #g+4, %d0
+; CHECK-NEXT:    ;NO_APP
+entry:
+  call void asm sideeffect "move.l $0, -(%sp)", "i"(ptr @g)
+  call void asm sideeffect "move.l $0, %d0", "i"(ptr getelementptr (i8, ptr @g, i32 4))
+  ret void
+}

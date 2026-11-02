@@ -500,8 +500,10 @@ bool M68kDAGToDAGISel::foldOffsetIntoAddress(uint64_t Offset,
 bool M68kDAGToDAGISel::matchAddressBase(SDValue N, M68kISelAddressMode &AM) {
   // Is the base register already occupied?
   if (AM.hasBase()) {
-    // If so, check to see if the scale index register is set.
-    if (!AM.hasIndexReg()) {
+    // If so, check to see if the scale index register is set. (A frame
+    // index base can take one too; hasIndexReg() only looks at register
+    // bases, so test the field itself.)
+    if (!AM.IndexReg.getNode()) {
       AM.IndexReg = N;
       AM.Scale = 1;
       return true;
@@ -823,15 +825,18 @@ bool M68kDAGToDAGISel::SelectARID(SDNode *Parent, SDValue N, SDValue &Disp,
     return false;
   }
 
+  // Check for an index register first: a frame index base with an index
+  // needs AddrType::ARII, and taking only the frame index here would drop
+  // the index from the address.
+  if (AM.IndexReg.getNode()) {
+    LLVM_DEBUG(dbgs() << "REJECT: Cannot match Index\n");
+    return false;
+  }
+
   // If this is a frame index, grab it
   if (getFrameIndexAddress(AM, SDLoc(N), Disp, Base)) {
     LLVM_DEBUG(dbgs() << "SUCCESS matched FI\n");
     return true;
-  }
-
-  if (AM.hasIndexReg()) {
-    LLVM_DEBUG(dbgs() << "REJECT: Cannot match Index\n");
-    return false;
   }
 
   if (!AM.hasBaseReg()) {
@@ -901,6 +906,20 @@ bool M68kDAGToDAGISel::SelectARII(SDNode *Parent, SDValue N, SDValue &Disp,
   if (AM.isPCRelative()) {
     LLVM_DEBUG(dbgs() << "REJECT: PC relative\n");
     return false;
+  }
+
+  // A frame index with an index register: the frame index becomes a
+  // register (an LEA) and is the base. A constant index is left to
+  // AddrType::ARID, which folds it into the displacement.
+  if (AM.hasFrameIndex() && AM.IndexReg.getNode() &&
+      !isa<ConstantSDNode>(AM.IndexReg) && !AM.hasSymbolicDisplacement() &&
+      (AM.Disp != 0 || AllowARIIWithZeroDisp(Parent))) {
+    Base = CurDAG->getFrameIndex(AM.BaseFrameIndex,
+                                 TLI->getPointerTy(CurDAG->getDataLayout()));
+    Index = AM.IndexReg;
+    Disp = getI8Imm(AM.Disp, SDLoc(N));
+    LLVM_DEBUG(dbgs() << "SUCCESS, matched FI with index\n");
+    return true;
   }
 
   if (!AM.hasIndexReg()) {
@@ -1059,13 +1078,28 @@ bool M68kDAGToDAGISel::SelectARI(SDNode *Parent, SDValue N, SDValue &Base) {
     return false;
   }
 
+  // An address no other mode could take, such as a store to a PC-relative
+  // global plus an offset (stores cannot use PC-relative modes): compute
+  // the whole address into a register. ARI is the last mode tried.
+  auto WholeAddress = [&]() {
+    if (AM.hasFrameIndex() || N.getOpcode() == ISD::FrameIndex)
+      return false;
+    Base = N;
+    LLVM_DEBUG(dbgs() << "SUCCESS, the whole address in a register\n");
+    return true;
+  };
+
   if (AM.isPCRelative()) {
+    if (WholeAddress())
+      return true;
     LLVM_DEBUG(dbgs() << "REJECT: Cannot match PC relative address\n");
     return false;
   }
 
   // AddrType::ARI does not use these
   if (AM.hasIndexReg() || AM.Disp != 0) {
+    if (WholeAddress())
+      return true;
     LLVM_DEBUG(dbgs() << "REJECT: Cannot match Index or Disp\n");
     return false;
   }

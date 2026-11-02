@@ -92,6 +92,8 @@ M68kTargetLowering::M68kTargetLowering(const M68kTargetMachine &TM,
     setOperationAction(ISD::MUL, MVT::i32, LibCall);
     setOperationAction(ISD::SDIV, MVT::i32, LibCall);
     setOperationAction(ISD::UDIV, MVT::i32, LibCall);
+    // A 32-bit product of 16-bit values fits mulu.w or muls.w.
+    setTargetDAGCombine(ISD::MUL);
   }
   setOperationAction(ISD::MUL, MVT::i64, LibCall);
 
@@ -541,6 +543,49 @@ SDValue M68kTargetLowering::LowerMemOpCallTo(SDValue Chain, SDValue StackPtr,
 //                                   Call
 //===----------------------------------------------------------------------===//
 
+/// Pascal pushes arguments left to right, so the first one ends up at the
+/// highest address. CC_M68k_Pascal assigns offsets in C order; mirror each
+/// argument (keeping the parts of a split argument in order) within the
+/// argument area.
+template <typename ArgT>
+static void layOutPascalArguments(SmallVectorImpl<CCValAssign> &ArgLocs,
+                                  const SmallVectorImpl<ArgT> &Args,
+                                  int64_t StackSize) {
+  DenseMap<unsigned, std::pair<int64_t, int64_t>> Extent;
+  auto Size = [&](const CCValAssign &VA) -> int64_t {
+    return alignTo(VA.getLocVT().getStoreSize(), 2);
+  };
+  for (const CCValAssign &VA : ArgLocs) {
+    if (!VA.isMemLoc())
+      continue;
+    int64_t Begin = VA.getLocMemOffset(), End = Begin + Size(VA);
+    auto [It, New] =
+        Extent.try_emplace(Args[VA.getValNo()].OrigArgIndex, Begin, End);
+    if (!New) {
+      It->second.first = std::min(It->second.first, Begin);
+      It->second.second = std::max(It->second.second, End);
+    }
+  }
+  for (CCValAssign &VA : ArgLocs) {
+    if (!VA.isMemLoc())
+      continue;
+    auto [Begin, End] = Extent.lookup(Args[VA.getValNo()].OrigArgIndex);
+    int64_t Offset = (StackSize - End) + (VA.getLocMemOffset() - Begin);
+    VA = CCValAssign::getMem(VA.getValNo(), VA.getValVT(), Offset,
+                             VA.getLocVT(), VA.getLocInfo(), VA.needsCustom());
+  }
+}
+
+/// Size of the stack slot a Pascal function leaves its result in: 0 for
+/// none, else 2 or 4 (a byte result sits in the high byte of a word).
+static unsigned pascalResultSlot(const SmallVectorImpl<ISD::InputArg> &Ins) {
+  if (Ins.empty())
+    return 0;
+  if (Ins.size() != 1)
+    report_fatal_error("Pascal function results must fit in 4 bytes");
+  return Ins[0].VT.getStoreSize() <= 2 ? 2 : 4;
+}
+
 SDValue M68kTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                       SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
@@ -565,6 +610,15 @@ SDValue M68kTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   auto Attr = MF.getFunction().getFnAttribute("disable-tail-calls");
   if (Attr.getValueAsBool())
+    IsTailCall = false;
+
+  bool IsPascal = CallConv == CallingConv::M68k_Pascal;
+  if (IsPascal && IsVarArg)
+    report_fatal_error("Pascal functions cannot take variable arguments");
+  // A Pascal callee pops its arguments and leaves a result on the stack, so
+  // neither side of a Pascal call can be a sibling call.
+  if (IsPascal ||
+      MF.getFunction().getCallingConv() == CallingConv::M68k_Pascal)
     IsTailCall = false;
 
   // FIXME Add tailcalls support
@@ -605,6 +659,14 @@ SDValue M68kTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NumBytes = CCInfo.getAlignedCallFrameSize();
+  unsigned PascalResultBytes = 0;
+  if (IsPascal) {
+    // Arguments first (mirrored), then the result slot above them.
+    unsigned ArgBytes = alignTo(CCInfo.getStackSize(), 2);
+    layOutPascalArguments(ArgLocs, Outs, ArgBytes);
+    PascalResultBytes = pascalResultSlot(Ins);
+    NumBytes = ArgBytes + PascalResultBytes;
+  }
   if (IsSibcall) {
     // This is a sibcall. The memory operands are available in caller's
     // own caller's stack.
@@ -834,6 +896,20 @@ SDValue M68kTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         S->getSymbol(), getPointerTy(DAG.getDataLayout()), OpFlags);
   }
 
+  // A call to a function declared with inline code (a classic Mac OS
+  // Toolbox trap) emits those code words in place of the jsr. The callee
+  // becomes a marker symbol that the asm printer expands.
+  if (const Function *F =
+          CLI.CB ? CLI.CB->getCalledFunction() : nullptr;
+      F && F->hasFnAttribute("m68k-inline")) {
+    std::string Name =
+        (Twine(M68k::InlineCodePrefix) +
+         F->getFnAttribute("m68k-inline").getValueAsString())
+            .str();
+    Callee = DAG.getTargetExternalSymbol(MF.createExternalSymbolName(Name),
+                                         getPointerTy(DAG.getDataLayout()));
+  }
+
   SmallVector<SDValue, 8> Ops;
 
   if (!IsSibcall && IsTailCall) {
@@ -871,9 +947,23 @@ SDValue M68kTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   Chain = DAG.getNode(M68kISD::CALL, DL, {MVT::Other, MVT::Glue}, Ops);
   InGlue = Chain.getValue(1);
 
+  // A Pascal callee popped its arguments and left the result on top of the
+  // stack: pop it into D0 right away.
+  if (PascalResultBytes) {
+    unsigned Opc = Ins[0].VT.getStoreSize() == 1 ? M68k::PASCAL_POP8
+                   : PascalResultBytes == 2      ? M68k::PASCAL_POP16
+                                                 : M68k::PASCAL_POP32;
+    SDNode *Pop =
+        DAG.getMachineNode(Opc, DL, MVT::Other, MVT::Glue, Chain, InGlue);
+    Chain = SDValue(Pop, 0);
+    InGlue = SDValue(Pop, 1);
+  }
+
   // Create the CALLSEQ_END node.
   unsigned NumBytesForCalleeToPop;
-  if (M68k::isCalleePop(CallConv, IsVarArg,
+  if (IsPascal) {
+    NumBytesForCalleeToPop = NumBytes; // The callee and the pop above.
+  } else if (M68k::isCalleePop(CallConv, IsVarArg,
                         DAG.getTarget().Options.GuaranteedTailCallOpt)) {
     NumBytesForCalleeToPop = NumBytes; // Callee pops everything
   } else if (!canGuaranteeTCO(CallConv) && SR == StackStructReturn) {
@@ -956,6 +1046,14 @@ SDValue M68kTargetLowering::LowerFormalArguments(
   M68kCCState CCInfo(ArgTypes, CCID, IsVarArg, MF, ArgLocs, *DAG.getContext());
 
   CCInfo.AnalyzeFormalArguments(Ins, CC_M68k);
+
+  bool IsPascal = CCID == CallingConv::M68k_Pascal;
+  unsigned PascalArgBytes = alignTo(CCInfo.getStackSize(), 2);
+  if (IsPascal) {
+    if (IsVarArg)
+      report_fatal_error("Pascal functions cannot take variable arguments");
+    layOutPascalArguments(ArgLocs, Ins, PascalArgBytes);
+  }
 
   unsigned LastVal = ~0U;
   SDValue ArgValue;
@@ -1063,7 +1161,11 @@ SDValue M68kTargetLowering::LowerFormalArguments(
   }
 
   // Some CCs need callee pop.
-  if (M68k::isCalleePop(CCID, IsVarArg,
+  if (IsPascal) {
+    // The callee pops the arguments but not the result slot above them.
+    StackSize = PascalArgBytes;
+    MMFI->setBytesToPopOnReturn(StackSize);
+  } else if (M68k::isCalleePop(CCID, IsVarArg,
                         MF.getTarget().Options.GuaranteedTailCallOpt)) {
     MMFI->setBytesToPopOnReturn(StackSize); // Callee pops everything.
   } else {
@@ -1099,6 +1201,25 @@ M68kTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CCID,
                                 const SDLoc &DL, SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
   M68kMachineFunctionInfo *MFI = MF.getInfo<M68kMachineFunctionInfo>();
+
+  // A Pascal function stores its result in the slot the caller left above
+  // the arguments, and returns nothing in registers.
+  if (CCID == CallingConv::M68k_Pascal && !OutVals.empty()) {
+    if (OutVals.size() != 1)
+      report_fatal_error("Pascal function results must fit in 4 bytes");
+    SDValue Val = OutVals[0];
+    if (Val.getValueType() == MVT::i1)
+      Val = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i8, Val);
+    unsigned Slot = Val.getValueType().getStoreSize() <= 2 ? 2 : 4;
+    int FI = MF.getFrameInfo().CreateFixedObject(
+        Slot, MFI->getArgumentStackSize(), /*IsImmutable=*/false);
+    SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+    Chain = DAG.getStore(Chain, DL, Val, FIN,
+                         MachinePointerInfo::getFixedStack(MF, FI));
+    return DAG.getNode(
+        M68kISD::RET, DL, MVT::Other, Chain,
+        DAG.getTargetConstant(MFI->getBytesToPopOnReturn(), DL, MVT::i32));
+  }
 
   SmallVector<CCValAssign, 16> RVLocs;
   CCState CCInfo(CCID, IsVarArg, MF, RVLocs, *DAG.getContext());
@@ -3021,7 +3142,22 @@ M68kTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
     }
   }
 
-  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+  auto Res = TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+
+  // An explicit register ("{d0}", from `register short x asm("d0")`) names
+  // the 32-bit register. For a narrower value use its low word or byte, or
+  // there is no way to copy between them.
+  if (Res.first && (VT == MVT::i16 || VT == MVT::i8)) {
+    unsigned Idx =
+        VT == MVT::i16 ? M68k::MxSubRegIndex16Lo : M68k::MxSubRegIndex8Lo;
+    if (MCRegister Sub = TRI->getSubReg(Res.first, Idx)) {
+      for (const TargetRegisterClass *RC :
+           {&M68k::DR16RegClass, &M68k::AR16RegClass, &M68k::DR8RegClass})
+        if (RC->contains(Sub))
+          return std::make_pair(unsigned(Sub), RC);
+    }
+  }
+  return Res;
 }
 
 /// Determines whether the callee is required to pop its own arguments.
@@ -3607,10 +3743,42 @@ static SDValue combineADDX(SDNode *N, SelectionDAG &DAG,
   return SDValue();
 }
 
+// Before the 68020 there is no 32-bit multiply, and a 32-bit MUL becomes a
+// call to __mulsi3. When both operands are zero- or sign-extended 16-bit
+// values, the full 32-bit product comes from a single mulu.w or muls.w.
+static SDValue combineMUL(SDNode *N, SelectionDAG &DAG,
+                          const M68kSubtarget &Subtarget) {
+  EVT VT = N->getValueType(0);
+  if (VT != MVT::i32 || Subtarget.atLeastM68020())
+    return SDValue();
+  SDValue LHS = N->getOperand(0), RHS = N->getOperand(1);
+  SDLoc DL(N);
+  if (DAG.computeKnownBits(LHS).countMinLeadingZeros() >= 16 &&
+      DAG.computeKnownBits(RHS).countMinLeadingZeros() >= 16)
+    return DAG.getNode(M68kISD::MULU16, DL, VT, LHS, RHS);
+  if (DAG.ComputeNumSignBits(LHS) > 16 && DAG.ComputeNumSignBits(RHS) > 16)
+    return DAG.getNode(M68kISD::MULS16, DL, VT, LHS, RHS);
+  // One unsigned 16-bit operand: a * b == a * lo(b) + (a * hi(b) << 16).
+  if (DAG.computeKnownBits(RHS).countMinLeadingZeros() >= 16)
+    std::swap(LHS, RHS);
+  if (DAG.computeKnownBits(LHS).countMinLeadingZeros() >= 16) {
+    // MULU16 reads only the low word of each operand, so lo(b) needs no mask.
+    SDValue Sixteen = DAG.getConstant(16, DL, VT);
+    SDValue Hi = DAG.getNode(ISD::SRL, DL, VT, RHS, Sixteen);
+    SDValue PLo = DAG.getNode(M68kISD::MULU16, DL, VT, LHS, RHS);
+    SDValue PHi = DAG.getNode(M68kISD::MULU16, DL, VT, LHS, Hi);
+    PHi = DAG.getNode(ISD::SHL, DL, VT, PHi, Sixteen);
+    return DAG.getNode(ISD::ADD, DL, VT, PLo, PHi);
+  }
+  return SDValue();
+}
+
 SDValue M68kTargetLowering::PerformDAGCombine(SDNode *N,
                                               DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
   switch (N->getOpcode()) {
+  case ISD::MUL:
+    return combineMUL(N, DAG, Subtarget);
   case M68kISD::SUBX:
     return combineSUBX(N, DAG);
   case M68kISD::ADDX:

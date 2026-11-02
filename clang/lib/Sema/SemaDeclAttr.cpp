@@ -830,6 +830,26 @@ public:
 };
 }
 
+static void handleM68kRawInlineAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (!AL.checkAtLeastNumArgs(S, 1))
+    return;
+  SmallVector<unsigned, 4> Words;
+  for (unsigned I = 0, E = AL.getNumArgs(); I != E; ++I) {
+    uint32_t Word;
+    if (!S.checkUInt32Argument(AL, AL.getArgAsExpr(I), Word, I))
+      return;
+    if (Word > 0xFFFF) {
+      S.Diag(AL.getArgAsExpr(I)->getExprLoc(),
+             diag::err_attribute_argument_out_of_range)
+          << AL << 0 << 0xFFFF << AL.getArgAsExpr(I)->getSourceRange();
+      return;
+    }
+    Words.push_back(Word);
+  }
+  D->addAttr(::new (S.Context)
+                 M68kRawInlineAttr(S.Context, AL, Words.data(), Words.size()));
+}
+
 static void handleDiagnoseAsBuiltinAttr(Sema &S, Decl *D,
                                         const ParsedAttr &AL) {
   const auto *DeclFD = cast<FunctionDecl>(D);
@@ -7881,6 +7901,9 @@ ProcessDeclAttribute(Sema &S, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_DiagnoseAsBuiltin:
     handleDiagnoseAsBuiltinAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_M68kRawInline:
+    handleM68kRawInlineAttr(S, D, AL);
     break;
   case ParsedAttr::AT_NoBuiltin:
     handleNoBuiltinAttr(S, D, AL);

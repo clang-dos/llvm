@@ -71,6 +71,18 @@ bool M68kAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                                      const char *ExtraCode, raw_ostream &OS) {
   // Print the operand if there is no operand modifier.
   if (!ExtraCode || !ExtraCode[0]) {
+    // A symbol given for an immediate ("i") operand is an immediate, like
+    // a number: print it with '#', or the assembler reads an absolute
+    // memory operand and the instruction loads from that address.
+    switch (MI->getOperand(OpNo).getType()) {
+    case MachineOperand::MO_GlobalAddress:
+    case MachineOperand::MO_BlockAddress:
+    case MachineOperand::MO_ConstantPoolIndex:
+      OS << '#';
+      break;
+    default:
+      break;
+    }
     printOperand(MI, OpNo, OS);
     return false;
   }
@@ -191,6 +203,27 @@ void M68kAsmPrinter::emitInstruction(const MachineInstr *MI) {
     // Lower these as normal, but add some comments.
     OutStreamer->AddComment("TAILCALL");
     break;
+  }
+
+  // A call whose callee is the inline-code marker emits the code words
+  // (classic Mac OS traps) instead of the call instruction.
+  if (MI->isCall()) {
+    for (const MachineOperand &MO : MI->operands()) {
+      if (!MO.isSymbol())
+        continue;
+      StringRef Name = MO.getSymbolName();
+      if (!Name.consume_front(M68k::InlineCodePrefix))
+        continue;
+      SmallVector<StringRef, 4> Words;
+      Name.split(Words, ',');
+      for (StringRef W : Words) {
+        unsigned Value;
+        if (W.trim().getAsInteger(16, Value) || Value > 0xFFFF)
+          report_fatal_error("bad m68k inline code word '" + W + "'");
+        OutStreamer->emitIntValue(Value, 2);
+      }
+      return;
+    }
   }
 
   MCInst TmpInst0;

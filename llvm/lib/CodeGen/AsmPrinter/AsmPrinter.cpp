@@ -3255,8 +3255,8 @@ void AsmPrinter::SetupMachineFunction(MachineFunction &MF) {
   if (!MAI.isAIX()) {
     CurrentFnSym = getSymbol(&MF.getFunction());
   } else {
-    assert(TM.getTargetTriple().isOSAIX() &&
-           "Only AIX uses the function descriptor hooks.");
+    assert(TM.getTargetTriple().isOSBinFormatXCOFF() &&
+           "Only XCOFF targets use the function descriptor hooks.");
     // AIX is unique here in that the name of the symbol emitted for the
     // function body does not have the same name as the source function's
     // C-linkage name.
@@ -3733,7 +3733,7 @@ void AsmPrinter::preprocessXXStructorList(const DataLayout &DL,
     S.Priority = Priority->getLimitedValue(65535);
     S.Func = CS->getOperand(1);
     if (!CS->getOperand(2)->isNullValue()) {
-      if (TM.getTargetTriple().isOSAIX()) {
+      if (TM.getTargetTriple().isOSBinFormatXCOFF()) {
         CS->getContext().emitError(
             "associated data of XXStructor list is not yet supported on AIX");
       }

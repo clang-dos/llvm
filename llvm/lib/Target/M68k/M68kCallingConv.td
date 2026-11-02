@@ -43,9 +43,19 @@ def RetCC_M68k_Fast : CallingConv<[
   CCIfType<[i32],  CCAssignToReg<[D0, D1, A0, A1]>>,
 ]>;
 
+/// Classic Mac OS Pascal return convention. The result really comes back in
+/// a stack slot above the arguments; the call sequence pops it into D0.
+def RetCC_M68k_Pascal : CallingConv<[
+  CCIfType<[i1],   CCPromoteToType<i8>>,
+  CCIfType<[i8],   CCAssignToReg<[BD0]>>,
+  CCIfType<[i16],  CCAssignToReg<[WD0]>>,
+  CCIfType<[i32],  CCAssignToReg<[D0]>>,
+]>;
+
 /// This is the root return-value convention for the M68k backend.
 def RetCC_M68k : CallingConv<[
   CCIfCC<"CallingConv::Fast", CCDelegateTo<RetCC_M68k_Fast>>,
+  CCIfCC<"CallingConv::M68k_Pascal", CCDelegateTo<RetCC_M68k_Pascal>>,
   CCDelegateTo<RetCC_M68k_C>
 ]>;
 
@@ -95,9 +105,22 @@ def CC_M68k_C : CallingConv<[
   CCDelegateTo<CC_M68k_Common>
 ]>;
 
+/// Classic Mac OS Pascal convention: every argument is on the stack, in 2-byte
+/// units. A byte (Boolean, Char) takes a word with the value in its high
+/// (first) byte. Arguments are pushed left to right, so the first one ends
+/// up highest; LowerCall and LowerFormalArguments reverse the offsets that
+/// this assigns.
+def CC_M68k_Pascal : CallingConv<[
+  CCIfType<[i1],   CCPromoteToType<i8>>,
+  CCIfType<[i8],   CCAssignToStack<2, 2>>,
+  CCIfType<[i16],  CCAssignToStack<2, 2>>,
+  CCIfType<[i32],  CCAssignToStack<4, 2>>
+]>;
+
 /// This is the root argument convention for the M68k backend.
 def CC_M68k : CallingConv<[
   CCIfCC<"CallingConv::Fast", CCDelegateTo<CC_M68k_Fast>>,
+  CCIfCC<"CallingConv::M68k_Pascal", CCDelegateTo<CC_M68k_Pascal>>,
   CCDelegateTo<CC_M68k_C>
 ]>;
 
@@ -111,4 +134,8 @@ def CSR_NoRegs : CalleeSavedRegs<(add)>;
 // A6 - FP
 def CSR_STD : CalleeSavedRegs<(add D2, D3, D4, D5, D6, D7,
                                    A2, A3, A4, A5, A6)>;
+
+// Pascal code and Toolbox traps on classic Mac OS may change D0-D2/A0-A1.
+def CSR_M68k_Pascal : CalleeSavedRegs<(add D3, D4, D5, D6, D7,
+                                           A2, A3, A4, A5, A6)>;
 

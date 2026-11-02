@@ -49,6 +49,21 @@ M68kTargetInfo::M68kTargetInfo(const llvm::Triple &Triple,
   } else {
     IntAlign = LongAlign = PointerAlign = 16;
   }
+
+  // Classic Mac OS uses the "mac68k" layout of MPW, THINK C and CodeWarrior:
+  // everything of 2 bytes or more is 2-byte aligned, so
+  // struct { char c; double d; int i; } is 14 bytes. The types match
+  // Retro68's gcc, except long double, which is double for now: SANE's
+  // extended type isn't supported.
+  if (getTriple().isOSMacOSClassic()) {
+    SizeType = UnsignedLong;
+    PtrDiffType = SignedLong;
+    IntPtrType = SignedLong;
+    WCharType = SignedLong;
+    FloatAlign = DoubleAlign = LongDoubleAlign = LongLongAlign = 16;
+    LongDoubleWidth = 64;
+    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+  }
 }
 
 bool M68kTargetInfo::setCPU(StringRef Name) {
@@ -69,6 +84,10 @@ void M68kTargetInfo::getTargetDefines(const LangOptions &Opts,
   using llvm::Twine;
 
   Builder.defineMacro("__m68k__");
+
+  // "pascal" in Toolbox declarations selects the Pascal calling convention.
+  if (getTriple().isOSMacOSClassic())
+    Builder.defineMacro("pascal", "__attribute__((__pascal__))");
 
   DefineStd(Builder, "mc68000", Opts);
 
@@ -239,6 +258,7 @@ M68kTargetInfo::checkCallingConvention(CallingConv CC) const {
   switch (CC) {
   case CC_C:
   case CC_M68kRTD:
+  case CC_X86Pascal: // Pascal functions and Toolbox traps on classic Mac OS
     return CCCR_OK;
   default:
     return TargetInfo::checkCallingConvention(CC);

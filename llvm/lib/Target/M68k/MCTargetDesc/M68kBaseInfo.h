@@ -33,6 +33,11 @@ namespace llvm {
 
 namespace M68k {
 
+/// Name prefix of the marker symbol that stands for inline code (classic
+/// Mac OS trap words) as the callee of a call. The rest of the name is the
+/// code words in hex, separated by commas.
+constexpr const char *InlineCodePrefix = "__m68k_inline_code$";
+
 /// Enums for memory operand decoding. Supports these forms:
 /// (d,An)
 /// (d,An,Xn)

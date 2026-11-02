@@ -1223,7 +1223,7 @@ static bool isSignedCharDefault(const llvm::Triple &Triple) {
 
   case llvm::Triple::ppc:
   case llvm::Triple::ppc64:
-    if (Triple.isOSDarwin())
+    if (Triple.isOSDarwin() || Triple.isOSMacOSClassic())
       return true;
     return false;
 
@@ -8078,8 +8078,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                     options::OPT_mno_constant_cfstrings, true))
     CmdArgs.push_back("-fno-constant-cfstrings");
 
-  Args.addOptInFlag(CmdArgs, options::OPT_fpascal_strings,
-                    options::OPT_fno_pascal_strings);
+  // "\pHello" Pascal string literals are on by default for classic Mac OS,
+  // as in MPW and CodeWarrior; the Toolbox takes Pascal strings.
+  if (Args.hasFlag(options::OPT_fpascal_strings,
+                   options::OPT_fno_pascal_strings, Triple.isOSMacOSClassic()))
+    CmdArgs.push_back("-fpascal-strings");
 
   // Honor -fpack-struct= and -fpack-struct, if given. Note that
   // -fno-pack-struct doesn't apply to -fpack-struct=.

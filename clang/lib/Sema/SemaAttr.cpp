@@ -70,7 +70,10 @@ void Sema::AddAlignmentAttributesForRecord(RecordDecl *RD) {
         Context, InfoVal.getPackNumber() * 8));
   }
 
-  if (IsXLPragma && M == AlignPackInfo::Natural)
+  // MrC and CodeWarrior also take align=natural to mean natural alignment
+  // instead of the default "power" alignment.
+  if ((IsXLPragma || Context.getTargetInfo().getTriple().isOSMacOSClassic()) &&
+      M == AlignPackInfo::Natural)
     RD->addAttr(AlignNaturalAttr::CreateImplicit(Context));
 
   if (AlignPackIncludeStack.empty())

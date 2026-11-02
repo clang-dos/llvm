@@ -829,6 +829,31 @@ public:
   }
 };
 
+// Classic Mac OS (System 7 to Mac OS 9) target, on 68k or PowerPC.
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY MacOSClassicTargetInfo
+    : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    // What MPW, CodeWarrior and Retro68 define. Not __APPLE__ or __MACH__:
+    // headers take those to mean Mac OS X.
+    Builder.defineMacro("macintosh");
+    Builder.defineMacro("Macintosh");
+    if (Opts.C11) {
+      Builder.defineMacro("__STDC_NO_ATOMICS__");
+      Builder.defineMacro("__STDC_NO_THREADS__");
+    }
+  }
+
+public:
+  MacOSClassicTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {
+    // #pragma options align=mac68k is used throughout Apple's headers.
+    this->HasAlignMac68kSupport = true;
+  }
+};
+
 // z/OS target
 template <typename Target>
 class LLVM_LIBRARY_VISIBILITY ZOSTargetInfo : public OSTargetInfo<Target> {

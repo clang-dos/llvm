@@ -194,6 +194,7 @@ enum Kind {
   kw_cheriot_compartmentcalleecc,
   kw_cheriot_librarycallcc,
   kw_x86_16_pascalcc,
+  kw_m68k_pascalcc,
 
   // Attributes:
   kw_attributes,

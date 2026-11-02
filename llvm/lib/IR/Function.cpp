@@ -1209,6 +1209,7 @@ bool llvm::CallingConv::supportsNonVoidReturnType(CallingConv::ID CC) {
   case CallingConv::AArch64_SME_ABI_Support_Routines_PreserveMost_From_X0:
   case CallingConv::AArch64_SME_ABI_Support_Routines_PreserveMost_From_X2:
   case CallingConv::M68k_RTD:
+  case CallingConv::M68k_Pascal:
   case CallingConv::GRAAL:
   case CallingConv::ARM64EC_Thunk_X64:
   case CallingConv::ARM64EC_Thunk_Native:

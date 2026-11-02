@@ -81,7 +81,7 @@ void ppc::getPPCTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   // purposes of the modern-aix-as.
   if (Args.hasFlag(options::OPT_fintegrated_as, options::OPT_fno_integrated_as,
                    true) &&
-      Triple.isOSAIX())
+      Triple.isPPCAIXABI())
     Features.push_back("+modern-aix-as");
 
   if (Arg *A = Args.getLastArg(options::OPT_mnoaix_use_ptrgl,

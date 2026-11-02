@@ -2068,7 +2068,7 @@ Register PPCFastISel::PPCMaterializeGV(const GlobalValue *GV, MVT VT) {
     return Register();
 
   PPCFuncInfo->setUsesTOCBasePtr();
-  bool IsAIXTocData = TM.getTargetTriple().isOSAIX() &&
+  bool IsAIXTocData = TM.getTargetTriple().isPPCAIXABI() &&
                       isa<GlobalVariable>(GV) &&
                       cast<GlobalVariable>(GV)->hasAttribute("toc-data");
 

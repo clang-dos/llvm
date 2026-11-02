@@ -60,7 +60,7 @@ void PPCInstPrinter::printInst(const MCInst *MI, uint64_t Address,
   // symbol reference, the instruction syntax is changed to look like a load
   // operation, i.e:
   //     Transform:  addis $rD, $rA, $src --> addis $rD, $src($rA).
-  if (TT.isOSAIX() &&
+  if (TT.isOSBinFormatXCOFF() &&
       (MI->getOpcode() == PPC::ADDIS8 || MI->getOpcode() == PPC::ADDIS) &&
       MI->getOperand(2).isExpr()) {
     assert((MI->getOperand(0).isReg() && MI->getOperand(1).isReg()) &&
@@ -162,7 +162,7 @@ void PPCInstPrinter::printInst(const MCInst *MI, uint64_t Address,
   // On AIX, only emit the extended mnemonics for dcbt and dcbtst if
   // the "modern assembler" is available.
   if ((MI->getOpcode() == PPC::DCBT || MI->getOpcode() == PPC::DCBTST) &&
-      (!TT.isOSAIX() || STI.hasFeature(PPC::FeatureModernAIXAs))) {
+      (!TT.isOSBinFormatXCOFF() || STI.hasFeature(PPC::FeatureModernAIXAs))) {
     unsigned char TH = MI->getOperand(0).getImm();
     O << "\tdcbt";
     if (MI->getOpcode() == PPC::DCBTST)
@@ -431,7 +431,7 @@ void PPCInstPrinter::printBranchOperand(const MCInst *MI, uint64_t Address,
     // Branches can take an immediate operand. This is used by the branch
     // selection pass to print, for example `.+8` (for ELF) or `$+8` (for AIX)
     // to express an eight byte displacement from the program counter.
-    if (!TT.isOSAIX())
+    if (!TT.isOSBinFormatXCOFF())
       O << ".";
     else
       O << "$";

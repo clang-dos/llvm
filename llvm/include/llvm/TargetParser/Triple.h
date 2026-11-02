@@ -352,9 +352,10 @@ public:
     Firmware,
     QURT,
     H2,
-    MSDOS, // MS-DOS and compatibles (16-bit real mode)
-    Win16, // 16-bit Windows (Windows 3.x NE programs and DLLs)
-    LastOSType = Win16
+    MSDOS,        // MS-DOS and compatibles (16-bit real mode)
+    Win16,        // 16-bit Windows (Windows 3.x NE programs and DLLs)
+    MacOSClassic, // Classic Mac OS (System 7 to Mac OS 9) on 68k and PowerPC
+    LastOSType = MacOSClassic
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -765,6 +766,17 @@ public:
 
   /// 16-bit Windows (Windows 3.x).
   bool isOSWin16() const { return getOS() == Triple::Win16; }
+
+  /// Classic Mac OS (System 7 to Mac OS 9), on 68k or PowerPC. Not Mac OS X:
+  /// isOSDarwin() and isMacOSX() are false.
+  bool isOSMacOSClassic() const { return getOS() == Triple::MacOSClassic; }
+
+  /// Does this PowerPC target use the AIX ABI (TOC in r2, function
+  /// descriptors, XCOFF objects)? True for AIX and for classic Mac OS on
+  /// PowerPC, whose ABI is the same as 32-bit AIX.
+  bool isPPCAIXABI() const {
+    return isOSAIX() || (isOSMacOSClassic() && getArch() == Triple::ppc);
+  }
 
   bool isOSUnknown() const { return getOS() == Triple::UnknownOS; }
 

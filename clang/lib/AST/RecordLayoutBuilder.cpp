@@ -688,7 +688,7 @@ protected:
         UnadjustedAlignment(CharUnits::One()), UseExternalLayout(false),
         InferAlignment(false), Packed(false), IsUnion(false),
         IsMac68kAlign(false),
-        IsNaturalAlign(!Context.getTargetInfo().getTriple().isOSAIX()),
+        IsNaturalAlign(!Context.getTargetInfo().defaultsToAIXPowerAlignment()),
         IsMsStruct(false), UnfilledBitsInLastUnit(0),
         LastBitfieldStorageUnitSize(0), MaxFieldAlignment(CharUnits::Zero()),
         DataSize(0), NonVirtualSize(CharUnits::Zero()),

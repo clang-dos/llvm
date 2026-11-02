@@ -1,5 +1,5 @@
 # Build the clang-dos toolchain packages with this commit of clang-dos/llvm and run the
-# smoke test on every target, using dos-sdk's toolchain workflow. The other
+# smoke test on every target, using dos-sdk's toolchain workflow (pinned below). The other
 # repositories are taken at their default branches. Pull requests build the
 # Linux-hosted package only; dos-sdk's nightly release builds both hosts.
 name: clang-dos toolchain
@@ -18,9 +18,12 @@ on:
 permissions:
   contents: read
 
+# dos-sdk is pinned to one commit, for both the workflow and its scripts.
+# To move to a newer dos-sdk, change both hashes to its new commit.
 jobs:
   toolchain:
-    uses: clang-dos/dos-sdk/.github/workflows/toolchain.yml@main
+    uses: clang-dos/dos-sdk/.github/workflows/toolchain.yml@e1b6f1774402351cc3fde695ac5daae49b4dd452
     with:
+      sdk_ref: e1b6f1774402351cc3fde695ac5daae49b4dd452
       llvm_ref: ${{ github.event.pull_request.head.sha || github.sha }}
       windows: ${{ inputs.windows || false }}

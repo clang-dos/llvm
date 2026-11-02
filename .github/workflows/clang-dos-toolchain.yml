@@ -1,7 +1,12 @@
 # Build the clang-dos toolchain packages with this commit of clang-dos/llvm and run the
 # smoke test on every target, using dos-sdk's toolchain workflow. The other
 # repositories are taken at their default branches. Pull requests build the
-# Linux-hosted package only; dos-sdk's nightly release builds both hosts.
+# Linux-hosted package only.
+#
+# A push to main builds both hosts and publishes the LLVM tools in the
+# llvm-prebuilt release (llvm-HOST-COMMIT-SCRIPTHASH.tar.zst), where the
+# toolchain workflows of dos-sdk, picolibc and JWlink find them instead of
+# building this commit again.
 name: clang-dos toolchain
 
 on:
@@ -23,4 +28,49 @@ jobs:
     uses: clang-dos/dos-sdk/.github/workflows/toolchain.yml@main
     with:
       llvm_ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      windows: ${{ inputs.windows || false }}
+      windows: ${{ github.event_name == 'push' || inputs.windows || false }}
+
+  publish-llvm:
+    name: Publish the LLVM tools for the other repositories
+    needs: toolchain
+    # The LLVM builds are worth keeping even when a later job failed.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.toolchain.outputs.llvm_key != '' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      KEY: ${{ needs.toolchain.outputs.llvm_key }}
+      # Assets kept per host; older ones are deleted.
+      KEEP: 8
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: llvm-*
+          merge-multiple: true
+      - name: Compress
+        run: |
+          ls -l
+          for host in linux windows; do
+            [ -f llvm-$host.tar ] || continue
+            zstd -q -T0 -12 llvm-$host.tar -o llvm-$host-$KEY.tar.zst
+          done
+          ls -l *.tar.zst
+      - name: Upload
+        run: |
+          gh release view llvm-prebuilt >/dev/null 2>&1 ||
+            gh release create llvm-prebuilt --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Prebuilt LLVM tools for CI" \
+              --notes "The clang-dos LLVM tools built from recent commits of main, for the toolchain workflows of the other clang-dos repositories. Not a release: use the packages from clang-dos/dos-sdk."
+          gh release upload llvm-prebuilt --clobber llvm-*-"$KEY".tar.zst
+      - name: Delete old assets
+        run: |
+          for host in linux windows; do
+            gh api "repos/$GH_REPO/releases/tags/llvm-prebuilt" --jq \
+              "[.assets[] | select(.name | startswith(\"llvm-$host-\"))] | sort_by(.created_at) | reverse | .[$KEEP:][] | \"\(.id) \(.name)\"" |
+            while read -r id name; do
+              echo "Deleting $name"
+              gh api -X DELETE "repos/$GH_REPO/releases/assets/$id"
+            done
+          done

@@ -753,6 +753,11 @@ def : Pat<(mulhu i16:$dst, i16:$opd),
 
 def : Pat<(mul i32:$dst, i32:$opd), (SMULd32d32 $dst, $opd)>;
 
+def : Pat<(MxMulU16 i32:$dst, i32:$opd),
+          (UMULd32d16 $dst, (EXTRACT_SUBREG $opd, MxSubRegIndex16Lo))>;
+def : Pat<(MxMulS16 i32:$dst, i32:$opd),
+          (SMULd32d16 $dst, (EXTRACT_SUBREG $opd, MxSubRegIndex16Lo))>;
+
 
 // RI
 def : Pat<(mul i16:$dst, Mxi16immSExt16:$opd),

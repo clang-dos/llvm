@@ -92,6 +92,8 @@ M68kTargetLowering::M68kTargetLowering(const M68kTargetMachine &TM,
     setOperationAction(ISD::MUL, MVT::i32, LibCall);
     setOperationAction(ISD::SDIV, MVT::i32, LibCall);
     setOperationAction(ISD::UDIV, MVT::i32, LibCall);
+    // A 32-bit product of 16-bit values fits mulu.w or muls.w.
+    setTargetDAGCombine(ISD::MUL);
   }
   setOperationAction(ISD::MUL, MVT::i64, LibCall);
 
@@ -3741,10 +3743,42 @@ static SDValue combineADDX(SDNode *N, SelectionDAG &DAG,
   return SDValue();
 }
 
+// Before the 68020 there is no 32-bit multiply, and a 32-bit MUL becomes a
+// call to __mulsi3. When both operands are zero- or sign-extended 16-bit
+// values, the full 32-bit product comes from a single mulu.w or muls.w.
+static SDValue combineMUL(SDNode *N, SelectionDAG &DAG,
+                          const M68kSubtarget &Subtarget) {
+  EVT VT = N->getValueType(0);
+  if (VT != MVT::i32 || Subtarget.atLeastM68020())
+    return SDValue();
+  SDValue LHS = N->getOperand(0), RHS = N->getOperand(1);
+  SDLoc DL(N);
+  if (DAG.computeKnownBits(LHS).countMinLeadingZeros() >= 16 &&
+      DAG.computeKnownBits(RHS).countMinLeadingZeros() >= 16)
+    return DAG.getNode(M68kISD::MULU16, DL, VT, LHS, RHS);
+  if (DAG.ComputeNumSignBits(LHS) > 16 && DAG.ComputeNumSignBits(RHS) > 16)
+    return DAG.getNode(M68kISD::MULS16, DL, VT, LHS, RHS);
+  // One unsigned 16-bit operand: a * b == a * lo(b) + (a * hi(b) << 16).
+  if (DAG.computeKnownBits(RHS).countMinLeadingZeros() >= 16)
+    std::swap(LHS, RHS);
+  if (DAG.computeKnownBits(LHS).countMinLeadingZeros() >= 16) {
+    // MULU16 reads only the low word of each operand, so lo(b) needs no mask.
+    SDValue Sixteen = DAG.getConstant(16, DL, VT);
+    SDValue Hi = DAG.getNode(ISD::SRL, DL, VT, RHS, Sixteen);
+    SDValue PLo = DAG.getNode(M68kISD::MULU16, DL, VT, LHS, RHS);
+    SDValue PHi = DAG.getNode(M68kISD::MULU16, DL, VT, LHS, Hi);
+    PHi = DAG.getNode(ISD::SHL, DL, VT, PHi, Sixteen);
+    return DAG.getNode(ISD::ADD, DL, VT, PLo, PHi);
+  }
+  return SDValue();
+}
+
 SDValue M68kTargetLowering::PerformDAGCombine(SDNode *N,
                                               DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
   switch (N->getOpcode()) {
+  case ISD::MUL:
+    return combineMUL(N, DAG, Subtarget);
   case M68kISD::SUBX:
     return combineSUBX(N, DAG);
   case M68kISD::ADDX:

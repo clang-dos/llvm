@@ -136,6 +136,10 @@ def MxSubX : SDNode<"M68kISD::SUBX", MxSDT_BiArithCCRInOut>;
 def MxSMul : SDNode<"M68kISD::SMUL", MxSDT_BiArithCCROut, [SDNPCommutative]>;
 def MxUMul : SDNode<"M68kISD::UMUL", MxSDT_BiArithCCROut, [SDNPCommutative]>;
 
+// 32-bit product of the low words of two values (mulu.w and muls.w).
+def MxMulU16 : SDNode<"M68kISD::MULU16", SDTIntBinOp, [SDNPCommutative]>;
+def MxMulS16 : SDNode<"M68kISD::MULS16", SDTIntBinOp, [SDNPCommutative]>;
+
 // M68k compare and logical compare instructions. Subtracts the source
 // operand from the destination data register and sets the condition
 // codes according to the result. Immediate always goes first.

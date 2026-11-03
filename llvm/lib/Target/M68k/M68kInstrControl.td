@@ -140,6 +140,20 @@ class MxJMP<MxOperand LOCOp, MxEncMemOp DST_ENC>
 
 def JMP32j : MxJMP<MxARI32, MxEncAddrMode_j<"dst">>;
 
+// JMP to an absolute address: the tail call of a function in another
+// section on CPUs without 32-bit branch displacements (see M68kMCInstLower).
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+class MxJMPAbs<MxOperand LOCOp, MxEncMemOp DST_ENC>
+    : MxInst<(outs), (ins LOCOp:$dst), "jmp\t$dst", []> {
+  let Inst =
+    (ascend
+      (descend 0b0100, 0b1110, 0b11, DST_ENC.EA),
+      DST_ENC.Supplement
+    );
+}
+
+def JMP32b : MxJMPAbs<MxAL32, MxEncAddrMode_abs<"dst", true>>;
+
 
 // FIXME Support 16 bit indirect jump.
 // Currently M68k does not allow 16 bit indirect jumps use sext operands

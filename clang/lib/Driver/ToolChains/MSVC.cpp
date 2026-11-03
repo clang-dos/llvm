@@ -293,6 +293,50 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(Args.MakeArgString(std::string("-lto-sample-profile:") +
                                            A->getValue()));
   }
+
+  const Arg *A = Args.getLastArg(options::OPT_fuse_ld_EQ);
+  StringRef Linker = A ? A->getValue() : TC.getDriver().getPreferredLinker();
+
+  if (Linker.empty()) {
+    // If DWARF is requested, use LLD, because MSVC's link.exe will silently
+    // truncate the .debug_* sections to eight characters. PE/COFF doesn't allow
+    // section names longer than eight bytes in executables - LLD uses the same
+    // name length extension as in object files (where long names are allowed).
+    // Also 'lld-link' for hybrid object files if -marm64x is requested.
+    if (Args.hasArg(options::OPT_gdwarf, options::OPT_gdwarf_2,
+                    options::OPT_gdwarf_3, options::OPT_gdwarf_4,
+                    options::OPT_gdwarf_5, options::OPT_gdwarf_6,
+                    options::OPT_marm64x))
+      Linker = "lld-link";
+    else
+      Linker = "link";
+  }
+
+  // We need to translate 'lld' into 'lld-link'.
+  if (Linker.equals_insensitive("lld"))
+    Linker = "lld-link";
+
+  if (Linker == "lld-link") {
+    // A Windows version in the triple, as in i386-pc-windows3.51-msvc, is the
+    // oldest Windows the program runs on, as for MinGW: older Windows refuses
+    // programs that ask for a newer subsystem version, so set it and the OS
+    // version from the triple. LLD still infers the subsystem from the entry
+    // point, and a /subsystem or /osversion given with /link or -Wl wins.
+    VersionTuple WindowsVersion = TC.getTriple().getOSVersion();
+    if (!WindowsVersion.empty()) {
+      std::string Version = (Twine(WindowsVersion.getMajor()) + "." +
+                             Twine(WindowsVersion.getMinor().value_or(0)))
+                                .str();
+      CmdArgs.push_back(Args.MakeArgString("-subsystem:default," + Version));
+      CmdArgs.push_back(Args.MakeArgString("-osversion:" + Version));
+      // LLD puts the import address table in .rdata. The Windows NT 3.x
+      // loader predates the IAT directory that later loaders use to make the
+      // table writable while they fill it in, so make .rdata writable for it.
+      if (WindowsVersion < VersionTuple(4))
+        CmdArgs.push_back("-section:.rdata,RW");
+    }
+  }
+
   Args.AddAllArgValues(CmdArgs, options::OPT__SLASH_link);
 
   // Control Flow Guard checks
@@ -337,28 +381,6 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasArg(options::OPT_nostdlib)) {
     AddRunTimeLibs(TC, TC.getDriver(), CmdArgs, Args);
   }
-
-  const Arg *A = Args.getLastArg(options::OPT_fuse_ld_EQ);
-  StringRef Linker = A ? A->getValue() : TC.getDriver().getPreferredLinker();
-
-  if (Linker.empty()) {
-    // If DWARF is requested, use LLD, because MSVC's link.exe will silently
-    // truncate the .debug_* sections to eight characters. PE/COFF doesn't allow
-    // section names longer than eight bytes in executables - LLD uses the same
-    // name length extension as in object files (where long names are allowed).
-    // Also 'lld-link' for hybrid object files if -marm64x is requested.
-    if (Args.hasArg(options::OPT_gdwarf, options::OPT_gdwarf_2,
-                    options::OPT_gdwarf_3, options::OPT_gdwarf_4,
-                    options::OPT_gdwarf_5, options::OPT_gdwarf_6,
-                    options::OPT_marm64x))
-      Linker = "lld-link";
-    else
-      Linker = "link";
-  }
-
-  // We need to translate 'lld' into 'lld-link'.
-  if (Linker.equals_insensitive("lld"))
-    Linker = "lld-link";
 
   if (Linker == "lld-link") {
     for (Arg *A : Args.filtered(options::OPT_vfsoverlay))

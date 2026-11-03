@@ -58,7 +58,10 @@ CodeModel::Model getEffectiveCodeModel(const Triple &TT,
     // AmigaOS loads each hunk (code, data, bss) at its own address, so code
     // can't reach data with a 16-bit PC-relative offset. Use 32-bit absolute
     // addresses, which become HUNK_RELOC32 entries.
-    if (TT.isOSAmigaOS())
+    // Atari TOS loads text, data and bss together, but a program with more
+    // than 32K of code can't reach its data PC-relative either, and every
+    // 32-bit address becomes an entry in the PRG relocation table.
+    if (TT.isOSAmigaOS() || TT.isOSTOS())
       return CodeModel::Large;
     return CodeModel::Small;
   } else if (CM == CodeModel::Kernel) {

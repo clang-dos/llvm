@@ -241,6 +241,9 @@ M68kTargetLowering::getInlineAsmMemConstraint(StringRef ConstraintCode) const {
 
 EVT M68kTargetLowering::getSetCCResultType(const DataLayout &DL,
                                            LLVMContext &Context, EVT VT) const {
+  // Vectors are split into scalars; compare them element by element.
+  if (VT.isVector())
+    return VT.changeVectorElementTypeToInteger();
   // M68k SETcc producess either 0x00 or 0xFF
   return MVT::i8;
 }
@@ -258,8 +261,8 @@ MVT M68kTargetLowering::getScalarShiftAmountTy(const DataLayout &DL,
 
 enum StructReturnType { NotStructReturn, RegStructReturn, StackStructReturn };
 
-// On AmigaOS the hidden struct-return pointer is passed in A1, as with gcc,
-// so it's never on the stack for the callee to pop.
+// On AmigaOS and Atari TOS the hidden struct-return pointer is passed in A1, as
+// with gcc, so it's never on the stack for the callee to pop.
 static StructReturnType
 callIsStructReturn(const SmallVectorImpl<ISD::OutputArg> &Outs,
                    bool SRetInReg) {
@@ -606,8 +609,7 @@ SDValue M68kTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool IsVarArg = CLI.IsVarArg;
 
   MachineFunction &MF = DAG.getMachineFunction();
-  StructReturnType SR =
-      callIsStructReturn(Outs, Subtarget.getTargetTriple().isOSAmigaOS());
+  StructReturnType SR = callIsStructReturn(Outs, Subtarget.hasGccClassicABI());
   bool IsSibcall = false;
   M68kMachineFunctionInfo *MFI = MF.getInfo<M68kMachineFunctionInfo>();
   // const M68kRegisterInfo *TRI = Subtarget.getRegisterInfo();
@@ -1179,7 +1181,7 @@ SDValue M68kTargetLowering::LowerFormalArguments(
     MMFI->setBytesToPopOnReturn(0); // Callee pops nothing.
     // If this is an sret function, the return should pop the hidden pointer.
     if (!canGuaranteeTCO(CCID) &&
-        argsAreStructReturn(Ins, Subtarget.getTargetTriple().isOSAmigaOS()) ==
+        argsAreStructReturn(Ins, Subtarget.hasGccClassicABI()) ==
             StackStructReturn)
       MMFI->setBytesToPopOnReturn(4);
   }

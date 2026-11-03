@@ -13,6 +13,7 @@
 #include "ToolChains/AVR.h"
 #include "ToolChains/AmigaOS.h"
 #include "ToolChains/Arch/RISCV.h"
+#include "ToolChains/AtariTOS.h"
 #include "ToolChains/BareMetal.h"
 #include "ToolChains/CSKYToolChain.h"
 #include "ToolChains/Clang.h"
@@ -6216,6 +6217,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       break;
     case llvm::Triple::AmigaOS:
       TC = std::make_unique<toolchains::AmigaOS>(*this, Target, Args);
+      break;
+    case llvm::Triple::TOS:
+      TC = std::make_unique<toolchains::AtariTOS>(*this, Target, Args);
       break;
     case llvm::Triple::Darwin:
     case llvm::Triple::MacOSX:

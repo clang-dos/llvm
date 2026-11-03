@@ -1,0 +1,60 @@
+## The program must start at the first byte of its text.
+# RUN: yaml2obj %s -DENTRY=0x1002 -o %t1.elf
+# RUN: not llvm-elf2tos %t1.elf -o %t1.prg 2>&1 | FileCheck %s --check-prefix=ENTRY
+# ENTRY: error: the entry point must be the first byte of the text; link the startup code first
+
+## GEMDOS relocates only 32-bit addresses at even offsets.
+# RUN: yaml2obj %s -DTYPE=R_68K_16 -o %t2.elf
+# RUN: not llvm-elf2tos %t2.elf -o %t2.prg 2>&1 | FileCheck %s --check-prefix=ABS16
+# ABS16: error: a 16- or 8-bit absolute address at offset 2 can't be relocated; build with the large code model (-mcmodel=large)
+# RUN: yaml2obj %s -DOFFSET=0x1003 -o %t3.elf
+# RUN: not llvm-elf2tos %t3.elf -o %t3.prg 2>&1 | FileCheck %s --check-prefix=ODD
+# ODD: error: a 32-bit address at odd offset 3 can't be relocated by GEMDOS
+
+## Initialized data can't follow the bss.
+# RUN: yaml2obj %s -DLATETYPE=SHT_PROGBITS -o %t4.elf
+# RUN: not llvm-elf2tos %t4.elf -o %t4.prg 2>&1 | FileCheck %s --check-prefix=LATE
+# LATE: error: section .late has contents but comes after the bss; TOS programs keep all uninitialized data at the end
+
+## Not an executable.
+# RUN: yaml2obj %s -DKIND=ET_REL -o %t5.o
+# RUN: not llvm-elf2tos %t5.o -o %t5.prg 2>&1 | FileCheck %s --check-prefix=REL
+# REL: error: {{.*}}: not an executable; link it first (with --emit-relocs)
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS32
+  Data:    ELFDATA2MSB
+  Type:    [[KIND=ET_EXEC]]
+  Machine: EM_68K
+  Entry:   [[ENTRY=0x1000]]
+Sections:
+  - Name:    .text
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address: 0x1000
+    Content: 203C000010084E714E71
+  - Name:    .bss
+    Type:    SHT_NOBITS
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 0x100a
+    Size:    8
+  - Name:    .late
+    Type:    [[LATETYPE=SHT_NOBITS]]
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 0x1100
+    Size:    2
+  - Name:    .rela.text
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .text
+    Relocations:
+      - Offset: [[OFFSET=0x1002]]
+        Symbol: data
+        Type:   [[TYPE=R_68K_32]]
+Symbols:
+  - Name:    data
+    Section: .bss
+    Value:   0x100a
+    Binding: STB_GLOBAL
+...

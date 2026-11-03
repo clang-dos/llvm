@@ -102,6 +102,12 @@ public:
 
   bool isTargetELF() const { return TargetTriple.isOSBinFormatELF(); }
 
+  /// AmigaOS and Atari TOS follow the gcc ABI of those systems: pointers are
+  /// returned in D0 and the struct-return pointer is passed in A1.
+  bool hasGccClassicABI() const {
+    return TargetTriple.isOSAmigaOS() || TargetTriple.isOSTOS();
+  }
+
   /// Return true if the subtarget allows calls to immediate address.
   bool isLegalToCallImmediateAddr() const;
 

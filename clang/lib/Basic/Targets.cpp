@@ -370,6 +370,8 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
                                                                       Opts);
     case llvm::Triple::AmigaOS:
       return std::make_unique<AmigaOSTargetInfo<M68kTargetInfo>>(Triple, Opts);
+    case llvm::Triple::TOS:
+      return std::make_unique<TOSTargetInfo<M68kTargetInfo>>(Triple, Opts);
     default:
       return std::make_unique<M68kTargetInfo>(Triple, Opts);
     }

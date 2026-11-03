@@ -54,6 +54,7 @@ add_clang_library(clangDriver
   ToolChains/Arch/X86.cpp
   ToolChains/AIX.cpp
   ToolChains/AmigaOS.cpp
+  ToolChains/AtariTOS.cpp
   ToolChains/AMDGPU.cpp
   ToolChains/AVR.cpp
   ToolChains/BareMetal.cpp

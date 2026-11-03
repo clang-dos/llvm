@@ -1,0 +1,81 @@
+## Fixups more than 254 bytes apart are reached with 1 bytes (254 bytes on,
+## nothing to fix). Read-only data between the code and the data is part of
+## the text, and addresses that are absolute or of undefined weak symbols
+## stay as they are. PC-relative references need no fixup.
+
+# RUN: yaml2obj %s -o %t.elf
+# RUN: llvm-elf2tos %t.elf -o %t.prg -v | FileCheck %s --check-prefix=LAYOUT
+# RUN: od -An -v -tx1 -j 638 %t.prg | FileCheck %s
+
+# LAYOUT: text 608, data 2, bss 0 bytes, 3 relocations, 0 symbols
+
+## 600 - 2 = 598 = 254 + 254 + 90 (0x5a); 604 - 600 = 4. Then the end,
+## and a byte to make the file length even.
+# CHECK: 00 00 00 02 01 01 5a 04 00 00{{$}}
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS32
+  Data:    ELFDATA2MSB
+  Type:    ET_EXEC
+  Machine: EM_68K
+  Entry:   0
+Sections:
+  - Name:    .text
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address: 0
+    Size:    600
+  - Name:    .rodata
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC ]
+    Address: 600
+    Size:    8
+  - Name:    .data
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 608
+    Size:    2
+  - Name:    .rela.text
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .text
+    Relocations:
+      - Offset: 2
+        Symbol: data
+        Type:   R_68K_32
+      - Offset: 10
+        Symbol: abs
+        Type:   R_68K_32
+      - Offset: 14
+        Symbol: weak
+        Type:   R_68K_32
+      - Offset: 20
+        Symbol: data
+        Type:   R_68K_PC16
+  - Name:    .rela.rodata
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .rodata
+    Relocations:
+      - Offset: 600
+        Symbol: data
+        Type:   R_68K_32
+      - Offset: 604
+        Symbol: .text
+        Type:   R_68K_32
+Symbols:
+  - Name:    .text
+    Type:    STT_SECTION
+    Section: .text
+  - Name:    data
+    Section: .data
+    Value:   608
+    Binding: STB_GLOBAL
+  - Name:    abs
+    Index:   SHN_ABS
+    Value:   0x4ba
+    Binding: STB_GLOBAL
+  - Name:    weak
+    Binding: STB_WEAK
+...

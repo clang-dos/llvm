@@ -356,7 +356,8 @@ public:
     Win16,        // 16-bit Windows (Windows 3.x NE programs and DLLs)
     MacOSClassic, // Classic Mac OS (System 7 to Mac OS 9) on 68k and PowerPC
     AmigaOS,      // Classic AmigaOS (1.x to 3.x) on 68k, Hunk executables
-    LastOSType = AmigaOS
+    TOS,          // Atari TOS (GEMDOS) on 68k, PRG executables
+    LastOSType = TOS
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -774,6 +775,9 @@ public:
 
   /// Classic AmigaOS (Kickstart 1.x to 3.x) on 68k.
   bool isOSAmigaOS() const { return getOS() == Triple::AmigaOS; }
+
+  /// Atari TOS (TOS 1.x to 4.x, EmuTOS) on 68k.
+  bool isOSTOS() const { return getOS() == Triple::TOS; }
 
   /// Does this PowerPC target use the AIX ABI (TOC in r2, function
   /// descriptors, XCOFF objects)? True for AIX and for classic Mac OS on

@@ -124,6 +124,14 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::AmigaOS, T.getOS());
   EXPECT_EQ("m68k-unknown-amigaos", T.str());
 
+  T = Triple("m68k-atari-tos");
+  EXPECT_EQ(Triple::m68k, T.getArch());
+  EXPECT_EQ(Triple::TOS, T.getOS());
+  EXPECT_EQ(Triple::ELF, T.getObjectFormat());
+  EXPECT_TRUE(T.isOSTOS());
+  EXPECT_FALSE(T.isOSAmigaOS());
+  EXPECT_EQ("m68k-unknown-tos", Triple::normalize("m68k-tos"));
+
   T = Triple("powerpc-apple-macosclassic");
   EXPECT_EQ(Triple::ppc, T.getArch());
   EXPECT_EQ(Triple::Apple, T.getVendor());

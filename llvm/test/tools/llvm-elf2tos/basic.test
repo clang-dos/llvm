@@ -1,0 +1,90 @@
+## A small program with text, data and bss, linked at 0x1000. The PRG keeps
+## the layout; each R_68K_32 address becomes an offset from the start of
+## the text, with an entry in the fixup table.
+
+# RUN: yaml2obj %s -o %t.elf
+# RUN: llvm-elf2tos %t.elf -o %t.prg -v | FileCheck %s --check-prefix=LAYOUT
+# RUN: od -An -v -tx1 %t.prg | FileCheck %s
+
+# LAYOUT: text 8, data 4, bss 8 bytes, 2 relocations, 0 symbols
+
+## The header: magic, text, data and bss sizes, no symbols, no flags, and
+## relocation information present.
+# CHECK:      60 1a 00 00 00 08 00 00 00 04 00 00 00 08 00 00
+# CHECK-NEXT: 00 00 00 00 00 00 00 00 00 00 00 00
+## The text: move.l #data, %d0; nop. data is at offset 8.
+# CHECK-SAME:                                     20 3c 00 00
+# CHECK-NEXT: 00 08 4e 71
+## The data: a pointer to _start+4.
+# CHECK-SAME:             00 00 00 04
+## The fixups: the first at offset 2, the next 6 bytes on, and the end.
+# CHECK-SAME:                         00 00 00 02 06 00{{$}}
+
+## Symbols, in the DRI format: 8 characters, the type (defined, text or
+## data, global) and the offset from the start of the text.
+# RUN: llvm-elf2tos %t.elf -o %t.sym.prg --symbols -v | FileCheck %s --check-prefix=SYMLAYOUT
+# RUN: od -An -v -tx1 -j 40 -N 28 %t.sym.prg | FileCheck %s --check-prefix=SYMS
+# SYMLAYOUT: text 8, data 4, bss 8 bytes, 2 relocations, 2 symbols
+# SYMS:      5f 73 74 61 72 74 00 00 a2 00 00 00 00 00 64 61
+# SYMS-NEXT: 74 61 00 00 00 00 a4 00 00 00 00 08
+
+## Header flags.
+# RUN: llvm-elf2tos %t.elf -o %t.flags.prg --flags=fastload,ttram,ttmalloc
+# RUN: od -An -v -tx1 -j 22 -N 4 %t.flags.prg | FileCheck %s --check-prefix=FLAGS
+# RUN: llvm-elf2tos %t.elf -o %t.flags2.prg --flags=0x17
+# RUN: od -An -v -tx1 -j 22 -N 4 %t.flags2.prg | FileCheck %s --check-prefix=FLAGS2
+# FLAGS: 00 00 00 07
+# FLAGS2: 00 00 00 17
+# RUN: not llvm-elf2tos %t.elf -o %t.bad.prg --flags=fast 2>&1 | FileCheck %s --check-prefix=BADFLAG
+# BADFLAG: error: unknown PRG flag 'fast'
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS32
+  Data:    ELFDATA2MSB
+  Type:    ET_EXEC
+  Machine: EM_68K
+  Entry:   0x1000
+Sections:
+  - Name:    .text
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address: 0x1000
+    Content: 203C000010084E71
+  - Name:    .data
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 0x1008
+    Content: '00001004'
+  - Name:    .bss
+    Type:    SHT_NOBITS
+    Flags:   [ SHF_ALLOC, SHF_WRITE ]
+    Address: 0x100c
+    Size:    8
+  - Name:    .rela.text
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .text
+    Relocations:
+      - Offset: 0x1002
+        Symbol: data
+        Type:   R_68K_32
+  - Name:    .rela.data
+    Type:    SHT_RELA
+    Link:    .symtab
+    Info:    .data
+    Relocations:
+      - Offset: 0x1008
+        Symbol: _start
+        Type:   R_68K_32
+        Addend: 4
+Symbols:
+  - Name:    _start
+    Section: .text
+    Value:   0x1000
+    Binding: STB_GLOBAL
+  - Name:    data
+    Section: .data
+    Value:   0x1008
+    Binding: STB_GLOBAL
+...

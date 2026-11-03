@@ -105,6 +105,7 @@ set(LLVM_TEST_DEPENDS
   llvm-dwarfutil
   llvm-dwp
   llvm-elf2hunk
+  llvm-elf2tos
   llvm-exegesis
   llvm-extract
   llvm-extract-bundle-entry

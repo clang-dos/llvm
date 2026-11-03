@@ -22,10 +22,10 @@ class CCIfSubtarget<string F, CCAction A>
 // Return Value Calling Conventions
 //===----------------------------------------------------------------------===//
 
-/// M68k C return convention. AmigaOS returns pointers in D0, like every
-/// OS function and Amiga compiler.
+/// M68k C return convention. AmigaOS and Atari TOS return pointers in D0,
+/// like every OS function and the compilers for those systems.
 def RetCC_M68k_C : CallingConv<[
-  CCIfSubtarget<"getTargetTriple().isOSAmigaOS()",
+  CCIfSubtarget<"hasGccClassicABI()",
                 CCIfPtr<CCAssignToReg<[D0]>>>,
   CCIfPtr<CCAssignToReg<[A0]>>,
   CCIfType<[i1],   CCPromoteToType<i8>>,
@@ -99,8 +99,8 @@ def CC_M68k_C : CallingConv<[
   /// The 'nest' parameter, if any, is passed in A1.
   CCIfNest<CCAssignToReg<[A1]>>, // FIXME verify if this is correct
 
-  /// AmigaOS passes the struct-return pointer in A1, as gcc does.
-  CCIfSubtarget<"getTargetTriple().isOSAmigaOS()",
+  /// AmigaOS and Atari TOS pass the struct-return pointer in A1, as gcc does.
+  CCIfSubtarget<"hasGccClassicABI()",
                 CCIfSRet<CCAssignToReg<[A1]>>>,
 
   /// Use registers only if 'inreg' used and the call is not vararg

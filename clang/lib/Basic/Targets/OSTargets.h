@@ -887,6 +887,28 @@ public:
       : OSTargetInfo<Target>(Triple, Opts) {}
 };
 
+// Atari TOS (TOS 1.x to 4.x and EmuTOS) on 68k, without MiNT.
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY TOSTargetInfo : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    // What gcc for the Atari (m68k-atari-mint) defines, less __MINT__: this
+    // target runs on plain TOS. __TOS__ is Pure C's and __ATARI__ vbcc's.
+    DefineStd(Builder, "atarist", Opts);
+    Builder.defineMacro("__TOS__");
+    Builder.defineMacro("__ATARI__");
+    if (Opts.C11) {
+      Builder.defineMacro("__STDC_NO_ATOMICS__");
+      Builder.defineMacro("__STDC_NO_THREADS__");
+    }
+  }
+
+public:
+  TOSTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {}
+};
+
 // z/OS target
 template <typename Target>
 class LLVM_LIBRARY_VISIBILITY ZOSTargetInfo : public OSTargetInfo<Target> {

@@ -122,8 +122,16 @@ void amigaos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       TC.AddCXXStdlibLibArgs(Args, CmdArgs);
     CmdArgs.push_back("--start-group");
     CmdArgs.push_back("-lc");
-    CmdArgs.push_back("-lamiga");
+    // The OS call stubs, built from the NDK the user installs; a sysroot
+    // without them still links programs that make no OS calls of their own.
+    std::string Amiga = TC.GetFilePath("libamiga.a");
+    if (Amiga != "libamiga.a")
+      CmdArgs.push_back("-lamiga");
+    // The builtins from the resource directory, or else from the sysroot,
+    // where the clang-dos package puts them.
     std::string RT = TC.getCompilerRT(Args, "builtins");
+    if (!TC.getVFS().exists(RT))
+      RT = TC.GetFilePath("libclang_rt.builtins.a");
     if (TC.getVFS().exists(RT))
       CmdArgs.push_back(Args.MakeArgString(RT));
     CmdArgs.push_back("--end-group");

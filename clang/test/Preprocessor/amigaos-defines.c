@@ -22,3 +22,5 @@
 
 // NOT-NOT: #define __linux__
 // NOT-NOT: #define __unix__
+// <sys/cdefs.h> defines __aligned(x), so SAS/C's __aligned is not predefined.
+// NOT-NOT: #define __aligned

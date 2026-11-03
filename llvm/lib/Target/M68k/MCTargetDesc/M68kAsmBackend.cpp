@@ -183,8 +183,13 @@ static unsigned getRelaxedOpcode(unsigned Opcode) {
 
 bool M68kAsmBackend::mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand>,
                                        const MCSubtargetInfo &STI) const {
-  // Branches can always be relaxed in either mode.
-  return getRelaxedOpcode(Opcode) != Opcode;
+  unsigned Relaxed = getRelaxedOpcode(Opcode);
+  if (Relaxed == Opcode)
+    return false;
+  // A 16-bit branch relaxes only to a 32-bit one, which needs the 68020.
+  if (!Allows32BitBranch && getRelaxedOpcode(Relaxed) == Relaxed)
+    return false;
+  return true;
 
   // NOTE will change for x20 mem
 }

@@ -178,7 +178,14 @@ void M68kMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
       Opcode = M68k::JMP32j;
       break;
     case M68k::TAILJMPq:
-      Opcode = M68k::BRA8;
+      // A BRA that reaches another section or object needs a 32-bit
+      // displacement, which only the 68020 and later have. Without one,
+      // jump to the absolute address unless the code must be PC-relative.
+      if (MF.getSubtarget<M68kSubtarget>().atLeastM68020() ||
+          TM.isPositionIndependent())
+        Opcode = M68k::BRA8;
+      else
+        Opcode = M68k::JMP32b;
       break;
     }
     OutMI.setOpcode(Opcode);

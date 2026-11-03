@@ -824,7 +824,9 @@ void M68kInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   UsedRegs.addLiveOuts(MBB);
   auto InstUpToI = MBB.end();
   while (InstUpToI != MI) {
-    UsedRegs.stepBackward(*--InstUpToI);
+    --InstUpToI;
+    if (!InstUpToI->isDebugInstr())
+      UsedRegs.stepBackward(*InstUpToI);
   }
 
   if (SrcReg == M68k::CCR) {

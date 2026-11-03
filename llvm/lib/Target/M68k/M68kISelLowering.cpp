@@ -119,7 +119,10 @@ M68kTargetLowering::M68kTargetLowering(const M68kTargetMachine &TM,
   for (auto OP : {ISD::SMULO, ISD::UMULO}) {
     setOperationAction(OP, MVT::i8, Custom);
     setOperationAction(OP, MVT::i16, Custom);
-    setOperationAction(OP, MVT::i32, Custom);
+    // The overflow of a 32-bit multiply comes from MULU.L/MULS.L, which the
+    // 68000 and 68010 don't have.
+    setOperationAction(OP, MVT::i32,
+                       Subtarget.atLeastM68020() ? Custom : Expand);
   }
 
   for (auto OP : {ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS})
@@ -1685,15 +1688,17 @@ static SDValue getSETCC(M68k::CondCode Cond, SDValue CCR, const SDLoc &dl,
                      DAG.getConstant(Cond, dl, MVT::i8), CCR);
 }
 
-static bool isOverflowArithmetic(unsigned Opcode) {
-  switch (Opcode) {
+static bool isOverflowArithmetic(SDValue Op, const M68kSubtarget &ST) {
+  switch (Op.getOpcode()) {
   case ISD::UADDO:
   case ISD::SADDO:
   case ISD::USUBO:
   case ISD::SSUBO:
+    return true;
   case ISD::UMULO:
   case ISD::SMULO:
-    return true;
+    // A 32-bit one is expanded before the 68020.
+    return Op->getValueType(0) != MVT::i32 || ST.atLeastM68020();
   default:
     return false;
   }
@@ -2184,37 +2189,16 @@ SDValue M68kTargetLowering::EmitTest(SDValue Op, unsigned M68kCC,
     EVT VT = Op.getValueType();
     SDValue WideVal = Op->getOperand(0);
     EVT WideVT = WideVal.getValueType();
-    unsigned ConvertedOp = 0;
-    // Use a target machine opcode to prevent further DAGCombine
-    // optimizations that may separate the arithmetic operations
-    // from the setcc node.
-    switch (WideVal.getOpcode()) {
-    default:
-      break;
-    case ISD::ADD:
-      ConvertedOp = M68kISD::ADD;
-      break;
-    case ISD::SUB:
-      ConvertedOp = M68kISD::SUB;
-      break;
-    case ISD::AND:
-      ConvertedOp = M68kISD::AND;
-      break;
-    case ISD::OR:
-      ConvertedOp = M68kISD::OR;
-      break;
-    case ISD::XOR:
-      ConvertedOp = M68kISD::XOR;
-      break;
-    }
-
-    if (ConvertedOp) {
-      const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-      if (TLI.isOperationLegal(WideVal.getOpcode(), WideVT)) {
-        SDValue V0 = DAG.getNode(ISD::TRUNCATE, DL, VT, WideVal.getOperand(0));
-        SDValue V1 = DAG.getNode(ISD::TRUNCATE, DL, VT, WideVal.getOperand(1));
-        Op = DAG.getNode(ConvertedOp, DL, VT, V0, V1);
-      }
+    // Narrow the generic operation. The code below turns it into the M68k
+    // node that also produces the flags, as for an operation that was not
+    // truncated. (Creating the M68k node here, with only the value result,
+    // made an invalid node.)
+    unsigned WideOpc = WideVal.getOpcode();
+    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+    if (TLI.isOperationLegal(WideOpc, WideVT)) {
+      SDValue V0 = DAG.getNode(ISD::TRUNCATE, DL, VT, WideVal.getOperand(0));
+      SDValue V1 = DAG.getNode(ISD::TRUNCATE, DL, VT, WideVal.getOperand(1));
+      Op = DAG.getNode(WideOpc, DL, VT, V0, V1);
     }
   }
 
@@ -2400,7 +2384,7 @@ SDValue M68kTargetLowering::LowerSELECT(SDValue Op, SelectionDAG &DAG) const {
       Cond = Cmp;
       addTest = false;
     }
-  } else if (isOverflowArithmetic(CondOpcode)) {
+  } else if (isOverflowArithmetic(Cond, Subtarget)) {
     // Result is unused here.
     SDValue Result;
     M68k::CondCode CCode;
@@ -2539,7 +2523,7 @@ SDValue M68kTargetLowering::LowerBRCOND(SDValue Op, SelectionDAG &DAG) const {
     }
   }
   CondOpcode = Cond.getOpcode();
-  if (isOverflowArithmetic(CondOpcode)) {
+  if (isOverflowArithmetic(Cond, Subtarget)) {
     SDValue Result;
     M68k::CondCode CCode;
     lowerOverflowArithmetic(Cond, DAG, Result, Cond, CCode);

@@ -868,14 +868,14 @@ protected:
     Builder.defineMacro("__AMIGA__");
     // Amiga compiler keywords used in the NDK and in Amiga sources. __chip
     // puts data in chip RAM, where the custom chips can reach it. There are
-    // no near or far pointers, and stack arguments are the default.
+    // no near or far pointers, and stack arguments are the default. (SAS/C's
+    // __aligned is left out: <sys/cdefs.h> defines __aligned(x).)
     Builder.defineMacro("__chip",
                         "__attribute__((__section__(\".datachip\")))");
     Builder.defineMacro("__far", "");
     Builder.defineMacro("__near", "");
     Builder.defineMacro("__stdargs", "");
     Builder.defineMacro("__saveds", "");
-    Builder.defineMacro("__aligned", "__attribute__((__aligned__(4)))");
     if (Opts.C11) {
       Builder.defineMacro("__STDC_NO_ATOMICS__");
       Builder.defineMacro("__STDC_NO_THREADS__");

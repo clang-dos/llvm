@@ -467,6 +467,7 @@ if (NOT MSVC)
     i386/lshrdi3.S
     i386/moddi3.S
     i386/muldi3.S
+    i386/sync.c
     i386/udivdi3.S
     i386/umoddi3.S
   )

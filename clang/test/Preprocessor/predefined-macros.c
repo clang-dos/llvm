@@ -86,6 +86,14 @@
 // RUN:   | FileCheck -match-full-lines %s --check-prefix=CHECK-SYNC_CAS_I386
 // CHECK-SYNC_CAS_I386-NOT: __GCC_HAVE_SYNC_COMPARE_AND_SWAP
 //
+// On Windows compiler-rt has the __sync_* functions that 80386 code calls.
+// RUN: %clang_cc1 %s -E -dM -o - -triple i386-pc-windows-gnu -target-cpu i386 \
+// RUN:   | FileCheck -match-full-lines %s --check-prefix=CHECK-SYNC_CAS_I386_WIN
+// CHECK-SYNC_CAS_I386_WIN: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1 1
+// CHECK-SYNC_CAS_I386_WIN: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_2 1
+// CHECK-SYNC_CAS_I386_WIN: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4 1
+// CHECK-SYNC_CAS_I386_WIN-NOT: __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8
+//
 // RUN: %clang_cc1 %s -E -dM -o - -triple i686 -target-cpu i486 \
 // RUN:   | FileCheck -match-full-lines %s --check-prefix=CHECK-SYNC_CAS_I486
 // CHECK-SYNC_CAS_I486: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1 1

@@ -281,6 +281,11 @@ void X86Subtarget::initSubtargetFeatures(StringRef CPU, StringRef TuneCPU,
   if (!TargetTriple.isX86_16())
     Has186 = Has286 = Has386 = true;
 
+  // The "i386" CPU has no BSWAP, XADD or CMPXCHG, which came with the 80486,
+  // and neither have the CPUs before it on the i8086 triple.
+  IsPre486 =
+      !Is64Bit && (CPU == "i386" || (TargetTriple.isX86_16() && !Has386));
+
   // All CPUs that implement SSE4.2 or SSE4A support unaligned accesses of
   // 16-bytes and under that are reasonably fast. These features were
   // introduced with Intel's Nehalem/Silvermont and AMD's Family10h

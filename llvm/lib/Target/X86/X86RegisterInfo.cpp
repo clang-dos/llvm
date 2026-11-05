@@ -118,8 +118,12 @@ bool X86RegisterInfo::shouldCoalesce(
   // Don't let coalescing spread these classes over long live ranges, which
   // can leave the allocator without registers: only allow it when the
   // register that would be constrained is used just by this copy.
-  if (!isAddr16RegClass(NewRC))
-    return true;
+  if (!isAddr16RegClass(NewRC)) {
+    // On an 80386, joining one with a 32-bit register (as a sub-register)
+    // makes a 32-bit class such as GR32_SIDI, which the coalescer may then
+    // inflate back to GR32, losing the constraint. Keep the copy.
+    return !isAddr16RegClass(SrcRC) && !isAddr16RegClass(DstRC);
+  }
   const MachineRegisterInfo &MRI = MI->getMF()->getRegInfo();
   for (auto [Reg, RC] : {std::pair(MI->getOperand(0).getReg(), DstRC),
                          std::pair(MI->getOperand(1).getReg(), SrcRC)}) {

@@ -3425,6 +3425,11 @@ bool X86DAGToDAGISel::selectLEAAddr(SDValue N,
   SDLoc DL(N);
   MVT VT = N.getSimpleValueType();
 
+  // A 32-bit LEA in 16-bit code (on an 80386) takes 16-bit address registers
+  // and drops the high half of the sum, so it can't do 32-bit arithmetic.
+  if (Subtarget->isTarget16BitABI() && VT == MVT::i32)
+    return false;
+
   // Set AM.Segment to prevent MatchAddress from using one. LEA doesn't support
   // segments.
   SDValue Copy = AM.Segment;

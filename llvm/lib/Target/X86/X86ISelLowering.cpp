@@ -108,7 +108,12 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
       addBypassSlowDiv(64, 32);
   }
 
-  if (Subtarget.canUseCMPXCHG16B())
+  // 16-bit code before the 80486 makes every atomic operation a call to the
+  // __atomic_* functions, which compiler-rt implements with CLI. Their far
+  // pointer arguments are ordinary call arguments then.
+  if (Subtarget.isTarget16BitABI() && Subtarget.isPre486())
+    setMaxAtomicSizeInBitsSupported(0);
+  else if (Subtarget.canUseCMPXCHG16B())
     setMaxAtomicSizeInBitsSupported(128);
   else if (Subtarget.canUseCMPXCHG8B())
     setMaxAtomicSizeInBitsSupported(64);
@@ -411,6 +416,9 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
 
   if (!Subtarget.hasMOVBE())
     setOperationAction(ISD::BSWAP          , MVT::i16  , Expand);
+  // BSWAP came with the 80486.
+  if (Subtarget.isPre486())
+    setOperationAction(ISD::BSWAP, MVT::i32, Expand);
 
   // X86 wants to expand cmov itself.
   for (auto VT : { MVT::f32, MVT::f64, MVT::f80, MVT::f128 }) {
@@ -478,6 +486,23 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
 
   if (!Subtarget.is64Bit())
     setOperationAction(ISD::ATOMIC_LOAD, MVT::i64, Custom);
+
+  // The 80386 has no XADD or CMPXCHG, so in 32-bit code atomic writes become
+  // __sync_* calls. compiler-rt picks the instructions on an 80486 or later,
+  // and a lock on an 80386. Plain stores would bypass that lock, so atomic
+  // stores are calls too. Atomic loads stay plain MOVs.
+  if (Subtarget.isPre486()) {
+    for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+      for (unsigned Op :
+           {ISD::ATOMIC_SWAP, ISD::ATOMIC_CMP_SWAP,
+            ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS, ISD::ATOMIC_LOAD_ADD,
+            ISD::ATOMIC_LOAD_SUB, ISD::ATOMIC_LOAD_AND, ISD::ATOMIC_LOAD_OR,
+            ISD::ATOMIC_LOAD_XOR, ISD::ATOMIC_LOAD_NAND, ISD::ATOMIC_LOAD_MIN,
+            ISD::ATOMIC_LOAD_MAX, ISD::ATOMIC_LOAD_UMIN, ISD::ATOMIC_LOAD_UMAX,
+            ISD::ATOMIC_STORE})
+        setOperationAction(Op, VT, Expand);
+    }
+  }
 
   if (Subtarget.is64Bit() && Subtarget.hasAVX()) {
     // All CPUs supporting AVX will atomically load/store aligned 128-bit
@@ -33321,6 +33346,30 @@ X86TargetLowering::shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const {
   }
 
   AtomicRMWInst::BinOp Op = AI->getOperation();
+
+  // Before the 80486, integer operations with a __sync_* call stay whole, so
+  // that they become that call. The rest are a loop around compare-and-swap.
+  if (Subtarget.isPre486()) {
+    switch (Op) {
+    case AtomicRMWInst::Xchg:
+    case AtomicRMWInst::Add:
+    case AtomicRMWInst::Sub:
+    case AtomicRMWInst::And:
+    case AtomicRMWInst::Or:
+    case AtomicRMWInst::Xor:
+    case AtomicRMWInst::Nand:
+    case AtomicRMWInst::Max:
+    case AtomicRMWInst::Min:
+    case AtomicRMWInst::UMax:
+    case AtomicRMWInst::UMin:
+      if (MemType->isIntegerTy())
+        return AtomicExpansionKind::None;
+      [[fallthrough]];
+    default:
+      return AtomicExpansionKind::CmpXChg;
+    }
+  }
+
   switch (Op) {
   case AtomicRMWInst::Xchg:
     return AtomicExpansionKind::None;
@@ -33489,8 +33538,10 @@ static SDValue LowerATOMIC_FENCE(SDValue Op, const X86Subtarget &Subtarget,
 
   // The only fence that needs an instruction is a sequentially-consistent
   // cross-thread fence.
+  // DOS and 16-bit Windows run on one processor, where every fence only has
+  // to stop the compiler.
   if (FenceOrdering == AtomicOrdering::SequentiallyConsistent &&
-      FenceSSID == SyncScope::System) {
+      FenceSSID == SyncScope::System && !Subtarget.isTarget16BitABI()) {
     if (!Subtarget.avoidMFence() && Subtarget.hasMFence())
       return DAG.getNode(X86ISD::MFENCE, dl, MVT::Other, Op.getOperand(0));
 
@@ -49823,6 +49874,10 @@ static SDValue combineSelect(SDNode *N, SelectionDAG &DAG,
 static SDValue combineSetCCAtomicArith(SDValue Cmp, X86::CondCode &CC,
                                        SelectionDAG &DAG,
                                        const X86Subtarget &Subtarget) {
+  // Before the 80486 there is no XADD to take the flags from.
+  if (Subtarget.isPre486())
+    return SDValue();
+
   // This combine only operates on CMP-like nodes.
   if (!(Cmp.getOpcode() == X86ISD::CMP ||
         (Cmp.getOpcode() == X86ISD::SUB && !Cmp->hasAnyUseOfValue(0))))
@@ -51645,6 +51700,11 @@ static SDValue combineMul(SDNode *N, SelectionDAG &DAG,
 
   if (VT != MVT::i64 && VT != MVT::i32 &&
       (!VT.isVector() || !VT.isSimple() || !VT.isInteger()))
+    return SDValue();
+
+  // MUL_IMM becomes an LEA, whose address registers are 16 bits in 16-bit
+  // code, so it can't compute a 32-bit product there.
+  if (Subtarget.isTarget16BitABI() && !VT.isVector())
     return SDValue();
 
   KnownBits Known1 = DAG.computeKnownBits(N->getOperand(1));

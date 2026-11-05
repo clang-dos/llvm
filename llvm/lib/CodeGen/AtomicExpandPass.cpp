@@ -2348,10 +2348,19 @@ bool AtomicExpandImpl::expandAtomicOpToLibcall(
   SmallVector<Value *, 6> Args;
   AttributeList Attr;
 
+  // The library takes its pointers in the address space of the target's C
+  // pointers, which is not 0 in the i8086 memory models with far data.
+  unsigned LibAS = getLibCallPointerAddrSpace(*M);
+  PointerType *LibPtrTy = PointerType::get(Ctx, LibAS);
+  auto LibPtr = [&](Value *V) {
+    return Builder.CreateAddrSpaceCast(V, LibPtrTy);
+  };
+
   // 'size' argument.
   if (!UseSizedLibcall) {
-    // Note, getIntPtrType is assumed equivalent to size_t.
-    Args.push_back(ConstantInt::get(DL.getIntPtrType(Ctx), Size));
+    unsigned SizeTBits =
+        TargetLibraryInfoImpl(M->getTargetTriple()).getSizeTSize(*M);
+    Args.push_back(ConstantInt::get(IntegerType::get(Ctx, SizeTBits), Size));
   }
 
   // 'ptr' argument.
@@ -2359,9 +2368,7 @@ bool AtomicExpandImpl::expandAtomicOpToLibcall(
   // implementation and that addresses are convertable.  For systems without
   // that property, we'd need to extend this mechanism to support AS-specific
   // families of atomic intrinsics.
-  Value *PtrVal = PointerOperand;
-  PtrVal = Builder.CreateAddrSpaceCast(PtrVal, PointerType::getUnqual(Ctx));
-  Args.push_back(PtrVal);
+  Args.push_back(LibPtr(PointerOperand));
 
   // 'expected' argument, if present.
   if (CASExpected) {
@@ -2369,7 +2376,7 @@ bool AtomicExpandImpl::expandAtomicOpToLibcall(
     AllocaCASExpected->setAlignment(AllocaAlignment);
     Builder.CreateLifetimeStart(AllocaCASExpected);
     Builder.CreateAlignedStore(CASExpected, AllocaCASExpected, AllocaAlignment);
-    Args.push_back(AllocaCASExpected);
+    Args.push_back(LibPtr(AllocaCASExpected));
   }
 
   // 'val' argument ('desired' for cas), if present.
@@ -2383,7 +2390,7 @@ bool AtomicExpandImpl::expandAtomicOpToLibcall(
       AllocaValue->setAlignment(AllocaAlignment);
       Builder.CreateLifetimeStart(AllocaValue);
       Builder.CreateAlignedStore(ValueOperand, AllocaValue, AllocaAlignment);
-      Args.push_back(AllocaValue);
+      Args.push_back(LibPtr(AllocaValue));
     }
   }
 
@@ -2392,7 +2399,7 @@ bool AtomicExpandImpl::expandAtomicOpToLibcall(
     AllocaResult = AllocaBuilder.CreateAlloca(I->getType());
     AllocaResult->setAlignment(AllocaAlignment);
     Builder.CreateLifetimeStart(AllocaResult);
-    Args.push_back(AllocaResult);
+    Args.push_back(LibPtr(AllocaResult));
   }
 
   // The ordering arguments are C ints, which may need to be extended.

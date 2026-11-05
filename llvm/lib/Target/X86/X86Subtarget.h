@@ -74,6 +74,10 @@ class X86Subtarget final : public X86GenSubtargetInfo {
 #define GET_SUBTARGETINFO_MACRO(ATTRIBUTE, DEFAULT, GETTER)                    \
   bool ATTRIBUTE = DEFAULT;
 #include "X86GenSubtargetInfo.inc"
+  /// True for code on the "i386" CPU or, on the i8086 triple, an older one:
+  /// they lack the 80486's BSWAP, XADD and CMPXCHG.
+  bool IsPre486 = false;
+
   /// ReservedRReg R#i is not available as a general purpose register.
   std::bitset<X86::NUM_TARGET_REGS> ReservedRReg;
 
@@ -340,6 +344,9 @@ public:
 
   /// Whether instructions are limited to a CPU older than the 80386.
   bool isPre386() const { return !Has386; }
+  /// Whether code is limited to an 80386 or older CPU, which lacks BSWAP, XADD
+  /// and CMPXCHG.
+  bool isPre486() const { return IsPre486; }
   bool isTargetFuchsia() const { return TargetTriple.isOSFuchsia(); }
 
   bool isLFI() const { return TargetTriple.isLFI(); }

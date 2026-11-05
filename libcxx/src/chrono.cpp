@@ -45,6 +45,8 @@
 #  define WIN32_LEAN_AND_MEAN
 #  define VC_EXTRA_LEAN
 #  include <windows.h>
+
+#  include "include/win32_ansi_files.h"
 #  if _WIN32_WINNT >= _WIN32_WINNT_WIN8
 #    include <winapifamily.h>
 #  endif
@@ -83,7 +85,7 @@ class GetSystemTimeInit {
 public:
   GetSystemTimeInit() {
     fp = (GetSystemTimeAsFileTimePtr)(void*)GetProcAddress(
-        GetModuleHandleW(L"kernel32.dll"), "GetSystemTimePreciseAsFileTime");
+        GetModuleHandleA("kernel32.dll"), "GetSystemTimePreciseAsFileTime");
     if (fp == nullptr)
       fp = GetSystemTimeAsFileTime;
   }

@@ -260,7 +260,7 @@ static void* win32_get_synch_api_function(const char* function_name) {
   // Microsoft will guarantee compatibility for us, as we are exposed to the same conditions as all existing Windows
   // apps using the Microsoft STL VS2015/2017/2019/2022 runtimes, where Windows 7 support has not been excluded at
   // compile time.
-  static auto module_handle = GetModuleHandleW(L"api-ms-win-core-synch-l1-2-0.dll");
+  static auto module_handle = GetModuleHandleA("api-ms-win-core-synch-l1-2-0.dll");
   if (module_handle == nullptr) {
     return nullptr;
   }

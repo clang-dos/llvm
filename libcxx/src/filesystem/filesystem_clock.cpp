@@ -22,6 +22,8 @@
 #  define WIN32_LEAN_AND_MEAN
 #  define NOMINMAX
 #  include <windows.h>
+
+#  include "include/win32_ansi_files.h"
 #endif
 
 #if __has_include(<unistd.h>)

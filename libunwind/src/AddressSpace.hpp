@@ -24,7 +24,9 @@
 #include "Registers.hpp"
 
 #ifndef _LIBUNWIND_USE_DLADDR
-  #if !(defined(_LIBUNWIND_IS_BAREMETAL) || defined(_WIN32) || defined(_AIX))
+  // 32-bit PowerPC Mac OS X has dladdr only from 10.3.
+  #if !(defined(_LIBUNWIND_IS_BAREMETAL) || defined(_WIN32) || defined(_AIX) ||  \
+        (defined(__APPLE__) && defined(__ppc__)))
     #define _LIBUNWIND_USE_DLADDR 1
   #else
     #define _LIBUNWIND_USE_DLADDR 0
@@ -63,8 +65,56 @@ char *getFuncNameFromTBTable(uintptr_t pc, uint16_t &NameLen,
     uintptr_t                   compact_unwind_section_length;
   };
 
+#if defined(__ppc__)
+// Older Mac OS X headers don't declare these extern "C" for C++.
+extern "C" {
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#include <mach-o/loader.h>
+}
+#include <string.h>
+
+  // 32-bit PowerPC Mac OS X (10.0 to 10.5) predates
+  // _dyld_find_unwind_sections, so find the image whose __TEXT segment holds
+  // the address, and its __eh_frame, with the dyld calls 10.0 already has.
+  // These images have no compact unwind section.
+  static bool _dyld_find_unwind_sections(void *addr,
+                                         dyld_unwind_sections *info) {
+    uintptr_t pc = (uintptr_t)addr;
+    uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; ++i) {
+      const struct mach_header *mh = _dyld_get_image_header(i);
+      if (mh == NULL)
+        continue;
+      uintptr_t slide = (uintptr_t)_dyld_get_image_vmaddr_slide(i);
+      const char *lc = (const char *)(mh + 1);
+      for (uint32_t j = 0; j < mh->ncmds; ++j) {
+        const struct load_command *cmd = (const struct load_command *)lc;
+        if (cmd->cmd == LC_SEGMENT) {
+          const struct segment_command *seg =
+              (const struct segment_command *)lc;
+          uintptr_t start = seg->vmaddr + slide;
+          if (strncmp(seg->segname, "__TEXT", sizeof(seg->segname)) == 0 &&
+              pc >= start && pc - start < seg->vmsize) {
+            const struct section *eh = getsectbynamefromheader(
+                (struct mach_header *)mh, "__TEXT", "__eh_frame");
+            info->mh = mh;
+            info->dwarf_section = eh ? (const void *)(eh->addr + slide) : NULL;
+            info->dwarf_section_length = eh ? eh->size : 0;
+            info->compact_unwind_section = NULL;
+            info->compact_unwind_section_length = 0;
+            return true;
+          }
+        }
+        lc += cmd->cmdsize;
+      }
+    }
+    return false;
+  }
+#else
   // In 10.7.0 or later, libSystem.dylib implements this function.
   extern "C" bool _dyld_find_unwind_sections(void *, dyld_unwind_sections *);
+#endif
 
 namespace libunwind {
   bool findDynamicUnwindSections(void *, unw_dynamic_unwind_sections *);

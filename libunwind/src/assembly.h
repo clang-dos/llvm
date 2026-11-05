@@ -43,6 +43,9 @@
 #define PPC64_OFFS_V      824
 #elif defined(__APPLE__) && defined(__aarch64__)
 #define SEPARATOR %%
+#elif defined(__APPLE__) && defined(__ppc__)
+// Apple's PowerPC assembler syntax: ';' starts a comment, '@' separates.
+#define SEPARATOR @
 #elif defined(__riscv)
 # define RISCV_ISIZE (__riscv_xlen / 8)
 # define RISCV_FOFFSET (RISCV_ISIZE * 32)

@@ -928,6 +928,7 @@ set(avr_SOURCES
 set(i8086_SOURCES
   ashlsi3.c
   ashrsi3.c
+  i8086/atomic.c
   lshrsi3.c
   ${GENERIC_SOURCES}
 )

@@ -12,7 +12,9 @@
 #endif
 #include <stddef.h>
 
-#if __APPLE__
+// 32-bit PowerPC Mac OS X has no sys_icache_invalidate before 10.5; it
+// uses the PowerPC loop below.
+#if __APPLE__ && !defined(__ppc__)
 #include <libkern/OSCacheControl.h>
 #endif
 

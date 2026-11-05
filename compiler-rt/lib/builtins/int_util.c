@@ -27,7 +27,8 @@ void __compilerrt_abort_impl(const char *file, int line, const char *function) {
   panic("%s:%d: abort in %s", file, line, function);
 }
 
-#elif __APPLE__
+// 32-bit PowerPC Mac OS X has no __assert_rtn before 10.4.
+#elif __APPLE__ && !defined(__ppc__)
 
 // from libSystem.dylib
 NORETURN extern void __assert_rtn(const char *func, const char *file, int line,

@@ -251,6 +251,8 @@ public:
 
   bool HasNativeLLVMSupport() const override;
 
+  const char *getDefaultLinker() const override;
+
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args, BoundArch BA,
                 Action::OffloadKind DeviceOffloadKind) const override;

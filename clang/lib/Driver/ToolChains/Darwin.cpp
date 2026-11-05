@@ -3601,6 +3601,17 @@ void Darwin::addClangTargetOptions(
   if (DeviceOffloadKind != Action::OFK_None)
     return;
 
+  // CoreFoundation exports __CFConstantStringClassReference from 10.2 on.
+  // Before that, Objective-C string literals must be NSConstantString
+  // objects (Foundation's _NSConstantStringClassReference), as gcc made them.
+  if (isTargetMacOS() && getArch() == llvm::Triple::ppc &&
+      isMacosxVersionLT(10, 2) &&
+      !DriverArgs.hasArgNoClaim(options::OPT_fconstant_cfstrings,
+                                options::OPT_fno_constant_cfstrings,
+                                options::OPT_mconstant_cfstrings,
+                                options::OPT_mno_constant_cfstrings))
+    CC1Args.push_back("-fno-constant-cfstrings");
+
   // Pass "-faligned-alloc-unavailable" only when the user hasn't manually
   // enabled or disabled aligned allocations.
   if (!DriverArgs.hasArgNoClaim(options::OPT_faligned_allocation,

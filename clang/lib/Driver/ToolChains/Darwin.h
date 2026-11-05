@@ -268,8 +268,10 @@ public:
   bool IsEncodeExtendedBlockSignatureDefault() const override { return true; }
 
   bool IsObjCNonFragileABIDefault() const override {
-    // Non-fragile ABI is default for everything but i386.
-    return getTriple().getArch() != llvm::Triple::x86;
+    // Non-fragile ABI is default for everything but i386 and 32-bit PowerPC,
+    // whose Mac OS X releases only have the fragile (Objective-C 1) runtime.
+    return getTriple().getArch() != llvm::Triple::x86 &&
+           getTriple().getArch() != llvm::Triple::ppc;
   }
 
   bool UseObjCMixedDispatch() const override { return true; }

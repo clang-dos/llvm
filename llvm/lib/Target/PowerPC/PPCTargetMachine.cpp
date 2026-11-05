@@ -460,9 +460,13 @@ void PPCPassConfig::addIRPasses() {
 bool PPCPassConfig::addPreISel() {
   // The GlobalMerge pass is intended to be on by default on AIX.
   // Specifying the command line option overrides the AIX default.
+  // Not on Mac OS X: merging string literals into one global takes them out
+  // of __cstring, and ld64 then coalesces __cfstring entries that point into
+  // the merged block by the wrong contents.
   if ((EnableGlobalMerge.getNumOccurrences() > 0)
           ? EnableGlobalMerge
-          : getOptLevel() != CodeGenOptLevel::None)
+          : getOptLevel() != CodeGenOptLevel::None &&
+                !TM->getTargetTriple().isOSDarwin())
     addPass(createGlobalMergePass(TM, GlobalMergeMaxOffset, false, false, true,
                                   true));
 

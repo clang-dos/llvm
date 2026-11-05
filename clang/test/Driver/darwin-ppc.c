@@ -66,3 +66,18 @@
 // LINK104-NOT: "-commons"
 // LINK104: "-lSystem" "-lgcc_s.1"
 // LINK104-NOT: lcc_dynamic
+
+// Objective-C uses the fragile runtime, and before 10.2, whose CoreFoundation
+// first has __CFConstantStringClassReference, NSConstantString literals.
+// RUN: %clang -target powerpc-apple-macosx10.0 -x objective-c -c %s -### 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=OBJC100
+// OBJC100: "-fno-constant-cfstrings"
+// OBJC100: "-fobjc-runtime=macosx-fragile-10.0.0"
+// RUN: %clang -target powerpc-apple-macosx10.2 -x objective-c -c %s -### 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=OBJC102
+// OBJC102-NOT: "-fno-constant-cfstrings"
+// OBJC102: "-fobjc-runtime=macosx-fragile-10.2.0"
+// OBJC102-NOT: "-fno-constant-cfstrings"
+// RUN: %clang -target powerpc-apple-macosx10.0 -fconstant-cfstrings -c %s -### 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=CFSTR
+// CFSTR-NOT: "-fno-constant-cfstrings"

@@ -37,6 +37,8 @@
 #  include <io.h>
 #  include <windows.h>
 #  include <winioctl.h>
+
+#  include "include/win32_ansi_files.h"
 #else
 #  include <fcntl.h>
 #  include <sys/stat.h>
@@ -165,7 +167,11 @@ enum : int {
 #    define FILE_NAME_NORMALIZED 0x0
 #    define VOLUME_NAME_DOS 0x0
 
-inline FARPROC nt_function(const char* name) { return GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name); }
+// Windows 95 has no ntdll.dll, and that of 98 and ME has none of these.
+inline FARPROC nt_function(const char* name) {
+  HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+  return ntdll ? GetProcAddress(ntdll, name) : nullptr;
+}
 
 inline BOOL nt_file_information(bool set, HANDLE h, int cls, void* buf, DWORD size) {
   struct {
@@ -203,7 +209,7 @@ inline BOOL SetFileInformationByHandle(HANDLE h, int cls, void* buf, DWORD size)
 
 inline BOOLEAN CreateSymbolicLinkW(const wchar_t* link, const wchar_t* target, DWORD flags) {
   using create_t = BOOLEAN(WINAPI*)(const wchar_t*, const wchar_t*, DWORD);
-  static auto f  = reinterpret_cast<create_t>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateSymbolicLinkW"));
+  static auto f  = reinterpret_cast<create_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "CreateSymbolicLinkW"));
   if (f)
     return f(link, target, flags);
   SetLastError(ERROR_NOT_SUPPORTED);
@@ -234,7 +240,68 @@ private:
   HANDLE h;
 };
 
+#  if defined(_LIBCPP_WIN32_ANSI_FILES)
+// Windows 9x and Win32s have no ntdll functions for files, and can't open a
+// directory. A handle's information comes from GetFileInformationByHandle
+// there, and a name's from FindFirstFile. Their file indexes don't tell
+// files apart on FAT, so a file is known by its full name in capitals: 9x
+// has no hard links.
+inline void ansi_stat_attributes(StatT* buf, DWORD attributes) {
+  buf->st_mode = 0555;
+  if (!(attributes & FILE_ATTRIBUTE_READONLY))
+    buf->st_mode |= 0222;
+  buf->st_mode |= (attributes & FILE_ATTRIBUTE_DIRECTORY) ? _S_IFDIR : _S_IFREG;
+  buf->st_nlink = 1;
+}
+
+inline int ansi_stat_name(const wchar_t* path, StatT* buf) {
+  DWORD attributes = GetFileAttributesW(path);
+  if (attributes == INVALID_FILE_ATTRIBUTES)
+    return -1;
+  memset(buf, 0, sizeof(*buf));
+  ansi_stat_attributes(buf, attributes);
+  // FindFirstFile finds no root directory, which then has no times.
+  WIN32_FIND_DATAW data;
+  HANDLE find = FindFirstFileW(path, &data);
+  if (find != INVALID_HANDLE_VALUE) {
+    FindClose(find);
+    buf->st_mtim = filetime_to_timespec(data.ftLastWriteTime);
+    buf->st_atim = filetime_to_timespec(data.ftLastAccessTime);
+    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY))
+      buf->st_size = (static_cast<uintmax_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+  }
+  wchar_t full[MAX_PATH * 2];
+  DWORD n = GetFullPathNameW(path, MAX_PATH * 2, full, nullptr);
+  if (!n || n >= MAX_PATH * 2)
+    return -1;
+  uint64_t hash = 14695981039346656037ull; // FNV-1a
+  for (DWORD i = 0; i < n; ++i) {
+    wchar_t c = full[i] >= L'a' && full[i] <= L'z' ? full[i] - (L'a' - L'A') : full[i];
+    hash      = (hash ^ c) * 1099511628211ull;
+  }
+  memcpy(&buf->st_ino.id[0], &hash, sizeof(hash));
+  return 0;
+}
+#  endif
+
 inline int stat_handle(HANDLE h, StatT* buf) {
+#  if defined(_LIBCPP_WIN32_ANSI_FILES)
+  if (__libcpp_win32_ansi_only()) {
+    BY_HANDLE_FILE_INFORMATION info;
+    if (!GetFileInformationByHandle(h, &info))
+      return -1;
+    memset(buf, 0, sizeof(*buf));
+    ansi_stat_attributes(buf, info.dwFileAttributes);
+    buf->st_mtim = filetime_to_timespec(info.ftLastWriteTime);
+    buf->st_atim = filetime_to_timespec(info.ftLastAccessTime);
+    buf->st_size = (static_cast<uintmax_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
+    buf->st_dev  = info.dwVolumeSerialNumber;
+    // Only an open file has no name here: tell it apart by its handle.
+    memcpy(&buf->st_ino.id[0], &h, sizeof(h));
+    buf->st_ino.id[15] = 1;
+    return 0;
+  }
+#  endif
   FILE_BASIC_INFO basic;
   if (!GetFileInformationByHandleEx(h, FileBasicInfo, &basic, sizeof(basic)))
     return -1;
@@ -271,6 +338,10 @@ inline int stat_handle(HANDLE h, StatT* buf) {
 }
 
 inline int stat_file(const wchar_t* path, StatT* buf, DWORD flags) {
+#  if defined(_LIBCPP_WIN32_ANSI_FILES)
+  if (__libcpp_win32_ansi_only())
+    return ansi_stat_name(path, buf);
+#  endif
   WinHandle h(path, FILE_READ_ATTRIBUTES, flags);
   if (!h)
     return -1;
@@ -324,6 +395,16 @@ inline int link(const wchar_t* oldname, const wchar_t* newname) {
 }
 
 inline int remove(const wchar_t* path) {
+#  if defined(_LIBCPP_WIN32_ANSI_FILES)
+  if (__libcpp_win32_ansi_only()) {
+    DWORD attributes = GetFileAttributesW(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES)
+      return -1;
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+      return RemoveDirectoryW(path) ? 0 : -1;
+    return DeleteFileW(path) ? 0 : -1;
+  }
+#  endif
   detail::WinHandle h(path, DELETE, FILE_FLAG_OPEN_REPARSE_POINT);
   if (!h)
     return -1;
@@ -423,6 +504,18 @@ inline wchar_t* realpath(const wchar_t* path, [[maybe_unused]] wchar_t* resolved
   // Only expected to be used with us allocating the buffer.
   _LIBCPP_ASSERT_INTERNAL(resolved_name == nullptr, "Windows realpath() assumes a null resolved_name");
 
+#  if defined(_LIBCPP_WIN32_ANSI_FILES)
+  // Windows 9x can't open a directory; the name must still exist.
+  if (__libcpp_win32_ansi_only()) {
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
+      return nullptr;
+    DWORD n = GetFullPathNameW(path, 0, nullptr, nullptr);
+    std::unique_ptr<wchar_t, decltype(&::free)> full(static_cast<wchar_t*>(malloc((n + 1) * sizeof(wchar_t))), &::free);
+    if (!n || !full || GetFullPathNameW(path, n + 1, full.get(), nullptr) > n)
+      return nullptr;
+    return full.release();
+  }
+#  endif
   WinHandle h(path, FILE_READ_ATTRIBUTES, 0);
   if (!h) {
     return nullptr;
@@ -434,7 +527,7 @@ inline wchar_t* realpath(const wchar_t* path, [[maybe_unused]] wchar_t* resolved
   // name stands in (the file exists: it was opened above).
   using final_path_t = DWORD(WINAPI*)(HANDLE, LPWSTR, DWORD, DWORD);
   static auto final_path =
-      reinterpret_cast<final_path_t>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetFinalPathNameByHandleW"));
+      reinterpret_cast<final_path_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetFinalPathNameByHandleW"));
   auto GetFinalPathNameByHandleW = [&](HANDLE handle, LPWSTR out, DWORD size, DWORD flags) -> DWORD {
     if (final_path)
       return final_path(handle, out, size, flags);

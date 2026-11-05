@@ -152,8 +152,14 @@ string do_strerror_r(int ev);
 #  ifdef _WIN32
 string do_strerror_r(int ev) {
   char buffer[strerror_buff_size];
+#    if defined(__MINGW32__) && __MSVCRT_VERSION__ == 0
+  // crtdll.dll has no strerror_s.
+  if (const char* message = ::strerror(ev))
+    return string(message);
+#    else
   if (::strerror_s(buffer, strerror_buff_size, ev) == 0)
     return string(buffer);
+#    endif
   std::snprintf(buffer, strerror_buff_size, "unknown error %d", ev);
   return string(buffer);
 }

@@ -32,6 +32,16 @@ _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 #  define _LIBCPP_WIN32_VISTA_SYNC 0
 #endif
 
+// Windows 95, 98 and ME have no TryEnterCriticalSection. With headers for
+// them and NT 4.0 (_WIN32_WINNT below 0x0500), a mutex is a count of the
+// threads that want it and a semaphore they wait on, which can be tried
+// everywhere, instead of a CRITICAL_SECTION.
+#if _WIN32_WINNT < 0x0500
+#  define _LIBCPP_WIN32_COUNT_MUTEX 1
+#else
+#  define _LIBCPP_WIN32_COUNT_MUTEX 0
+#endif
+
 #if _LIBCPP_WIN32_VISTA_SYNC
 static_assert(sizeof(__libcpp_mutex_t) == sizeof(SRWLOCK), "");
 static_assert(alignof(__libcpp_mutex_t) == alignof(SRWLOCK), "");
@@ -57,6 +67,105 @@ static_assert(alignof(__libcpp_thread_t) == alignof(HANDLE), "");
 static_assert(sizeof(__libcpp_tls_key) == sizeof(DWORD), "");
 static_assert(alignof(__libcpp_tls_key) == alignof(DWORD), "");
 
+#if _LIBCPP_WIN32_COUNT_MUTEX
+namespace {
+// Taking the mutex adds one to __count; a thread that finds it above zero
+// waits for the semaphore, which the owner releases when it leaves with
+// others still counted.
+struct __count_mutex {
+  LONG __count;
+  HANDLE __sem;
+};
+
+bool __count_mutex_init(__count_mutex* __m) {
+  __m->__count = 0;
+  __m->__sem   = CreateSemaphoreA(nullptr, 0, 0x7fffffff, nullptr);
+  return __m->__sem != nullptr;
+}
+
+void __count_mutex_lock(__count_mutex* __m) {
+  if (__atomic_fetch_add(&__m->__count, 1, __ATOMIC_ACQ_REL) > 0)
+    WaitForSingleObject(__m->__sem, INFINITE);
+}
+
+bool __count_mutex_trylock(__count_mutex* __m) {
+  LONG __expected = 0;
+  return __atomic_compare_exchange_n(&__m->__count, &__expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+}
+
+void __count_mutex_unlock(__count_mutex* __m) {
+  if (__atomic_fetch_sub(&__m->__count, 1, __ATOMIC_ACQ_REL) > 1)
+    ReleaseSemaphore(__m->__sem, 1, nullptr);
+}
+
+// A recursive mutex is one of those, its owner and its depth, in place.
+struct __count_recursive_mutex {
+  __count_mutex __m;
+  DWORD __owner;
+  LONG __depth;
+};
+static_assert(sizeof(__count_recursive_mutex) <= sizeof(__libcpp_recursive_mutex_t), "");
+
+__count_recursive_mutex* __recursive(__libcpp_recursive_mutex_t* __m) {
+  return reinterpret_cast<__count_recursive_mutex*>(__m);
+}
+
+bool __owns(__count_recursive_mutex* __r) {
+  return __atomic_load_n(&__r->__owner, __ATOMIC_RELAXED) == GetCurrentThreadId();
+}
+
+void __take(__count_recursive_mutex* __r) {
+  __atomic_store_n(&__r->__owner, GetCurrentThreadId(), __ATOMIC_RELAXED);
+  __r->__depth = 1;
+}
+} // namespace
+
+// Mutex
+int __libcpp_recursive_mutex_init(__libcpp_recursive_mutex_t* __m) {
+  __count_recursive_mutex* __r = __recursive(__m);
+  __r->__owner                 = 0;
+  __r->__depth                 = 0;
+  return __count_mutex_init(&__r->__m) ? 0 : GetLastError();
+}
+
+int __libcpp_recursive_mutex_lock(__libcpp_recursive_mutex_t* __m) {
+  __count_recursive_mutex* __r = __recursive(__m);
+  if (__owns(__r)) {
+    ++__r->__depth;
+    return 0;
+  }
+  __count_mutex_lock(&__r->__m);
+  __take(__r);
+  return 0;
+}
+
+bool __libcpp_recursive_mutex_trylock(__libcpp_recursive_mutex_t* __m) {
+  __count_recursive_mutex* __r = __recursive(__m);
+  if (__owns(__r)) {
+    ++__r->__depth;
+    return true;
+  }
+  if (!__count_mutex_trylock(&__r->__m))
+    return false;
+  __take(__r);
+  return true;
+}
+
+int __libcpp_recursive_mutex_unlock(__libcpp_recursive_mutex_t* __m) {
+  __count_recursive_mutex* __r = __recursive(__m);
+  if (--__r->__depth)
+    return 0;
+  __atomic_store_n(&__r->__owner, 0, __ATOMIC_RELAXED);
+  __count_mutex_unlock(&__r->__m);
+  return 0;
+}
+
+int __libcpp_recursive_mutex_destroy(__libcpp_recursive_mutex_t* __m) {
+  CloseHandle(__recursive(__m)->__m.__sem);
+  return 0;
+}
+#else  // _LIBCPP_WIN32_COUNT_MUTEX
+
 // Mutex
 int __libcpp_recursive_mutex_init(__libcpp_recursive_mutex_t* __m) {
   InitializeCriticalSection((LPCRITICAL_SECTION)__m);
@@ -81,6 +190,7 @@ int __libcpp_recursive_mutex_destroy(__libcpp_recursive_mutex_t* __m) {
   DeleteCriticalSection((LPCRITICAL_SECTION)__m);
   return 0;
 }
+#endif // _LIBCPP_WIN32_COUNT_MUTEX
 
 #if _LIBCPP_WIN32_VISTA_SYNC
 int __libcpp_mutex_lock(__libcpp_mutex_t* __m) {
@@ -174,6 +284,7 @@ _Tp* __get_or_make(void** __slot, _Make __make, _Free __free) {
   return static_cast<_Tp*>(__expected);
 }
 
+#  if !_LIBCPP_WIN32_COUNT_MUTEX
 CRITICAL_SECTION* __new_critical_section() {
   auto* __cs = static_cast<CRITICAL_SECTION*>(malloc(sizeof(CRITICAL_SECTION)));
   if (__cs)
@@ -185,10 +296,41 @@ void __free_critical_section(CRITICAL_SECTION* __cs) {
   DeleteCriticalSection(__cs);
   free(__cs);
 }
+#  endif
 
+#  if _LIBCPP_WIN32_COUNT_MUTEX
+__count_mutex* __new_count_mutex() {
+  auto* __cm = static_cast<__count_mutex*>(malloc(sizeof(__count_mutex)));
+  if (__cm && !__count_mutex_init(__cm)) {
+    free(__cm);
+    __cm = nullptr;
+  }
+  return __cm;
+}
+
+void __free_count_mutex(__count_mutex* __cm) {
+  CloseHandle(__cm->__sem);
+  free(__cm);
+}
+
+__count_mutex* __mutex_cm(__libcpp_mutex_t* __m) {
+  return __get_or_make<__count_mutex>(__m, __new_count_mutex, __free_count_mutex);
+}
+
+void __mutex_enter(__libcpp_mutex_t* __m) { __count_mutex_lock(__mutex_cm(__m)); }
+bool __mutex_try(__libcpp_mutex_t* __m) { return __count_mutex_trylock(__mutex_cm(__m)); }
+void __mutex_leave(__libcpp_mutex_t* __m) { __count_mutex_unlock(__mutex_cm(__m)); }
+void __mutex_free(void* __p) { __free_count_mutex(static_cast<__count_mutex*>(__p)); }
+#  else
 CRITICAL_SECTION* __mutex_cs(__libcpp_mutex_t* __m) {
   return __get_or_make<CRITICAL_SECTION>(__m, __new_critical_section, __free_critical_section);
 }
+
+void __mutex_enter(__libcpp_mutex_t* __m) { EnterCriticalSection(__mutex_cs(__m)); }
+bool __mutex_try(__libcpp_mutex_t* __m) { return TryEnterCriticalSection(__mutex_cs(__m)) != 0; }
+void __mutex_leave(__libcpp_mutex_t* __m) { LeaveCriticalSection(__mutex_cs(__m)); }
+void __mutex_free(void* __p) { __free_critical_section(static_cast<CRITICAL_SECTION*>(__p)); }
+#  endif
 
 // A condition variable is a queue of waiting threads, each with its own
 // event, so a signal wakes exactly one thread that was waiting when it came.
@@ -244,7 +386,7 @@ void __condvar_wake(__libcpp_condvar_t* __cv, bool __all) {
 int __condvar_wait(__libcpp_condvar_t* __cv, __libcpp_mutex_t* __m, DWORD __ms) {
   __cv_state* __st = __condvar_state(__cv);
   __cv_waiter __w;
-  __w.__event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  __w.__event = CreateEventA(nullptr, FALSE, FALSE, nullptr);
   if (!__w.__event)
     return GetLastError();
   __w.__signaled = false;
@@ -258,7 +400,7 @@ int __condvar_wait(__libcpp_condvar_t* __cv, __libcpp_mutex_t* __m, DWORD __ms) 
   __st->__tail = &__w;
   LeaveCriticalSection(&__st->__lock);
 
-  LeaveCriticalSection(__mutex_cs(__m));
+  __mutex_leave(__m);
   WaitForSingleObject(__w.__event, __ms);
 
   // Signaled or not, take the waiter off the queue before it goes away.
@@ -278,27 +420,27 @@ int __condvar_wait(__libcpp_condvar_t* __cv, __libcpp_mutex_t* __m, DWORD __ms) 
   LeaveCriticalSection(&__st->__lock);
   CloseHandle(__w.__event);
 
-  EnterCriticalSection(__mutex_cs(__m));
+  __mutex_enter(__m);
   return __timed_out ? ETIMEDOUT : 0;
 }
 
 } // namespace
 
 int __libcpp_mutex_lock(__libcpp_mutex_t* __m) {
-  EnterCriticalSection(__mutex_cs(__m));
+  __mutex_enter(__m);
   return 0;
 }
 
-bool __libcpp_mutex_trylock(__libcpp_mutex_t* __m) { return TryEnterCriticalSection(__mutex_cs(__m)) != 0; }
+bool __libcpp_mutex_trylock(__libcpp_mutex_t* __m) { return __mutex_try(__m); }
 
 int __libcpp_mutex_unlock(__libcpp_mutex_t* __m) {
-  LeaveCriticalSection(__mutex_cs(__m));
+  __mutex_leave(__m);
   return 0;
 }
 
 int __libcpp_mutex_destroy(__libcpp_mutex_t* __m) {
   if (*__m)
-    __free_critical_section(static_cast<CRITICAL_SECTION*>(*__m));
+    __mutex_free(*__m);
   *__m = nullptr;
   return 0;
 }
@@ -374,15 +516,95 @@ static inline _LIBCPP_HIDE_FROM_ABI unsigned WINAPI __libcpp_beginthreadex_thunk
 
 bool __libcpp_thread_isnull(const __libcpp_thread_t* __t) { return *__t == 0; }
 
+#if !_LIBCPP_WIN32_VISTA_SYNC
+namespace {
+using __get_thread_id_t = DWORD(WINAPI*)(HANDLE);
+using __query_thread_t  = LONG(WINAPI*)(HANDLE, int, PVOID, ULONG, PULONG);
+
+FARPROC __system_function(const char* __dll, const char* __name) {
+  HMODULE __module = GetModuleHandleA(__dll);
+  return __module ? GetProcAddress(__module, __name) : nullptr;
+}
+
+// GetThreadId is from Server 2003 and Vista. Before that, ntdll's
+// NtQueryInformationThread gives the thread's client ID.
+__get_thread_id_t __get_thread_id() {
+  static auto __f = reinterpret_cast<__get_thread_id_t>(__system_function("kernel32.dll", "GetThreadId"));
+  return __f;
+}
+
+__query_thread_t __query_thread() {
+  static auto __f = reinterpret_cast<__query_thread_t>(__system_function("ntdll.dll", "NtQueryInformationThread"));
+  return __f;
+}
+
+// Windows 95, 98 and ME have neither, and no other way from a thread's
+// handle to its ID. There, the threads made here are kept in a list with
+// their IDs until they are joined or detached.
+struct __thread_entry {
+  HANDLE __handle;
+  DWORD __id;
+  __thread_entry* __next;
+};
+__thread_entry* __threads;
+LONG __threads_lock;
+
+bool __keeps_thread_ids() { return !__get_thread_id() && !__query_thread(); }
+
+void __lock_threads() {
+  while (__atomic_exchange_n(&__threads_lock, 1, __ATOMIC_ACQUIRE))
+    Sleep(0);
+}
+
+void __unlock_threads() { __atomic_store_n(&__threads_lock, 0, __ATOMIC_RELEASE); }
+
+void __remember_thread(HANDLE __h, DWORD __id) {
+  auto* __e = static_cast<__thread_entry*>(malloc(sizeof(__thread_entry)));
+  if (!__e)
+    return;
+  __e->__handle = __h;
+  __e->__id     = __id;
+  __lock_threads();
+  __e->__next = __threads;
+  __threads   = __e;
+  __unlock_threads();
+}
+
+DWORD __remembered_thread_id(HANDLE __h, bool __forget) {
+  DWORD __id = 0;
+  __lock_threads();
+  for (__thread_entry** __p = &__threads; *__p; __p = &(*__p)->__next) {
+    if ((*__p)->__handle == __h) {
+      __thread_entry* __e = *__p;
+      __id                = __e->__id;
+      if (__forget) {
+        *__p = __e->__next;
+        free(__e);
+      }
+      break;
+    }
+  }
+  __unlock_threads();
+  return __id;
+}
+} // namespace
+#endif
+
 int __libcpp_thread_create(__libcpp_thread_t* __t, void* (*__func)(void*), void* __arg) {
   auto* __data   = new __libcpp_beginthreadex_thunk_data;
   __data->__func = __func;
   __data->__arg  = __arg;
 
-  *__t = reinterpret_cast<HANDLE>(_beginthreadex(nullptr, 0, __libcpp_beginthreadex_thunk, __data, 0, nullptr));
+  unsigned __id = 0;
+  *__t          = reinterpret_cast<HANDLE>(_beginthreadex(nullptr, 0, __libcpp_beginthreadex_thunk, __data, 0, &__id));
 
-  if (*__t)
+  if (*__t) {
+#if !_LIBCPP_WIN32_VISTA_SYNC
+    if (__keeps_thread_ids())
+      __remember_thread(*__t, __id);
+#endif
     return 0;
+  }
   return GetLastError();
 }
 
@@ -391,14 +613,9 @@ __libcpp_thread_id __libcpp_thread_get_current_id() { return GetCurrentThreadId(
 #if _LIBCPP_WIN32_VISTA_SYNC
 __libcpp_thread_id __libcpp_thread_get_id(const __libcpp_thread_t* __t) { return GetThreadId(*__t); }
 #else
-// GetThreadId is from Server 2003 and Vista. Before that, ntdll's
-// NtQueryInformationThread gives the thread's client ID.
 __libcpp_thread_id __libcpp_thread_get_id(const __libcpp_thread_t* __t) {
-  using __get_thread_id_t = DWORD(WINAPI*)(HANDLE);
-  static auto __get_thread_id =
-      reinterpret_cast<__get_thread_id_t>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetThreadId"));
-  if (__get_thread_id)
-    return __get_thread_id(*__t);
+  if (auto __f = __get_thread_id())
+    return __f(*__t);
 
   struct {
     LONG __exit_status;
@@ -409,30 +626,43 @@ __libcpp_thread_id __libcpp_thread_get_id(const __libcpp_thread_t* __t) {
     LONG __priority;
     LONG __base_priority;
   } __info;
-  using __query_t = LONG(WINAPI*)(HANDLE, int, PVOID, ULONG, PULONG);
-  static auto __query =
-      reinterpret_cast<__query_t>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread"));
-  if (__query && __query(*__t, 0 /* ThreadBasicInformation */, &__info, sizeof(__info), nullptr) >= 0)
-    return static_cast<__libcpp_thread_id>(reinterpret_cast<uintptr_t>(__info.__thread_id));
-  return 0;
+  if (auto __query = __query_thread()) {
+    if (__query(*__t, 0 /* ThreadBasicInformation */, &__info, sizeof(__info), nullptr) >= 0)
+      return static_cast<__libcpp_thread_id>(reinterpret_cast<uintptr_t>(__info.__thread_id));
+    return 0;
+  }
+  return __remembered_thread_id(*__t, false);
 }
 #endif
 
 int __libcpp_thread_join(__libcpp_thread_t* __t) {
   if (WaitForSingleObjectEx(*__t, INFINITE, FALSE) == WAIT_FAILED)
     return GetLastError();
+#if !_LIBCPP_WIN32_VISTA_SYNC
+  if (__keeps_thread_ids())
+    __remembered_thread_id(*__t, true);
+#endif
   if (!CloseHandle(*__t))
     return GetLastError();
   return 0;
 }
 
 int __libcpp_thread_detach(__libcpp_thread_t* __t) {
+#if !_LIBCPP_WIN32_VISTA_SYNC
+  if (__keeps_thread_ids())
+    __remembered_thread_id(*__t, true);
+#endif
   if (!CloseHandle(*__t))
     return GetLastError();
   return 0;
 }
 
+#if _WIN32_WINNT < 0x0500
+// SwitchToThread is from NT 4.0; Windows 95, 98 and ME have only Sleep.
+void __libcpp_thread_yield() { Sleep(0); }
+#else
 void __libcpp_thread_yield() { SwitchToThread(); }
+#endif
 
 void __libcpp_thread_sleep_for(const chrono::nanoseconds& __ns) {
   // round-up to the nearest millisecond

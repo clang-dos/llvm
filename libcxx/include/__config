@@ -42,6 +42,15 @@
 #    define _LIBCPP_ABI_VCRUNTIME
 #  endif
 
+// On Windows the C library is Microsoft's (msvcrt.dll, crtdll.dll or the UCRT,
+// with MSVC or MinGW), or picolibc, which libc++ treats as newlib. The
+// Win32 API is there either way.
+#  if defined(_WIN32) && !_LIBCPP_LIBC_NEWLIB
+#    define _LIBCPP_WIN32_CRT 1
+#  else
+#    define _LIBCPP_WIN32_CRT 0
+#  endif
+
 #  if defined(_WIN32)
 #    if defined(_MSC_VER) && !defined(__MINGW32__)
 #      define _LIBCPP_MSVCRT // Using Microsoft's C Runtime library
@@ -89,8 +98,10 @@
 #    define _LIBCPP_USING_GETENTROPY
 #  elif defined(__Fuchsia__)
 #    define _LIBCPP_USING_FUCHSIA_CPRNG
-#  elif defined(_WIN32)
+#  elif _LIBCPP_WIN32_CRT
 #    define _LIBCPP_USING_WIN32_RANDOM
+#  elif defined(_WIN32)
+#    define _LIBCPP_USING_ARC4_RANDOM
 #  else
 #    define _LIBCPP_USING_DEV_RANDOM
 #  endif

@@ -109,9 +109,15 @@ if(WIN32)
   list(APPEND LIBCXX_SOURCES
     support/win32/ansi_files.cpp
     support/win32/compiler_rt_shims.cpp
-    support/win32/locale_win32.cpp
-    support/win32/support.cpp
     )
+  # With picolibc as the C library, the POSIX locale paths are used and the
+  # MS CRT support files are not needed.
+  if (NOT RUNTIMES_USE_LIBC STREQUAL "picolibc")
+    list(APPEND LIBCXX_SOURCES
+      support/win32/locale_win32.cpp
+      support/win32/support.cpp
+      )
+  endif()
 
   if (NOT LIBCXX_HAS_PTHREAD_API)
     list(APPEND LIBCXX_SOURCES

@@ -328,6 +328,8 @@ void WINAPI __libcpp_GetSystemTimeAsFileTime(LPFILETIME ft) {
   SystemTimeToFileTime(&st, ft);
 }
 
+#  if !_LIBCPP_LIBC_PICOLIBC // picolibc's own _wopen and _wfopen do this
+
 // _wopen and _wfopen: the C runtime's own on Windows NT when it has them
 // (msvcrt.dll does, crtdll.dll doesn't), otherwise the narrow ones with the
 // name in the ANSI code page.
@@ -380,6 +382,8 @@ FILE* __cdecl __libcpp_wfopen(const wchar_t* name, const wchar_t* mode) {
   }
   return fopen(a.s, m);
 }
+
+#  endif // !_LIBCPP_LIBC_PICOLIBC
 
 } // extern "C"
 

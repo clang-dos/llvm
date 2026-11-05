@@ -53,8 +53,10 @@ BOOL WINAPI __libcpp_SetCurrentDirectoryW(LPCWSTR);
 BOOL WINAPI __libcpp_SetFileAttributesW(LPCWSTR, DWORD);
 BOOL WINAPI __libcpp_SetFilePointerEx(HANDLE, LARGE_INTEGER, PLARGE_INTEGER, DWORD);
 void WINAPI __libcpp_GetSystemTimeAsFileTime(LPFILETIME);
+#  if !_LIBCPP_LIBC_PICOLIBC
 int __cdecl __libcpp_wopen(const wchar_t*, int, ...);
 FILE* __cdecl __libcpp_wfopen(const wchar_t*, const wchar_t*);
+#  endif
 // True on Windows 95, 98, ME and Win32s.
 bool __libcpp_win32_ansi_only();
 }
@@ -77,8 +79,10 @@ bool __libcpp_win32_ansi_only();
 #    define SetFileAttributesW __libcpp_SetFileAttributesW
 #    define SetFilePointerEx __libcpp_SetFilePointerEx
 #    define GetSystemTimeAsFileTime __libcpp_GetSystemTimeAsFileTime
-#    define _wopen __libcpp_wopen
-#    define _wfopen __libcpp_wfopen
+#    if !_LIBCPP_LIBC_PICOLIBC
+#      define _wopen __libcpp_wopen
+#      define _wfopen __libcpp_wfopen
+#    endif
 #  endif
 #endif
 

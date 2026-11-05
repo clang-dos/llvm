@@ -149,7 +149,7 @@ constexpr size_t strerror_buff_size = 1024;
 
 string do_strerror_r(int ev);
 
-#  ifdef _WIN32
+#  if _LIBCPP_WIN32_CRT
 string do_strerror_r(int ev) {
   char buffer[strerror_buff_size];
 #    if defined(__MINGW32__) && __MSVCRT_VERSION__ == 0

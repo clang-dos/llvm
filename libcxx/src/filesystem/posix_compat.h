@@ -123,7 +123,9 @@ namespace detail {
 #  define S_ISLNK(m) (((m) & _S_IFMT) == _S_IFLNK)
 #  define S_ISSOCK(m) (((m) & _S_IFMT) == _S_IFSOCK)
 
-#  define O_NONBLOCK 0
+#  ifndef O_NONBLOCK // picolibc has it
+#    define O_NONBLOCK 0
+#  endif
 
 #  if _WIN32_WINNT < 0x0600
 // Windows 2000 and XP have no GetFileInformationByHandleEx,
@@ -555,8 +557,10 @@ inline wchar_t* realpath(const wchar_t* path, [[maybe_unused]] wchar_t* resolved
   return buff.release();
 }
 
-#  define AT_FDCWD -1
-#  define AT_SYMLINK_NOFOLLOW 1
+#  ifndef AT_FDCWD // picolibc has these
+#    define AT_FDCWD -1
+#    define AT_SYMLINK_NOFOLLOW 1
+#  endif
 using ModeT = int;
 
 inline int fchmod_handle(HANDLE h, int perms) {

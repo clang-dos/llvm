@@ -225,7 +225,7 @@ extern "C" long long __libcpp_ftello64(FILE*) __asm__("ftello64");
 extern "C" int __libcpp_fseeko64(FILE*, long long, int) __asm__("fseeko64");
 #    endif
 
-#    if _LIBCPP_HAS_OPEN_WITH_WCHAR && defined(__MINGW32__) && _WIN32_WINNT < 0x0500
+#    if _LIBCPP_HAS_OPEN_WITH_WCHAR && _LIBCPP_WIN32_CRT && defined(__MINGW32__) && _WIN32_WINNT < 0x0500
 // Windows 95, 98, ME and Win32s have no _wfopen that works, and crtdll.dll
 // none at all: libc++ has one for them (src/support/win32/ansi_files.cpp).
 extern "C" FILE* __cdecl __libcpp_wfopen(const wchar_t*, const wchar_t*);
@@ -239,7 +239,7 @@ _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 
 #    if _LIBCPP_HAS_OPEN_WITH_WCHAR
 inline _LIBCPP_HIDE_FROM_ABI FILE* __wfopen(const wchar_t* __name, const wchar_t* __mode) {
-#      if defined(__MINGW32__) && _WIN32_WINNT < 0x0500
+#      if _LIBCPP_WIN32_CRT && defined(__MINGW32__) && _WIN32_WINNT < 0x0500
   return ::__libcpp_wfopen(__name, __mode);
 #      else
   return ::_wfopen(__name, __mode);
@@ -1176,15 +1176,18 @@ basic_filebuf<_CharT, _Traits>::seekoff(off_type __off, ios_base::seekdir __way,
 
 template <class _CharT, class _Traits>
 int basic_filebuf<_CharT, _Traits>::__fseek(FILE* __file, pos_type __offset, int __whence) {
-#    if defined(__MINGW32__) && __MSVCRT_VERSION__ == 0
+#    if _LIBCPP_WIN32_CRT && defined(__MINGW32__) && __MSVCRT_VERSION__ == 0
   // crtdll.dll (Windows NT 3.x) has only 32-bit file positions: mingw-w64's
   // _fseeki64 for it goes through fgetpos and fsetpos, which Wine's crtdll.dll
   // takes as 64-bit and so overruns.
   if (static_cast<off_type>(__offset) != static_cast<long>(static_cast<off_type>(__offset)))
     return -1;
   return fseek(__file, static_cast<long>(static_cast<off_type>(__offset)), __whence);
-#    elif defined(_WIN32)
+#    elif _LIBCPP_WIN32_CRT
   return _fseeki64(__file, __offset, __whence);
+#    elif _LIBCPP_LIBC_PICOLIBC && defined(_WIN32)
+  // long is 32 bits on Windows; off_t is 64.
+  return fseeko(__file, __offset, __whence);
 #    elif _LIBCPP_LIBC_NEWLIB
   return fseek(__file, __offset, __whence);
 #    elif defined(_AIX)
@@ -1198,10 +1201,12 @@ int basic_filebuf<_CharT, _Traits>::__fseek(FILE* __file, pos_type __offset, int
 
 template <class _CharT, class _Traits>
 typename basic_filebuf<_CharT, _Traits>::off_type basic_filebuf<_CharT, _Traits>::__ftell(FILE* __file) {
-#    if defined(__MINGW32__) && __MSVCRT_VERSION__ == 0
+#    if _LIBCPP_WIN32_CRT && defined(__MINGW32__) && __MSVCRT_VERSION__ == 0
   return ftell(__file);
-#    elif defined(_WIN32)
+#    elif _LIBCPP_WIN32_CRT
   return _ftelli64(__file);
+#    elif _LIBCPP_LIBC_PICOLIBC && defined(_WIN32)
+  return ftello(__file);
 #    elif _LIBCPP_LIBC_NEWLIB
   return ftell(__file);
 #    elif defined(_AIX)

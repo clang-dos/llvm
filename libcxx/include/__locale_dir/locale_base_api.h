@@ -118,7 +118,7 @@
 #    include <__locale_dir/support/netbsd.h>
 #  elif defined(__OpenBSD__)
 #    include <__locale_dir/support/openbsd.h>
-#  elif defined(_WIN32)
+#  elif _LIBCPP_WIN32_CRT
 #    include <__locale_dir/support/windows.h>
 #  elif defined(__Fuchsia__)
 #    include <__locale_dir/support/fuchsia.h>

@@ -50,6 +50,26 @@ int toupper(int c);
 #    pragma GCC system_header
 #  endif
 
+// Older C libraries, such as Mac OS X 10.0 to 10.4's, define these as macros
+// even in C++, which would break std::isdigit(c) and the like. They declare
+// the functions too.
+#  if defined(__APPLE__) && defined(__ppc__)
+#    undef isalnum
+#    undef isalpha
+#    undef isblank
+#    undef iscntrl
+#    undef isdigit
+#    undef isgraph
+#    undef islower
+#    undef isprint
+#    undef ispunct
+#    undef isspace
+#    undef isupper
+#    undef isxdigit
+#    undef tolower
+#    undef toupper
+#  endif
+
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 using ::isalnum _LIBCPP_USING_IF_EXISTS;

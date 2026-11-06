@@ -18,7 +18,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifdef __APPLE__
+// On 32-bit PowerPC Mac OS X (10.0 to 10.5) libSystem has no libunwind;
+// this one is linked statically, so it is always available.
+#if defined(__APPLE__) && !defined(__ppc__)
   #if __clang__
     #if __has_include(<Availability.h>)
       #include <Availability.h>

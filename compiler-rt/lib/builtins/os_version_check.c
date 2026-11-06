@@ -11,7 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifdef __APPLE__
+// Not for 32-bit PowerPC Mac OS X (10.0 to 10.5), which predates the APIs
+// these checks use.
+#if defined(__APPLE__) && !defined(__ppc__)
 
 #include <TargetConditionals.h>
 #include <assert.h>

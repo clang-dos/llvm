@@ -1093,6 +1093,18 @@ types::ID MachO::LookupTypeForExtension(StringRef Ext) const {
 
 bool MachO::HasNativeLLVMSupport() const { return true; }
 
+const char *MachO::getDefaultLinker() const {
+  // A Linux or Windows host has no PowerPC Mach-O linker of its own. Prefer
+  // Apple's ld64 from cctools-port, installed under its target-prefixed name,
+  // when it is next to clang or on the PATH.
+  if (getArch() == llvm::Triple::ppc || getArch() == llvm::Triple::ppc64) {
+    static const char PPCLinker[] = "powerpc-apple-darwin8-ld";
+    if (llvm::sys::path::is_absolute(GetProgramPath(PPCLinker)))
+      return PPCLinker;
+  }
+  return "ld";
+}
+
 ToolChain::CXXStdlibType Darwin::GetDefaultCXXStdlibType() const {
   // Always use libc++ by default
   return ToolChain::CST_Libcxx;
@@ -1625,6 +1637,10 @@ std::string Darwin::getCompilerRT(const ArgList &Args, StringRef Component,
   if (Component != "builtins") {
     DarwinLibName += Component;
     DarwinLibName += '_';
+  } else if (isTargetMacOS() && getArch() == llvm::Triple::ppc) {
+    // PowerPC Mac OS X builtins are kept apart from libclang_rt.osx.a, which
+    // a macOS-hosted build fills with x86_64 and arm64 only.
+    DarwinLibName += "ppc_";
   }
   DarwinLibName += getOSLibraryNameSuffix();
   DarwinLibName += Type == ToolChain::FT_Shared ? "_dynamic.dylib" : ".a";
@@ -1891,12 +1907,16 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
   // libSystem, and made libgcc_s.1.dylib a stub. We never link libgcc_s when
   // building for aarch64 or iOS simulator, since libgcc_s was made obsolete
   // before either existed.
-  // Mac OS X 10.0 has no libgcc_s.1.dylib; its GCC linked the static
-  // libcc_dynamic.a for the same helpers (64-bit division and so on).
-  // FIXME: 10.1 to 10.3.
-  if (isTargetMacOSBased() && isMacosxVersionLT(10, 1))
-    CmdArgs.push_back("-lcc_dynamic");
-  else if (getTriple().getArch() != llvm::Triple::aarch64 &&
+  //
+  // PowerPC before 10.4: of the older SDKs only 10.3.9 has libgcc_s.1.dylib,
+  // and 10.2.8 has neither it nor libcc_dynamic.a, so use our own builtins
+  // (libclang_rt.ppc_osx.a) when they are installed. Without them, fall back
+  // to the static libcc_dynamic.a that 10.0's and 10.1's GCC linked.
+  if (isTargetMacOS() && getArch() == llvm::Triple::ppc &&
+      isMacosxVersionLT(10, 4)) {
+    if (!getVFS().exists(getCompilerRT(Args, "builtins")))
+      CmdArgs.push_back("-lcc_dynamic");
+  } else if (getTriple().getArch() != llvm::Triple::aarch64 &&
            ((isTargetIOSBased() && isIPhoneOSVersionLT(5, 0) &&
              !isTargetIOSSimulator()) ||
             (isTargetMacOSBased() && isMacosxVersionLT(10, 6))))
@@ -3580,6 +3600,17 @@ void Darwin::addClangTargetOptions(
   // that depend on the host OS version and are irrelevant to device code.
   if (DeviceOffloadKind != Action::OFK_None)
     return;
+
+  // CoreFoundation exports __CFConstantStringClassReference from 10.2 on.
+  // Before that, Objective-C string literals must be NSConstantString
+  // objects (Foundation's _NSConstantStringClassReference), as gcc made them.
+  if (isTargetMacOS() && getArch() == llvm::Triple::ppc &&
+      isMacosxVersionLT(10, 2) &&
+      !DriverArgs.hasArgNoClaim(options::OPT_fconstant_cfstrings,
+                                options::OPT_fno_constant_cfstrings,
+                                options::OPT_mconstant_cfstrings,
+                                options::OPT_mno_constant_cfstrings))
+    CC1Args.push_back("-fno-constant-cfstrings");
 
   // Pass "-faligned-alloc-unavailable" only when the user hasn't manually
   // enabled or disabled aligned allocations.

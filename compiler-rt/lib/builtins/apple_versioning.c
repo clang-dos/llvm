@@ -6,7 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if __APPLE__
+// Not for 32-bit PowerPC Mac OS X, which this library supports from 10.0.
+#if __APPLE__ && !defined(__ppc__)
 #include <Availability.h>
 
 #if __IPHONE_OS_VERSION_MIN_REQUIRED

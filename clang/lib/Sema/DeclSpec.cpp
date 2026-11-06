@@ -1285,9 +1285,13 @@ void DeclSpec::CheckTypeSpec(Sema &S, const PrintingPolicy &Policy) {
       // unsupported in the Clang-based XL compiler since the deprecated type
       // has a number of conflicting semantics and continuing to support it
       // is a disservice to users.
+      // Apple's gcc accepted it on 32-bit PowerPC Mac OS X, where long is the
+      // same size as int, and Apple's headers use it (MachineExceptions.h).
+      const llvm::Triple &T = S.Context.getTargetInfo().getTriple();
+      bool DarwinPPC32 = T.isOSDarwin() && T.getArch() == llvm::Triple::ppc;
       if (S.getLangOpts().ZVector ||
-          !S.Context.getTargetInfo().hasFeature("vsx") ||
-          S.Context.getTargetInfo().getTriple().isOSAIX())
+          (!S.Context.getTargetInfo().hasFeature("vsx") && !DarwinPPC32) ||
+          T.isOSAIX())
         S.Diag(TSWRange.getBegin(), diag::err_invalid_vector_long_decl_spec);
       else
         S.Diag(TSWRange.getBegin(),

@@ -1968,10 +1968,16 @@ void ItaniumRecordLayoutBuilder::LayoutField(const FieldDecl *D,
     QualType ET = Context.getBaseElementType(D->getType());
     const auto *BT = ET->getAs<BuiltinType>();
     if (BT && BT->isFloatingPoint() && Context.getTypeSize(BT) == 64) {
-      const auto *CXXRD = dyn_cast<CXXRecordDecl>(D->getParent());
-      bool IsFirstMember =
-          D->getFieldIndex() == 0 &&
-          (!CXXRD || (CXXRD->getNumBases() == 0 && !CXXRD->isDynamicClass()));
+      // An Objective-C instance variable is never first: isa or the
+      // superclass's instance variables come before it, and it has no
+      // parent record.
+      bool IsFirstMember = false;
+      if (!isa<ObjCIvarDecl>(D)) {
+        const auto *CXXRD = dyn_cast<CXXRecordDecl>(D->getParent());
+        IsFirstMember = D->getFieldIndex() == 0 &&
+                        (!CXXRD || (CXXRD->getNumBases() == 0 &&
+                                    !CXXRD->isDynamicClass()));
+      }
       if (!IsFirstMember)
         FieldAlign = std::min(FieldAlign, CharUnits::fromQuantity(4));
     }

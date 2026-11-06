@@ -121,6 +121,15 @@ std::string x86::getX86TargetCPU(const Driver &D, const ArgList &Args,
         .Case("i586", "pentium")
         .Default("i686");
 
+  // OS/2 targets the CPU of the arch name, i386 for i386-pc-os2. Before Warp
+  // Server for e-business, OS/2 does not save SSE registers, so no SSE.
+  if (Triple.isOSOS2())
+    return llvm::StringSwitch<std::string>(Triple.getArchName())
+        .Case("i386", "i386")
+        .Case("i486", "i486")
+        .Case("i586", "pentium")
+        .Default("pentiumpro");
+
   switch (Triple.getOS()) {
   case llvm::Triple::NetBSD:
     return "i486";

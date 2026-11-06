@@ -267,7 +267,7 @@ static Value *farStackPointer(IRBuilder<> &B, Value *P) {
 /// which X86FixupAddr16 gives SS.
 static bool expandStackMemIntrinsics(Function &F,
                                      const TargetTransformInfo &TTI) {
-  if (!F.getParent()->getTargetTriple().isOSWin16())
+  if (!F.getParent()->getTargetTriple().isOSNE16())
     return false;
   SmallVector<MemIntrinsic *, 4> Work;
   for (Instruction &I : instructions(F)) {

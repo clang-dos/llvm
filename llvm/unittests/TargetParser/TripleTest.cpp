@@ -112,6 +112,21 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_FALSE(T.isOSWindows());
   EXPECT_FALSE(T.isOSMSDOS());
 
+  T = Triple("i8086-pc-os2");
+  EXPECT_EQ(Triple::i8086, T.getArch());
+  EXPECT_EQ(Triple::OS2, T.getOS());
+  EXPECT_EQ(Triple::OMF, T.getObjectFormat());
+  EXPECT_TRUE(T.isOSOS2());
+  EXPECT_TRUE(T.isOSNE16());
+  EXPECT_FALSE(T.isOSWin16());
+
+  T = Triple("i386-pc-os2");
+  EXPECT_EQ(Triple::x86, T.getArch());
+  EXPECT_EQ(Triple::OS2, T.getOS());
+  EXPECT_EQ(Triple::ELF, T.getObjectFormat());
+  EXPECT_TRUE(T.isOSOS2());
+  EXPECT_FALSE(T.isOSNE16());
+
   T = Triple("m68k-unknown-amigaos");
   EXPECT_EQ(Triple::m68k, T.getArch());
   EXPECT_EQ(Triple::AmigaOS, T.getOS());
@@ -4143,6 +4158,7 @@ TEST(TripleTest, X86_16) {
   EXPECT_EQ("x86", Triple::getArchTypePrefix(Triple::i8086));
   EXPECT_EQ("msdos", Triple::getOSTypeName(Triple::MSDOS));
   EXPECT_EQ("win16", Triple::getOSTypeName(Triple::Win16));
+  EXPECT_EQ("os2", Triple::getOSTypeName(Triple::OS2));
   EXPECT_EQ("macosclassic", Triple::getOSTypeName(Triple::MacOSClassic));
   EXPECT_EQ("omf", Triple::getObjectFormatTypeName(Triple::OMF));
   EXPECT_EQ(Triple::i8086, Triple::getArchTypeForLLVMName("i8086"));

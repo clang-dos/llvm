@@ -185,7 +185,7 @@ static bool addExceptionArgs(const ArgList &Args, types::ID InputType,
     // Disable C++ EH by default on XCore, PS4/PS5, DOS and GPU targets.
     bool CXXExceptionsEnabled = Triple.getArch() != llvm::Triple::xcore &&
                                 !Triple.isPS() && !Triple.isDriverKit() &&
-                                !Triple.isOSMSDOS() && !Triple.isOSWin16() &&
+                                !Triple.isOSMSDOS() && !Triple.isOSNE16() &&
                                 !(Triple.isGPU() && !IsDeviceOffloadAction);
     Arg *ExceptionArg = Args.getLastArg(
         options::OPT_fcxx_exceptions, options::OPT_fno_cxx_exceptions,
@@ -2255,7 +2255,7 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
       CmdArgs.push_back("-mwindows-prologue=exported");
     }
     // Code for a DLL, which runs with SS != DS.
-    if (getToolChain().getTriple().isOSWin16() &&
+    if (getToolChain().getTriple().isOSNE16() &&
         Args.hasArg(options::OPT_shared, options::OPT_mwindows_dll))
       CmdArgs.push_back("-mwindows-dll");
   }

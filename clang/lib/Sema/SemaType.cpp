@@ -1513,6 +1513,40 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
     // are never distributed.
     processTypeAttrs(state, Result, TAL_DeclSpec, SlidingAttrs);
     processTypeAttrs(state, Result, TAL_DeclSpec, DS.getAttributes());
+
+    // i8086 __near, __far and __huge are address spaces spelled as GNU
+    // attributes. Written before a later declarator in a list, as in
+    // `typedef struct _R {...} R, __far *PR;`, they qualify the type
+    // specifier for that declarator, as in the first declarator and as in
+    // Open Watcom, not the declarator (which would make PR itself far).
+    if (S.Context.getTargetInfo().getTriple().getArch() ==
+            llvm::Triple::i8086 &&
+        !declarator.getAttributes().empty()) {
+      const SourceManager &SM = S.getSourceManager();
+      SourceLocation Start =
+          declarator.getIdentifierLoc().isValid()
+              ? SM.getExpansionLoc(declarator.getIdentifierLoc())
+              : SourceLocation();
+      for (unsigned I = 0, E = declarator.getNumTypeObjects(); I != E; ++I) {
+        SourceLocation L = declarator.getTypeObject(I).Loc;
+        if (L.isInvalid())
+          continue;
+        L = SM.getExpansionLoc(L);
+        if (Start.isInvalid() || SM.isBeforeInTranslationUnit(L, Start))
+          Start = L;
+      }
+      ParsedAttributesView Leading;
+      if (Start.isValid())
+        for (ParsedAttr &AL : declarator.getAttributes())
+          if (AL.getKind() == ParsedAttr::AT_AddressSpace &&
+              !AL.isStandardAttributeSyntax() &&
+              SM.isBeforeInTranslationUnit(SM.getExpansionLoc(AL.getLoc()),
+                                           Start))
+            Leading.addAtEnd(&AL);
+      for (ParsedAttr &AL : Leading)
+        declarator.getAttributes().remove(&AL);
+      processTypeAttrs(state, Result, TAL_DeclSpec, Leading);
+    }
   }
 
   // Apply const/volatile/restrict qualifiers to T.

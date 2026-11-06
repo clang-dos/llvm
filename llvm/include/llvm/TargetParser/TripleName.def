@@ -93,6 +93,7 @@ TRIPLE_OS_ALIAS(MSDOS, "dos")
 TRIPLE_OS(Win16, "win16", "Windows16")
 TRIPLE_OS(AmigaOS, "amigaos", "Generic")
 TRIPLE_OS(TOS, "tos", "Generic")
+TRIPLE_OS(OS2, "os2", "OS2")
 
 #undef TRIPLE_OS
 #undef TRIPLE_OS_ALIAS

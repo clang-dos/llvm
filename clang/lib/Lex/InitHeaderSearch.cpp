@@ -224,6 +224,7 @@ bool InitHeaderSearch::ShouldAddDefaultIncludePaths(
   case llvm::Triple::Managarm:
   case llvm::Triple::MSDOS:
   case llvm::Triple::Win16:
+  case llvm::Triple::OS2:
   case llvm::Triple::MacOSClassic:
   case llvm::Triple::AmigaOS:
   case llvm::Triple::TOS:

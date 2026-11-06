@@ -2029,4 +2029,8 @@ void X86_16TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__WIN16_VERSION__",
                         "0x" + llvm::utohexstr(Ver, false, 4));
   }
+  // 16-bit OS/2 1.x, as Open Watcom (__OS2__) and Microsoft C define it.
+  if (getTriple().isOSOS2()) {
+    Builder.defineMacro("__OS2__");
+  }
 }

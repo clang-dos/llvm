@@ -20,6 +20,7 @@
 using namespace clang::driver;
 using namespace clang::driver::toolchains;
 using namespace clang::driver::tools;
+using namespace clang::driver::tools::watcom;
 using namespace clang;
 using namespace llvm::opt;
 
@@ -28,19 +29,21 @@ MSDOS::MSDOS(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
       MemoryModel(x86::getI8086MemoryModel(D, Args).str()) {
   getProgramPaths().push_back(getDriver().Dir);
 
-  // Windows runs in protected mode, where segment arithmetic does not work:
-  // the huge models are out, and a .COM program is a DOS thing.
-  if (Triple.isOSWin16() && (MemoryModel == "tiny" ||
-                             StringRef(MemoryModel).starts_with("huge")))
+  // Windows and OS/2 run in protected mode, where segment arithmetic does
+  // not work: the huge models are out, and a .COM program is a DOS thing.
+  if ((Triple.isOSWin16() || Triple.isOSOS2()) &&
+      (MemoryModel == "tiny" || StringRef(MemoryModel).starts_with("huge")))
     D.Diag(diag::err_drv_unsupported_option_argument_for_target)
         << "-mcmodel=" << MemoryModel << Triple.str();
 
   // Libraries for the memory model first, then shared ones. Windows
-  // libraries are in lib/win16.
+  // libraries are in lib/win16, OS/2 1.x ones in lib/os2.
   SmallString<128> LibDir(computeSysRoot());
   llvm::sys::path::append(LibDir, "lib");
   if (Triple.isOSWin16())
     llvm::sys::path::append(LibDir, "win16");
+  else if (Triple.isOSOS2())
+    llvm::sys::path::append(LibDir, "os2");
   SmallString<128> ModelDir(LibDir);
   llvm::sys::path::append(ModelDir, MemoryModel);
   // With C++ exceptions (off by default), libc++ and libc++abi built with
@@ -54,9 +57,9 @@ MSDOS::MSDOS(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
     llvm::sys::path::append(EHDir, "eh");
     getFilePaths().push_back(std::string(EHDir));
   }
-  // A Windows DLL in the small or medium model links the libraries built
-  // with -mwindows-dll, from <model>/dll.
-  if (Triple.isOSWin16() &&
+  // A Windows or OS/2 DLL in the small or medium model links the libraries
+  // built with -mwindows-dll, from <model>/dll.
+  if ((Triple.isOSWin16() || Triple.isOSOS2()) &&
       (MemoryModel == "small" || MemoryModel == "medium") &&
       Args.hasArg(options::OPT_shared, options::OPT_mwindows_dll)) {
     SmallString<128> DLLDir(ModelDir);
@@ -106,7 +109,7 @@ Tool *MSDOS::buildLinker() const { return new tools::msdos::Linker(*this); }
 
 /// Watcom linkers join their arguments into one directive string, so a file
 /// name with spaces or commas must be quoted.
-static const char *quoteName(const ArgList &Args, StringRef Name) {
+const char *tools::watcom::quoteName(const ArgList &Args, StringRef Name) {
   if (Name.find_first_of(" ,=") == StringRef::npos)
     return Args.MakeArgString(Name);
   return Args.MakeArgString("'" + Name + "'");
@@ -114,8 +117,8 @@ static const char *quoteName(const ArgList &Args, StringRef Name) {
 
 /// Find the linker: --ld-path=, then -fuse-ld=<name> (wlink, jwlink or a
 /// path), then wlink or jwlink on the program path.
-static std::string getWatcomLinkerPath(const ToolChain &TC,
-                                       const ArgList &Args) {
+std::string tools::watcom::getLinkerPath(const ToolChain &TC,
+                                         const ArgList &Args) {
   if (Args.hasArg(options::OPT_ld_path_EQ))
     return TC.GetLinkerPath();
   if (const Arg *A = Args.getLastArg(options::OPT_fuse_ld_EQ)) {
@@ -134,8 +137,9 @@ static std::string getWatcomLinkerPath(const ToolChain &TC,
 
 /// Find a library given with -l<name> or used by default: <name>.lib,
 /// lib<name>.a or lib<name>.lib in the library paths.
-static std::optional<std::string>
-findLibrary(const ToolChain &TC, const ArgList &Args, StringRef Name) {
+std::optional<std::string> tools::watcom::findLibrary(const ToolChain &TC,
+                                                      const ArgList &Args,
+                                                      StringRef Name) {
   SmallVector<std::string, 8> Dirs;
   for (const Arg *A : Args.filtered(options::OPT_L))
     Dirs.push_back(A->getValue());
@@ -162,16 +166,23 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   ArgStringList CmdArgs;
 
   // The tiny model gives a .COM program, the others an MZ executable. For
-  // Windows, an NE program, or a DLL with -shared.
+  // Windows and OS/2 1.x, an NE program, or a DLL with -shared.
   bool Win16 = TC.getTriple().isOSWin16();
-  bool IsDLL = Win16 && Args.hasArg(options::OPT_shared);
+  bool OS2 = TC.getTriple().isOSOS2();
+  bool IsDLL = (Win16 || OS2) && Args.hasArg(options::OPT_shared);
   CmdArgs.push_back("format");
-  CmdArgs.push_back(Win16 ? "windows" : "dos");
-  bool IsCOM = !Win16 && TC.getMemoryModel() == "tiny";
+  CmdArgs.push_back(Win16 ? "windows" : OS2 ? "os2" : "dos");
+  bool IsCOM = !Win16 && !OS2 && TC.getMemoryModel() == "tiny";
   if (IsCOM)
     CmdArgs.push_back("com");
   if (IsDLL)
     CmdArgs.push_back("dll");
+  // An OS/2 program runs in a window of the Presentation Manager, as
+  // text-mode programs that keep to the VIO subset do (-mwindows for a PM
+  // program).
+  else if (OS2)
+    CmdArgs.push_back(Args.hasArg(options::OPT_mwindows) ? "pm"
+                                                         : "pmcompatible");
   CmdArgs.push_back("option");
   CmdArgs.push_back("quiet");
   // Drop code that nothing references. With COMDATs this removes unused
@@ -231,6 +242,19 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("option");
       CmdArgs.push_back("protmode");
     }
+  }
+
+  // OS/2 1.x: the local heap and the stack are in DGROUP; a DLL runs on its
+  // caller's stack. The program runs in protected mode only (it is not a
+  // Family API program, which DOS can run too).
+  if (OS2) {
+    CmdArgs.push_back("option");
+    CmdArgs.push_back("heapsize=4096");
+    if (!IsDLL) {
+      CmdArgs.push_back("option");
+      CmdArgs.push_back("stack=8192");
+    }
+    CmdArgs.append({"option", "protmode"});
   }
 
   // The startup code goes first, so that its segments set the order. A DLL
@@ -297,6 +321,13 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     // 1.x, 2.x or 3.0 gets the functions that version has, so that it
     // cannot call one that came later (it would then fail to load), and
     // gets them where that version has them.
+    // The OS/2 1.x API: import directives for DOSCALLS, VIOCALLS, KBDCALLS,
+    // MOUCALLS and the Presentation Manager.
+    if (OS2) {
+      std::string Imports = TC.GetFilePath("os2.lnk");
+      if (llvm::sys::fs::exists(Imports))
+        CmdArgs.push_back(Args.MakeArgString("@" + Imports));
+    }
     if (Win16) {
       VersionTuple Version = TC.getTriple().getOSVersion();
       const char *List = "windows.lnk";
@@ -314,7 +345,7 @@ void msdos::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
-  std::string Linker = getWatcomLinkerPath(TC, Args);
+  std::string Linker = watcom::getLinkerPath(TC, Args);
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
                                          Args.MakeArgString(Linker), CmdArgs,
                                          Inputs, Output));

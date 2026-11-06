@@ -909,6 +909,30 @@ public:
       : OSTargetInfo<Target>(Triple, Opts) {}
 };
 
+// 32-bit OS/2 (2.0 and later, LX executables)
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY OS2TargetInfo : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    // __OS2__ as every OS/2 compiler defines it, __32BIT__ as IBM's C Set/2
+    // and VisualAge C++ do, and __FLAT__ as Open Watcom does.
+    Builder.defineMacro("__OS2__");
+    Builder.defineMacro("__32BIT__");
+    Builder.defineMacro("__FLAT__");
+    if (Opts.C11)
+      Builder.defineMacro("__STDC_NO_THREADS__");
+  }
+
+public:
+  OS2TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {
+    // wchar_t is 16 bits, as with the IBM compilers, Open Watcom and the
+    // OS/2 GCC.
+    this->WCharType = TargetInfo::UnsignedShort;
+  }
+};
+
 // z/OS target
 template <typename Target>
 class LLVM_LIBRARY_VISIBILITY ZOSTargetInfo : public OSTargetInfo<Target> {

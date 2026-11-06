@@ -64585,7 +64585,7 @@ static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
     // argument slot.
     SDValue Chain = N->getOperand(0), Ptr = N->getOperand(1);
     if (Ptr.getValueType() != MVT::i32 &&
-        !DAG.getTarget().getTargetTriple().isOSWin16())
+        !DAG.getTarget().getTargetTriple().isOSNE16())
       return SDValue();
     EVT VT = N->getValueType(0);
     const Value *SV = cast<SrcValueSDNode>(N->getOperand(2))->getValue();
@@ -64626,10 +64626,11 @@ static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
     return N->getOperand(0);
   case ISD::VACOPY: {
     // va_copy(dst, src) with far va_lists: copy the far pointer. A va_list
-    // is far in the far-data models, and in every model on 16-bit Windows.
+    // is far in the far-data models, and in every model on 16-bit Windows
+    // and OS/2.
     SDValue Dst = N->getOperand(1), Src = N->getOperand(2);
     if (Dst.getValueType() != MVT::i32 && Src.getValueType() != MVT::i32 &&
-        !DAG.getTarget().getTargetTriple().isOSWin16())
+        !DAG.getTarget().getTargetTriple().isOSNE16())
       return SDValue();
     const Value *DstSV = cast<SrcValueSDNode>(N->getOperand(3))->getValue();
     const Value *SrcSV = cast<SrcValueSDNode>(N->getOperand(4))->getValue();
@@ -64641,7 +64642,7 @@ static SDValue combineFarAccess16(SDNode *N, SelectionDAG &DAG) {
   case ISD::VASTART: {
     SDValue Ptr = N->getOperand(1);
     if (Ptr.getValueType() != MVT::i32 &&
-        !DAG.getTarget().getTargetTriple().isOSWin16())
+        !DAG.getTarget().getTargetTriple().isOSNE16())
       return SDValue();
     MachineFunction &MF = DAG.getMachineFunction();
     int FI = MF.getInfo<X86MachineFunctionInfo>()->getVarArgsFrameIndex();

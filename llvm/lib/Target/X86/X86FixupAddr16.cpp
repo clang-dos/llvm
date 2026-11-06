@@ -344,7 +344,7 @@ bool X86FixupAddr16Legacy::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
   // An interrupt function runs on the stack of the program it interrupted.
   bool SeparateStack =
-      ST.getTargetTriple().isOSWin16() ||
+      ST.getTargetTriple().isOSNE16() ||
       MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
 
   for (MachineBasicBlock &MBB : MF) {

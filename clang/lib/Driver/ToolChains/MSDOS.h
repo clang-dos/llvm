@@ -74,6 +74,20 @@ private:
 } // end namespace toolchains
 
 namespace tools {
+/// Helpers for the Watcom linkers (wlink and JWlink), shared by the DOS,
+/// Windows and OS/2 toolchains.
+namespace watcom {
+/// A file name quoted for a linker directive if it needs it.
+const char *quoteName(const llvm::opt::ArgList &Args, StringRef Name);
+/// The linker: --ld-path=, -fuse-ld=, or wlink or jwlink next to clang.
+std::string getLinkerPath(const ToolChain &TC, const llvm::opt::ArgList &Args);
+/// A library given with -l<name>: <name>.lib, lib<name>.a or lib<name>.lib
+/// in the -L and toolchain library paths.
+std::optional<std::string> findLibrary(const ToolChain &TC,
+                                       const llvm::opt::ArgList &Args,
+                                       StringRef Name);
+} // end namespace watcom
+
 namespace msdos {
 
 class LLVM_LIBRARY_VISIBILITY Linker final : public Tool {

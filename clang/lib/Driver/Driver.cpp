@@ -43,6 +43,7 @@
 #include "ToolChains/MipsLinux.h"
 #include "ToolChains/NetBSD.h"
 #include "ToolChains/OHOS.h"
+#include "ToolChains/OS2.h"
 #include "ToolChains/OpenBSD.h"
 #include "ToolChains/PPCFreeBSD.h"
 #include "ToolChains/PPCLinux.h"
@@ -5489,7 +5490,8 @@ InputInfoList Driver::BuildJobsForActionNoCache(
 
 const char *Driver::getDefaultImageName() const {
   llvm::Triple Target(llvm::Triple::normalize(TargetTriple));
-  return Target.isOSWindows() || Target.isOSMSDOS() || Target.isOSWin16()
+  return Target.isOSWindows() || Target.isOSMSDOS() || Target.isOSWin16() ||
+                 Target.isOSOS2()
              ? "a.exe"
              : "a.out";
 }
@@ -6211,6 +6213,13 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
     case llvm::Triple::MSDOS:
     case llvm::Triple::Win16:
       TC = std::make_unique<toolchains::MSDOS>(*this, Target, Args);
+      break;
+    case llvm::Triple::OS2:
+      // OS/2 1.x programs are linked as the DOS and Windows ones are.
+      if (Target.getArch() == llvm::Triple::i8086)
+        TC = std::make_unique<toolchains::MSDOS>(*this, Target, Args);
+      else
+        TC = std::make_unique<toolchains::OS2>(*this, Target, Args);
       break;
     case llvm::Triple::MacOSClassic:
       TC = std::make_unique<toolchains::MacOSClassic>(*this, Target, Args);

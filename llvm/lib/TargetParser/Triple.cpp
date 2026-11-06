@@ -1039,7 +1039,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
     return Triple::ELF;
 
   case Triple::i8086:
-    if (T.isOSMSDOS() || T.isOSWin16())
+    if (T.isOSMSDOS() || T.isOSWin16() || T.isOSOS2())
       return Triple::OMF;
     return Triple::ELF;
 

@@ -639,6 +639,8 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
       return std::make_unique<MCUX86_32TargetInfo>(Triple, Opts);
     case llvm::Triple::Hurd:
       return std::make_unique<HurdTargetInfo<X86_32TargetInfo>>(Triple, Opts);
+    case llvm::Triple::OS2:
+      return std::make_unique<OS2TargetInfo<X86_32TargetInfo>>(Triple, Opts);
     default:
       return std::make_unique<X86_32TargetInfo>(Triple, Opts);
     }

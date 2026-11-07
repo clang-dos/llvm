@@ -111,6 +111,7 @@ class X86_32ABIInfo : public ABIInfo {
   bool IsSoftFloatABI;
   bool IsMCUABI;
   bool IsLinuxABI;
+  bool IsCygMingABI;
   unsigned DefaultNumRegisterParameters;
 
   static bool isRegisterSize(unsigned Size) {
@@ -178,6 +179,7 @@ public:
         IsMCUABI(CGT.getTarget().getTriple().isOSIAMCU()),
         IsLinuxABI(CGT.getTarget().getTriple().isOSLinux() ||
                    CGT.getTarget().getTriple().isOSCygMing()),
+        IsCygMingABI(CGT.getTarget().getTriple().isOSCygMing()),
         DefaultNumRegisterParameters(NumRegisterParameters) {}
 };
 
@@ -906,7 +908,20 @@ ABIArgInfo X86_32ABIInfo::classifyArgumentType(QualType Ty, CCState &State,
       return getIndirectResult(Ty, true, State);
 
     // Ignore empty structs/unions on non-Windows.
-    if (!IsWin32StructABI && isEmptyRecord(getContext(), Ty, true))
+    //
+    // MinGW and Cygwin follow GCC instead, which on 32-bit x86 never drops an
+    // empty record: a C++ empty class (sizeof == 1) takes a 4-byte stack slot
+    // like any other small aggregate. Ignoring it here would make a
+    // callee-cleanup (thiscall/stdcall) function pop the wrong number of bytes
+    // when it is called across a GCC/Clang boundary, e.g. libstdc++'s
+    // tag-dispatched members taking std::forward_iterator_tag. Records that
+    // really have no storage (C empty structs) are still dropped below by the
+    // zero-width check, which matches GCC's C behavior.
+    bool KeepEmptyRecord =
+        IsCygMingABI && !getContext().getLangOpts().isCompatibleWith(
+                            LangOptions::ClangABI::Ver23);
+    if (!IsWin32StructABI && !KeepEmptyRecord &&
+        isEmptyRecord(getContext(), Ty, true))
       return ABIArgInfo::getIgnore();
 
     // Ignore 0 sized structs.
